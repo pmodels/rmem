@@ -1,5 +1,9 @@
+#
+# Copyright (C) by Argonne National Laboratory
+#  See COPYRIGHT in top-level directory
+#
 
-bin_PROGRAMS = trigr
+bin_PROGRAMS = rmem
 
-trigr_SOURCES =
+rmem_SOURCES =
 include src/Makefile.mk

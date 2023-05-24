@@ -1,3 +1,7 @@
+dnl 
+dnl Copyright (C) by Argonne National Laboratory
+dnl  See COPYRIGHT in top-level directory
+dnl 
 dnl ==================================================================================================
 dnl PAC_CHECK_HEADER_LIB(header.h, libname, function, action-if-yes, action-if-no)
 dnl This macro checks for a header and lib.
@@ -48,7 +52,10 @@ AC_DEFUN([PAC_ADD_LIB_PATH],[
             [
             AC_MSG_NOTICE([$4 path: ${with_$4}])
             PAC_APPEND_FLAG([-I${with_$4}/include],[CPPFLAGS])
-            PAC_APPEND_FLAG([-L${with_$4}/lib],[LDFLAGS])
+            AS_IF( [test -d ${with_$4}/lib],
+                [PAC_APPEND_FLAG([-L${with_$4}/lib -Wl,-rpath,${with_$4}/lib],[LDFLAGS])],)
+            AS_IF( [test -d ${with_$4}/lib64],
+                [PAC_APPEND_FLAG([-L${with_$4}/lib64 -Wl,-rpath,${with_$4}/lib64],[LDFLAGS])],)
             ],
             [AC_MSG_ERROR([path given for $4 is not valid])])],
         [AC_MSG_NOTICE([$1 path: system defaults])])
