@@ -15,6 +15,11 @@ missing
 build
 *.o
 compile_commands.json
-trigr
+rmem
 .dirstamp
 configure.ac~
+*.svg
+perf.*
+out.*
+slurm-*
+run/slurm-*
