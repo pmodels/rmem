@@ -45,12 +45,13 @@ typedef struct fi_cq_entry ofi_cq_entry;
 
 //--------------------------------------------------------------------------------------------------
 // TAGGED SEND-RECV
-#define m_ofi_tag_tot   64  // total number of bits in the tag
-#define m_ofi_tag_ctx   12  // number of bits to encode the comm context id
-#define m_ofi_tag_avail (m_ofi_tag_tot - m_ofi_tag_ctx)
+#define m_ofi_tag_tot    48  // total number of bits in the tag
+#define m_ofi_tag_ctx    7   // number of bits to encode the comm context id
+#define m_ofi_tag_intern 5
+#define m_ofi_tag_avail  (m_ofi_tag_tot - m_ofi_tag_ctx - m_ofi_tag_intern)
 
-#define m_ofi_tag_ctx_shift    (m_ofi_tag_tot - m_ofi_tag_ctx)
-#define m_ofi_tag_ctx_bits     ((uint64_t)0xffff)  // mask to get the context
+#define m_ofi_tag_ctx_shift    (m_ofi_tag_avail)
+#define m_ofi_tag_ctx_bits     ((uint64_t)0x7f)  // mask to get the context
 #define m_ofi_tag_ctx_mask     ((m_ofi_tag_ctx_bits) << m_ofi_tag_ctx_shift)
 #define m_ofi_tag_get_ctx(tag) ((tag & m_ofi_tag_ctx_mask) >> m_ofi_tag_ctx_shift)
 #define m_ofi_tag_set_ctx(ctx) ((ctx << m_ofi_tag_ctx_shift) & m_ofi_tag_ctx_mask)
@@ -63,9 +64,9 @@ inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 //--------------------------------------------------------------------------------------------------
 // rma flags sent either as REMOTE_CQ_DATA or as 64 bit msg
 // 64 bits total: [ 5b header | 1b post | 1b complete | ... | 32 bits # of operations]
-#define m_ofi_data_len      64
-#define m_ofi_data_bit_post (m_ofi_data_len - 2)
-#define m_ofi_data_bit_cmpl (m_ofi_data_len - 3)
+#define m_ofi_data_bit_post (m_ofi_tag_tot - 1)
+#define m_ofi_data_bit_cmpl (m_ofi_tag_tot - 2)
+#define m_ofi_tag_bit_sync  (m_ofi_tag_tot - 3)
 
 #define m_ofi_data_set_post    ((uint64_t)0x1 << m_ofi_data_bit_post)
 #define m_ofi_data_set_cmpl    ((uint64_t)0x1 << m_ofi_data_bit_cmpl)
@@ -73,14 +74,11 @@ inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 #define m_ofi_data_get_cmpl(a) ((a >> m_ofi_data_bit_cmpl) & 0x1)
 #define m_ofi_data_set_nops(a) (((uint64_t)a) & ((uint64_t)0xffffffff))
 #define m_ofi_data_get_nops(a) ((uint32_t)(a & 0xffffffff))
-
-#define m_ofi_tag_bit_sync (m_ofi_data_len - 4)
-#define m_ofi_tag_sync     ((uint64_t)0x1 << m_ofi_tag_bit_sync)
-// #define m_ofi_tag_get_sync(a) ((a >> m_ofi_tag_bit_sync) & 0x1)
+#define m_ofi_tag_sync         ((uint64_t)0x1 << m_ofi_tag_bit_sync)
 
 //--------------------------------------------------------------------------------------------------
-#define m_ofi_cq_kind_sync (0x1)  // 0000 0001
-#define m_ofi_cq_kind_rqst (0x2)  // 0000 0010
+#define m_ofi_cq_kind_sync (0x01)  // 0000 0001
+#define m_ofi_cq_kind_rqst (0x02)  // 0000 0010
 
 //--------------------------------------------------------------------------------------------------
 // communication context
