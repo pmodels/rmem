@@ -41,6 +41,31 @@ int main(int argc, char** argv) {
         for (int i = 0; i < ttl_len; ++i) {
             src[i] = i;
         }
+        //-----------------------------------------------------------------------------------------
+        // SEND
+        ofi_p2p_t* send = calloc(n_msg, sizeof(ofi_rma_t));
+        for (int i = 0; i < n_msg; ++i) {
+            send[i] = (ofi_p2p_t){
+                .buf = src + i * msg_size,
+                .count = msg_size * sizeof(double),
+                .peer = peer,
+            };
+            ofi_p2p_create(send + i, &comm);
+        }
+        for (int i = 0; i < 10; ++i) {
+            PMI_Barrier();
+            // start exposure
+            for (int i = 0; i < n_msg; ++i) {
+                ofi_send_enqueue(send + i, 0, &comm);
+            }
+            for (int i = 0; i < n_msg; ++i) {
+                ofi_p2p_wait(send + i);
+            }
+        }
+        for (int i = 0; i < n_msg; ++i) {
+            ofi_p2p_free(send + i);
+        }
+        free(send);
 
         //-----------------------------------------------------------------------------------------
         // PUT
@@ -103,10 +128,47 @@ int main(int argc, char** argv) {
         ofi_rmem_init(&pmem, &comm);
 
         //-----------------------------------------------------------------------------------------
+        // recv
+        m_log("============= SEND/RECV =============");
+        ofi_p2p_t* recv = calloc(n_msg, sizeof(ofi_rma_t));
+        rmem_prof_t time_recv = {.name = "recv"};
+        for (int i = 0; i < n_msg; ++i) {
+            recv[i] = (ofi_p2p_t){
+                .buf = pmem_buf + i * msg_size,
+                .count = msg_size * sizeof(double),
+                .peer = peer,
+            };
+            ofi_p2p_create(recv + i, &comm);
+        }
+        for (int i = 0; i < 10; ++i) {
+            PMI_Barrier();
+            m_rmem_prof(time_recv) {
+                for (int i = 0; i < n_msg; ++i) {
+                    ofi_recv_enqueue(recv + i, 0, &comm);
+                }
+                for (int i = 0; i < n_msg; ++i) {
+                    ofi_p2p_wait(recv + i);
+                }
+            }
+            // check the result
+            for (int i = 0; i < ttl_len; ++i) {
+                double res = i;
+                if (pmem_buf[i] != res) {
+                    m_log("pmem[%d] = %f != %f", i, pmem_buf[i], res);
+                }
+                pmem_buf[i] = 0.0;
+            }
+        }
+        for (int i = 0; i < n_msg; ++i) {
+            ofi_p2p_free(recv + i);
+        }
+        free(recv);
+
+        //-----------------------------------------------------------------------------------------
         // PUT
+        m_log("============= PUT =============");
         rmem_prof_t time_put = {.name = "put"};
         for (int i = 0; i < 10; ++i) {
-            m_log(">>>>>> iteration %d <<<<<<",i);
             PMI_Barrier();
             m_rmem_prof(time_put) {
                 ofi_rmem_post(1, &peer, &pmem, &comm);
