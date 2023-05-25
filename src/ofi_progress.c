@@ -45,7 +45,7 @@ int ofi_progress(ofi_cq_t* cq) {
             if (!op_ctx) {
                 m_verb("completion data received");
                 uint64_t data = event[i].data;
-                ofi_cq_update_data(&data, cq->ctx.sync.cntr);
+                ofi_cq_update_data(&data, cq->sync.cntr);
             } else {
 #endif
                 m_assert(op_ctx, "the context cannot be null here");

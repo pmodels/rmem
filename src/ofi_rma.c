@@ -449,7 +449,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     // n_rcompleted must be = the total number of calls received (including during the start sync) +
     // the sync from nrank for this sync
     if (mem->ofi.n_rx == 1) {
-        while (mem->ofi.epoch[1] < nrank) {
+        while (atomic_load(mem->ofi.epoch + 1) < nrank) {
             ofi_progress(&cq);
         }
         uint64_t threshold = atomic_load(mem->ofi.epoch + 2) + rma_sync_count;
