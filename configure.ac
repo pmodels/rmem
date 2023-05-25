@@ -27,7 +27,7 @@ AC_PREFIX_DEFAULT(.)
 # configure automake
 AM_INIT_AUTOMAKE([foreign -Wall -Werror subdir-objects])
 AM_SILENT_RULES([yes])
-PAC_ADD_CPPFLAGS([-Wall -std=c11])
+PAC_ADD_CPPFLAGS([-g -Wall -std=c11])
 PAC_ADD_CPPFLAGS([-Wno-deprecated-declarations])
 PAC_ADD_FLAGS([-fopenmp],[-fopenmp])
 PAC_ADD_LIB_PATH(fabric,[rdma/fabric.h],[fi_getinfo],[ofi])
@@ -41,7 +41,7 @@ PAC_ADD_ENABLE_MODE([verbose],
 PAC_ADD_ENABLE_MODE([fast],
                     [-O3 -DNDEBUG],
                     [-O3 -flto],
-                    [enable fast code, conflicts with --enable-asan])
+                    [enable fastest code, conflicts with --enable-asan])
 PAC_ADD_ENABLE_MODE([asan],
                     [-g -pg -O0 -fsanitize=address],
                     [-fsanitize=address],
