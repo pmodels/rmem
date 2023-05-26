@@ -89,7 +89,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
             m_verb("creating a new AV");
             // if we create a receive context as well, then get the AV
             struct fi_av_attr av_attr = {
-                .type = FI_AV_MAP,
+                .type = FI_AV_TABLE,
                 .name = NULL,
                 .count = comm->size,
             };

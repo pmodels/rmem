@@ -34,7 +34,7 @@ int ofi_ctx_init(const int comm_size, struct fi_info* prov, struct fid_domain* d
 
     // associate the adress vector
     struct fi_av_attr av_attr = {
-        .type = FI_AV_MAP,
+        .type = FI_AV_TABLE,
         .name = NULL,
         .count = comm_size,
     };
@@ -49,7 +49,7 @@ int ofi_ctx_init(const int comm_size, struct fi_info* prov, struct fid_domain* d
     // every endpoint has a different address vector. the memory belongs to the domain, but the
     // values are endpoint dependent open the address vector
     // get the address from libfabric and use the PMI to communicate it to others
-    ofi_util_av(comm_size, (*ctx)->p2p_ep, (*ctx)->p2p_av, &(*ctx)->p2p_addr);
+    m_rmem_call(ofi_util_av(comm_size, (*ctx)->p2p_ep, (*ctx)->p2p_av, &(*ctx)->p2p_addr));
 
     return m_success;
 }
