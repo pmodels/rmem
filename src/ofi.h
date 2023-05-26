@@ -151,6 +151,7 @@ typedef struct {
 
 typedef struct {
     struct fid_ep* ep;
+    struct fid_ep* srx;
     struct fid_cq* cq;       // completion queue for RECEIVE and REMOTE_DATA
     struct fid_av* av;       // address vector
     struct fid_cntr* rcntr;  // Remotely issued CouNTeR put and get

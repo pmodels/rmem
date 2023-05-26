@@ -74,12 +74,14 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     for (int i = 0; i < mem->ofi.n_tx; ++i) {
         // ------------------- endpoint
         if (i < mem->ofi.n_rx) {
+            // locally copy the srx address, might be overwritten if needed
+            mem->ofi.trx[i].srx = comm->ctx[i].srx;
             m_rmem_call(ofi_util_new_ep(false, comm->prov, comm->domain, &mem->ofi.trx[i].ep,
-                                         &comm->ctx[i].stx, &comm->ctx[i].srx));
+                                         &comm->ctx[i].stx, &mem->ofi.trx[i].srx));
         } else {
-            struct fid_ep* nullptr = NULL;
+            mem->ofi.trx[i].srx = NULL;
             m_rmem_call(ofi_util_new_ep(false, comm->prov, comm->domain, &mem->ofi.trx[i].ep,
-                                         &comm->ctx[i].stx, &nullptr));
+                                         &comm->ctx[i].stx, &mem->ofi.trx[i].srx));
         }
 
         // ------------------- address vector
@@ -332,11 +334,9 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
     };
 #if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
     for (int i = 0; i < nrank; ++i) {
-        // m_ofi_call(fi_recv(comm->ctx[0].srx, &mem->ofi.sync[i].ctx.sync.data, sizeof(uint64_t),
-        //                    NULL, mem->ofi.trx[0].addr[rank[i]], &mem->ofi.sync[i].ctx));
         uint64_t ignore = 0x0;
         uint64_t tag = m_ofi_tag_sync;
-        m_ofi_call(fi_trecv(comm->ctx[0].srx, &mem->ofi.sync[i].sync.data, sizeof(uint64_t),
+        m_ofi_call(fi_trecv(mem->ofi.trx[0].srx, &mem->ofi.sync[i].sync.data, sizeof(uint64_t),
                             NULL, mem->ofi.trx[0].addr[rank[i]], tag, ignore,
                             &mem->ofi.sync[i].ctx));
     }
@@ -433,11 +433,9 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     int rma_sync_count = nrank;
 #elif (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
     for (int i = 0; i < nrank; ++i) {
-        // m_ofi_call(fi_recv(comm->ctx[0].srx, &mem->ofi.sync[i].ctx.sync.data, sizeof(uint64_t),
-        //                    NULL, mem->ofi.trx[0].addr[rank[i]], &mem->ofi.sync[i].ctx));
         uint64_t ignore = 0x0;
         uint64_t tag = m_ofi_tag_sync;
-        m_ofi_call(fi_trecv(comm->ctx[0].srx, &mem->ofi.sync[i].sync.data, sizeof(uint64_t),
+        m_ofi_call(fi_trecv(mem->ofi.trx[0].srx, &mem->ofi.sync[i].sync.data, sizeof(uint64_t),
                             NULL, mem->ofi.trx[0].addr[rank[i]], tag, ignore,
                             &mem->ofi.sync[i].ctx));
     }
