@@ -144,8 +144,8 @@ typedef struct {
         // completion queue data
         ofi_cq_t cq;
         // data description and ofi msg
-        struct iovec iov;
-        struct fi_msg_tagged msg;
+        // struct iovec iov;
+        // struct fi_msg_tagged msg;
     } ofi;
 } ofi_p2p_t;
 
