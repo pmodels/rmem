@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
 
         //-----------------------------------------------------------------------------------------
         // recv
-        m_log("============= SEND/RECV =============");
+        m_log("============= SEND/RECV (%d at once) =============",n_msg);
         ofi_p2p_t* recv = calloc(n_msg, sizeof(ofi_rma_t));
         rmem_prof_t time_recv = {.name = "recv"};
         for (int i = 0; i < n_msg; ++i) {
@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
 
         //-----------------------------------------------------------------------------------------
         // PUT
-        m_log("============= PUT =============");
+        m_log("============= PUT (%d at once) =============",n_msg);
         rmem_prof_t time_put = {.name = "put"};
         for (int i = 0; i < 10; ++i) {
             PMI_Barrier();
