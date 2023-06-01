@@ -210,7 +210,7 @@ int ofi_util_free_ep(struct fi_info* prov, struct fid_ep** ep, struct fid_stx** 
 
 int ofi_util_av(const int n_addr, struct fid_ep* ep, struct fid_av* av, fi_addr_t** addr) {
     size_t ofi_addr_len = ofi_str_len;
-    void* ofi_local_addr = calloc(ofi_str_len, sizeof(char));
+    void* ofi_local_addr = calloc(ofi_addr_len, sizeof(char));
     m_ofi_call(fi_getname(&ep->fid, ofi_local_addr, &ofi_addr_len));
 
     // allocate the temp buffer if not done already
