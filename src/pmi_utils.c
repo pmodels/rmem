@@ -11,6 +11,8 @@
 
 #include "rmem_utils.h"
 
+static int pmi_key_count = 0;
+
 // coming from MPICH (mpir_pmi.c)
 static int hex(unsigned char c) {
     if (c >= '0' && c <= '9') {
@@ -33,12 +35,11 @@ static void encode(const size_t addr_len, const uint8_t* addr, const int key_len
     (*key)[2 * addr_len] = '\0';
 }
 
-
-static void decode(const int key_len, const char* key,const size_t addr_len, uint8_t** addr) {
-        // decode
-        for (int j = 0; j < addr_len; ++j) {
-            (*addr)[j] = (hex(key[2 * j]) << 4) + hex(key[2 * j + 1]);
-        }
+static void decode(const int key_len, const char* key, const size_t addr_len, uint8_t** addr) {
+    // decode
+    for (int j = 0; j < addr_len; ++j) {
+        (*addr)[j] = (hex(key[2 * j]) << 4) + hex(key[2 * j + 1]);
+    }
 }
 
 int pmi_init() {
@@ -83,7 +84,7 @@ int pmi_allgather(const size_t addr_len, const void* addr, void** addr_world) {
     //---------------------------------------------------------------------------------------------
     // store the key + value into kvsname
     char* kvs_key = calloc(key_max_len, sizeof(char));
-    snprintf(kvs_key, key_max_len, "key-%d", rank);
+    snprintf(kvs_key, key_max_len, "key%d-%d",++pmi_key_count, rank);
 
     // convert the bin value to a string
     // copy into the string. every byte (uint8_t) will be converted in hexadecimal using 2 caracters
@@ -111,7 +112,8 @@ int pmi_allgather(const size_t addr_len, const void* addr, void** addr_world) {
         }
         // get the other's key
         int val_len = val_max_len;
-        snprintf(kvs_key, key_max_len, "key-%d", i);
+        snprintf(kvs_key, key_max_len, "key%d-%d", pmi_key_count, i);
+        memset(kvs_val, 0, val_max_len);
         m_pmi_call(PMI_KVS_Get(kvs, kvs_key, kvs_val, val_len));
 
         uint8_t* c_addr = addr_list + i * addr_len;
