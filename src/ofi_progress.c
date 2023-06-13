@@ -7,12 +7,12 @@
 #include <inttypes.h>
 #include <stdint.h>
 
-#define m_ofi_cq_entries 8
+#define m_ofi_cq_entries 16
 #define m_ofi_cq_err_len 512
 
 #define m_ofi_cq_offset(a) (offsetof(ofi_cq_t, a) - offsetof(ofi_cq_t, ctx))
 
-static void ofi_cq_update_data(uint64_t* data, atomic_int* epoch) {
+static void ofi_cq_update_data(uint64_t* data, countr_t* epoch) {
     m_assert(*data > 0, "the value of data should be > 0 (and not %" PRIu64 ")", *data);
     m_assert(sizeof(int) == sizeof(uint32_t), "atomic int must be of size 32");
     uint32_t post = m_ofi_data_get_post(*data);
@@ -22,12 +22,12 @@ static void ofi_cq_update_data(uint64_t* data, atomic_int* epoch) {
     // get the atomic_int array to increment, always the same one
     if (post > 0) {
         m_assert(post <= 1, "post must be <=1");
-        atomic_fetch_add(epoch + 0, post);
+        m_countr_fetch_add(epoch + 0, post);
     }
     if (cmpl > 0) {
         m_assert(cmpl <= 1, "post must be <=1");
-        atomic_fetch_add(epoch + 1, cmpl);
-        atomic_fetch_add(epoch + 2, nops);
+        m_countr_fetch_add(epoch + 1, cmpl);
+        m_countr_fetch_add(epoch + 2, nops);
     }
 }
 
@@ -58,7 +58,7 @@ int ofi_progress(ofi_cq_t* cq) {
                         m_verb("increasing flag value by 1");
                     }
                 } else if (kind & m_ofi_cq_kind_sync) {
-                    atomic_int** epoch = (atomic_int**)(op_ctx + m_ofi_cq_offset(sync.cntr));
+                    countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.cntr));
                     uint64_t* data = (uint64_t*)(op_ctx + m_ofi_cq_offset(sync.data));
                     ofi_cq_update_data(data, *epoch);
                 } else {
@@ -103,7 +103,7 @@ int ofi_progress(ofi_cq_t* cq) {
 int ofi_wait(ofi_cq_t* cq) {
     m_assert(cq->kind == m_ofi_cq_kind_rqst, "wrong kind of request");
     // while the request is not completed, progress the CQ
-    while (!atomic_load(cq->rqst.flag)) {
+    while (!m_countr_load(cq->rqst.flag)) {
         m_rmem_call(ofi_progress(cq));
     }
     return m_success;

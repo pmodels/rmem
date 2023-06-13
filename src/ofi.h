@@ -83,6 +83,18 @@ inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 #define m_ofi_cq_kind_rqst (0x02)  // 0000 0010
 
 //--------------------------------------------------------------------------------------------------
+typedef struct {
+    atomic_int val;
+} countr_t;
+//--------------------------------------------------------------------------------------------------
+#define m_countr_init(a)         atomic_init(&(a)->val, 0)
+#define m_countr_load(a)         atomic_load_explicit(&(a)->val, memory_order_relaxed)
+#define m_countr_store(a, v)     atomic_store_explicit(&(a)->val, v, memory_order_relaxed)
+#define m_countr_exchange(a, v)  atomic_exchange_explicit(&(a)->val, v, memory_order_relaxed)
+#define m_countr_fetch_add(a, v) atomic_fetch_add_explicit(&(a)->val, v, memory_order_relaxed)
+
+
+//--------------------------------------------------------------------------------------------------
 // communication context
 typedef struct {
     // shared rx/tx contexts
@@ -123,11 +135,11 @@ typedef struct {
     // union for the different kind of completion events
     union {
         struct {
-            atomic_int* flag;
+            countr_t* flag;
             struct fid_cntr* cntr;
         } rqst;
         struct {
-            atomic_int* cntr;
+            countr_t* cntr;
             uint64_t data;
         } sync;
     };
@@ -142,7 +154,7 @@ typedef struct {
 
     // implementation specifics
     struct {
-        atomic_int completed;
+        countr_t completed;
         // completion queue data
         ofi_cq_t cq;
         // data description and ofi msg
@@ -176,9 +188,9 @@ typedef struct {
         // single receive (public) endpoint
         ofi_rma_trx_t* trx;
         // epoch arrays
-        atomic_int epoch[3];
+        countr_t epoch[3];
         // memory wide counters, tracked the number of issued put/get
-        atomic_int* icntr;  // issued put
+        countr_t* icntr;  // issued put
 #if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
         // cq data array for sync
         ofi_cq_t* sync;
@@ -199,7 +211,7 @@ typedef struct {
 
     // implementation specifics
     struct {
-        atomic_int completed;
+        countr_t completed;
         // completion queue data
         ofi_cq_t cq;
         // data description and ofi msg

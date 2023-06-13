@@ -37,7 +37,7 @@ int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2
 
     // set the completion param
     p2p->ofi.cq.cq = ctx->p2p_cq;
-    atomic_store(p2p->ofi.cq.rqst.flag, 0);
+    m_countr_store(p2p->ofi.cq.rqst.flag, 0);
     // address and tag depends on the communicator context
     // p2p->ofi.msg.tag = ofi_set_tag(ctx_id, p2p->tag);
     // p2p->ofi.msg.addr = ctx->p2p_addr[p2p->peer];
@@ -51,8 +51,7 @@ int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2
                     fi_tinject(ctx->p2p_ep, p2p->buf, p2p->count, ctx->p2p_addr[p2p->peer], tag));
 
                 // need to complete the request as no CQ entry will happen
-                atomic_fetch_add(p2p->ofi.cq.rqst.flag, 1);
-
+                m_countr_fetch_add(p2p->ofi.cq.rqst.flag, 1);
             } else {
                 // m_ofi_call(fi_tsendmsg(ctx->p2p_ep, &p2p->ofi.msg, flag));
                 m_ofi_call(fi_tsend(ctx->p2p_ep, p2p->buf, p2p->count, NULL,
