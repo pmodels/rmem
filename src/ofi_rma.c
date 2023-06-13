@@ -2,6 +2,7 @@
  * Copyright (C) by Argonne National Laboratory
  *	See COPYRIGHT in top-level directory
  */
+#include <stdatomic.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <inttypes.h>
@@ -252,16 +253,23 @@ static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id,
     // set the completion parameters
     put->ofi.cq.cq = pmem->ofi.trx[ctx_id].cq;
 
-    // address and tag depends on the communicator context
+    // address depends on the communicator context
     const int rx_id = m_get_rx(ctx_id,pmem);
     put->ofi.msg.addr =pmem->ofi.trx[rx_id].addr[put->peer];
+
+    // do we inject or generate a cq?
+    const bool do_inject = put->count < OFI_INJECT_THRESHOLD;
+    // get the flags to use
+    uint64_t flags = FI_INJECT_COMPLETE;
+    if (do_inject) {
+        flags |= FI_INJECT;
+    }
 
     // issue the operation
     switch (op) {
         case (RMA_OPT_PUT): {
             // no increment of the flag with RPUT
             put->ofi.cq.rqst.flag = NULL;
-            uint64_t flags = FI_INJECT_COMPLETE;
             m_ofi_call(fi_writemsg(pmem->ofi.trx[ctx_id].ep, &put->ofi.msg, flags));
         } break;
         case (RMA_OPT_RPUT): {
@@ -269,8 +277,12 @@ static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id,
             put->ofi.cq.rqst.flag = &put->ofi.completed;
             atomic_store(put->ofi.cq.rqst.flag, 0);
             // do the communication
-            uint64_t flags = FI_COMPLETION | FI_INJECT_COMPLETE;
-            m_ofi_call(fi_writemsg(pmem->ofi.trx[ctx_id].ep, &put->ofi.msg, flags));
+            m_ofi_call(fi_writemsg(pmem->ofi.trx[ctx_id].ep, &put->ofi.msg, FI_COMPLETION | flags));
+
+            // if inject, no CQ entry is generated, so the rput is completed upon exit
+            if (do_inject) {
+                atomic_fetch_add(put->ofi.cq.rqst.flag, 1);
+            }
         } break;
     }
     return m_success;

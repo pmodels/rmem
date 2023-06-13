@@ -14,6 +14,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define OFI_INJECT_THRESHOLD 128
+
 //--------------------------------------------------------------------------------------------------
 #define OFI_RMA_SYNC_INJECT_WRITE 0x0
 #define OFI_RMA_SYNC_MSG          0x1
