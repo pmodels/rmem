@@ -216,8 +216,8 @@ int main(int argc, char** argv) {
             ofi_rmem_free(&pmem, &comm);
             free(pmem_buf);
             //-----------------------------------------------------------------------------------------
-            m_log("time (%ld B): P2P = %f - PUT = %f - ratio = %f", ttl_len * sizeof(double),
-                  tavg_p2p, tavg_put, tavg_put / tavg_p2p);
+            m_log("time (%ld B - %d msgs): P2P = %f - PUT = %f - ratio = %f",
+                  ttl_len * sizeof(double), n_msg, tavg_p2p, tavg_put, tavg_put / tavg_p2p);
         }
     }
     m_rmem_call(ofi_finalize(&comm));
