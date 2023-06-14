@@ -3,31 +3,47 @@
  *	See COPYRIGHT in top-level directory
  */
 #include <getopt.h>
+#include <omp.h>
 #include <rdma/fabric.h>
 #include <rdma/fi_cm.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 #include "ofi.h"
-#include "rmem_utils.h"
-#include "rmem_profile.h"
 #include "pmi.h"
-
-#include <omp.h>
+#include "rmem_profile.h"
+#include "rmem_utils.h"
 
 //#define msg_size 1024
 #define n_msg 1
-#define max_size (1<<12)
-#define n_measure 25
+#define max_size (1<<18)
+#define n_measure 75
 
 int main(int argc, char** argv) {
-    const int nth = 1;//omp_get_max_threads();
+    const int nth = 1;  // omp_get_max_threads();
     // create a communicator with as many context as threads
     ofi_comm_t comm;
     comm.n_ctx = nth;
     m_rmem_call(ofi_init(&comm));
     int rank = ofi_get_rank(&comm);
 
+    //----------------------------------------------------------------------------------------------
+    // test and create the dir if needed
+    char fullname[128];
+    if (!(rank % 2 == 0)) {
+        char foldr_name[64] = "data";
+        sprintf(fullname, "%s/rmem_%d.txt", foldr_name, n_msg);
+        struct stat st = {0};
+        if (stat(foldr_name, &st) == -1) {
+            mkdir(foldr_name, 0770);
+        }
+        FILE* file = fopen(fullname, "w+");
+        m_assert(file, "cannot open %s", fullname);
+        fclose(file);
+    }
+
+    //----------------------------------------------------------------------------------------------
     for (size_t msg_size = 1; msg_size < max_size; msg_size *= 2) {
         PMI_Barrier();
         // m_log("===========================================================");
@@ -46,7 +62,7 @@ int main(int argc, char** argv) {
             for (int i = 0; i < ttl_len; ++i) {
                 src[i] = i;
             }
-            //-----------------------------------------------------------------------------------------
+            //--------------------------------------------------------------------------------------
             // SEND
             ofi_p2p_t* send = calloc(n_msg, sizeof(ofi_rma_t));
             for (int i = 0; i < n_msg; ++i) {
@@ -72,7 +88,7 @@ int main(int argc, char** argv) {
             }
             free(send);
 
-            //-----------------------------------------------------------------------------------------
+            //--------------------------------------------------------------------------------------
             // PUT
             ofi_rma_t* put = calloc(n_msg, sizeof(ofi_rma_t));
             for (int i = 0; i < n_msg; ++i) {
@@ -96,7 +112,7 @@ int main(int argc, char** argv) {
                 ofi_rma_free(put + i);
             }
             free(put);
-            //-----------------------------------------------------------------------------------------
+            //--------------------------------------------------------------------------------------
             // RPUT
             // rmem_rma_t rput = {
             //     .buf = src,
@@ -118,7 +134,7 @@ int main(int argc, char** argv) {
             //     ofi_rmem_complete(1, &peer,&pmem,&comm);
             // }
             // ofi_rma_free(&rput);
-            //-----------------------------------------------------------------------------------------
+            //--------------------------------------------------------------------------------------
             ofi_rmem_free(&pmem, &comm);
             free(src);
         } else {
@@ -131,7 +147,7 @@ int main(int argc, char** argv) {
             };
             ofi_rmem_init(&pmem, &comm);
 
-            //-----------------------------------------------------------------------------------------
+            //--------------------------------------------------------------------------------------
             // recv
             //m_log("============= SEND/RECV (%d at once) =============", n_msg);
             ofi_p2p_t* recv = calloc(n_msg, sizeof(ofi_rma_t));
@@ -174,7 +190,7 @@ int main(int argc, char** argv) {
             }
             free(recv);
 
-            //-----------------------------------------------------------------------------------------
+            //--------------------------------------------------------------------------------------
             // PUT
             //m_log("============= PUT (%d at once) =============", n_msg);
             double tavg_put = 0.0;
@@ -199,7 +215,7 @@ int main(int argc, char** argv) {
                     pmem_buf[i] = 0.0;
                 }
             }
-            //-----------------------------------------------------------------------------------------
+            //--------------------------------------------------------------------------------------
             // RPUT
             // rmem_prof_t time_rput = {.name = "rput"};
             // for (int i = 0; i < 10; ++i) {
@@ -212,12 +228,18 @@ int main(int argc, char** argv) {
             //         m_assert(pmem_buf[i] == res,"pmem[%d] = %f != %f",i,pmem_buf[i],res);
             //     }
             // }
-            //-----------------------------------------------------------------------------------------
+            //--------------------------------------------------------------------------------------
             ofi_rmem_free(&pmem, &comm);
             free(pmem_buf);
-            //-----------------------------------------------------------------------------------------
+            //--------------------------------------------------------------------------------------
             m_log("time (%ld B - %d msgs): P2P = %f - PUT = %f - ratio = %f",
                   ttl_len * sizeof(double), n_msg, tavg_p2p, tavg_put, tavg_put / tavg_p2p);
+            // write to csv
+            FILE* file = fopen(fullname, "a");
+            m_assert(file,"file must be open");
+            fprintf(file, "%ld,%f,%f\n", ttl_len * sizeof(double), tavg_p2p, tavg_put);
+            fclose(file);
+            //--------------------------------------------------------------------------------------
         }
     }
     m_rmem_call(ofi_finalize(&comm));
