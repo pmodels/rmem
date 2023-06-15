@@ -3,6 +3,7 @@
  *	See COPYRIGHT in top-level directory
  */
 #include <getopt.h>
+#include <math.h>
 #include <omp.h>
 #include <rdma/fabric.h>
 #include <rdma/fi_cm.h>
@@ -18,7 +19,8 @@
 //#define msg_size 1024
 #define n_msg 1
 #define max_size (1<<18)
-#define n_measure 75
+#define n_measure 150
+#define n_warmup 5
 
 int main(int argc, char** argv) {
     const int nth = 1;  // omp_get_max_threads();
@@ -47,23 +49,24 @@ int main(int argc, char** argv) {
     for (size_t msg_size = 1; msg_size < max_size; msg_size *= 2) {
         PMI_Barrier();
         // m_log("===========================================================");
-        // m_log("msg size = %ld B",msg_size*sizeof(double));
         const size_t ttl_len = n_msg * msg_size;
         if (rank % 2 == 0) {
+            //======================================================================================
+            // SENDER
+            //======================================================================================
             const int peer = rank + 1;
-            // recv buffer
+            // send buffer
             ofi_rmem_t pmem = {
                 .buf = NULL,
                 .count = 0,
             };
             ofi_rmem_init(&pmem, &comm);
-            // send buffer
             double* src = calloc(ttl_len, sizeof(double));
             for (int i = 0; i < ttl_len; ++i) {
                 src[i] = i;
             }
             //--------------------------------------------------------------------------------------
-            // SEND
+            // POINT TO POINT
             ofi_p2p_t* send = calloc(n_msg, sizeof(ofi_rma_t));
             for (int i = 0; i < n_msg; ++i) {
                 send[i] = (ofi_p2p_t){
@@ -73,14 +76,14 @@ int main(int argc, char** argv) {
                 };
                 ofi_p2p_create(send + i, &comm);
             }
-            for (int i = 0; i < n_measure; ++i) {
+            for (int it = -n_warmup; it < n_measure; ++it) {
                 PMI_Barrier();
                 // start exposure
-                for (int i = 0; i < n_msg; ++i) {
-                    ofi_send_enqueue(send + i, 0, &comm);
+                for (int j = 0; j < n_msg; ++j) {
+                    ofi_send_enqueue(send + j, 0, &comm);
                 }
-                for (int i = 0; i < n_msg; ++i) {
-                    ofi_p2p_wait(send + i);
+                for (int j = 0; j < n_msg; ++j) {
+                    ofi_p2p_wait(send + j);
                 }
             }
             for (int i = 0; i < n_msg; ++i) {
@@ -100,11 +103,11 @@ int main(int argc, char** argv) {
                 };
                 ofi_rma_init(put + i, &pmem, &comm);
             }
-            for (int i = 0; i < n_measure; ++i) {
+            for (int it = -n_warmup; it < n_measure; ++it) {
                 PMI_Barrier();  // start exposure
                 ofi_rmem_start(1, &peer, &pmem, &comm);
-                for (int i = 0; i < n_msg; ++i) {
-                    ofi_put_enqueue(put + i, &pmem, 0, &comm);
+                for (int j = 0; j < n_msg; ++j) {
+                    ofi_put_enqueue(put + j, &pmem, 0, &comm);
                 }
                 ofi_rmem_complete(1, &peer, &pmem, &comm);
             }
@@ -138,6 +141,9 @@ int main(int argc, char** argv) {
             ofi_rmem_free(&pmem, &comm);
             free(src);
         } else {
+            //======================================================================================
+            // RECIEVER
+            //======================================================================================
             const int peer = rank - 1;
             // allocate the receive buffer
             double* pmem_buf = calloc(ttl_len, sizeof(double));
@@ -148,10 +154,8 @@ int main(int argc, char** argv) {
             ofi_rmem_init(&pmem, &comm);
 
             //--------------------------------------------------------------------------------------
-            // recv
-            //m_log("============= SEND/RECV (%d at once) =============", n_msg);
+            // POINT-TO-POINT
             ofi_p2p_t* recv = calloc(n_msg, sizeof(ofi_rma_t));
-            double tavg_p2p = 0.0;
             rmem_prof_t prof_recv = {.name = "recv"};
             for (int i = 0; i < n_msg; ++i) {
                 recv[i] = (ofi_p2p_t){
@@ -161,21 +165,17 @@ int main(int argc, char** argv) {
                 };
                 ofi_p2p_create(recv + i, &comm);
             }
-            for (int i = 0; i < n_measure; ++i) {
+            double t_p2p[n_measure];
+            for (int it = -n_warmup; it < n_measure; ++it) {
                 PMI_Barrier();
-                double t_p2p;
-                m_rmem_prof(prof_recv,t_p2p) {
-                    for (int i = 0; i < n_msg; ++i) {
-                        ofi_recv_enqueue(recv + i, 0, &comm);
+                m_rmem_prof(prof_recv,t_p2p[(it >= 0) ? it : 0]) {
+                    for (int j = 0; j < n_msg; ++j) {
+                        ofi_recv_enqueue(recv + j, 0, &comm);
                     }
-                    for (int i = 0; i < n_msg; ++i) {
-                        ofi_p2p_wait(recv + i);
+                    for (int j = 0; j < n_msg; ++j) {
+                        ofi_p2p_wait(recv + j);
                     }
                 }
-                if (i > 1) {
-                    tavg_p2p += t_p2p / (n_measure - 1);
-                }
-
                 // check the result
                 for (int i = 0; i < ttl_len; ++i) {
                     double res = i;
@@ -193,18 +193,13 @@ int main(int argc, char** argv) {
             //--------------------------------------------------------------------------------------
             // PUT
             //m_log("============= PUT (%d at once) =============", n_msg);
-            double tavg_put = 0.0;
+            double t_put[n_measure];
             rmem_prof_t prof_put = {.name = "put"};
-            for (int i = 0; i < n_measure; ++i) {
+            for (int it = -n_warmup; it < n_measure; ++it) {
                 PMI_Barrier();
-                double t_put = 0.0;
-                m_rmem_prof(prof_put,t_put) {
+                m_rmem_prof(prof_put, t_put[(it >= 0) ? it : 0]) {
                     ofi_rmem_post(1, &peer, &pmem, &comm);
                     ofi_rmem_wait(1, &peer, &pmem, &comm);
-                }
-                // average the times except for the first one
-                if (i > 1) {
-                    tavg_put += t_put / (n_measure - 1);
                 }
                 // check the results
                 for (int i = 0; i < ttl_len; ++i) {
@@ -232,12 +227,35 @@ int main(int argc, char** argv) {
             ofi_rmem_free(&pmem, &comm);
             free(pmem_buf);
             //--------------------------------------------------------------------------------------
-            m_log("time (%ld B - %d msgs): P2P = %f - PUT = %f - ratio = %f",
-                  ttl_len * sizeof(double), n_msg, tavg_p2p, tavg_put, tavg_put / tavg_p2p);
+            // get the right std
+            double tavg_p2p = 0.0;
+            double tavg_put = 0.0;
+            for (int i = 0; i < n_measure; ++i) {
+                    tavg_p2p += t_p2p[i] / n_measure;
+                    tavg_put += t_put[i] / n_measure;
+            }
+            double tstd_p2p = 0.0;
+            double tstd_put = 0.0;
+            for (int i = 0; i < n_measure; ++i) {
+                    tstd_p2p += pow(t_p2p[i] - tavg_p2p, 2);
+                    tstd_put += pow(t_put[i] - tavg_put, 2);
+            }
+            // get the CI
+            const double t_nu_val = t_nu_interp(n_measure);
+            const double s_p2p = sqrt(tstd_p2p / (n_measure - 1));
+            const double s_put = sqrt(tstd_put / (n_measure - 1));
+            const double ci_p2p = s_p2p * t_nu_val * sqrt(1.0 / n_measure);
+            const double ci_put = s_put * t_nu_val * sqrt(1.0 / n_measure);
+
+            // display the results
+            m_log("time (%ld B - %d msgs): P2P = %f +-[%f] - PUT = %f +-[%f] - ratio = %f",
+                  ttl_len * sizeof(double), n_msg, tavg_p2p, ci_p2p, tavg_put, ci_put,
+                  tavg_put / tavg_p2p);
             // write to csv
             FILE* file = fopen(fullname, "a");
-            m_assert(file,"file must be open");
-            fprintf(file, "%ld,%f,%f\n", ttl_len * sizeof(double), tavg_p2p, tavg_put);
+            m_assert(file, "file must be open");
+            fprintf(file, "%ld,%f,%f,%f,%f\n", ttl_len * sizeof(double), tavg_p2p, tavg_put, ci_p2p,
+                    ci_put);
             fclose(file);
             //--------------------------------------------------------------------------------------
         }

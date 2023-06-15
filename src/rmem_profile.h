@@ -5,11 +5,44 @@
 #ifndef RMEM_PROFILE_H_
 #define RMEM_PROFILE_H_
 
+#include <limits.h>
 #include <time.h>
+
 #include "rmem_utils.h"
 
 #define m_rmem_prof_name_len 256
 
+#define m_rmem_nu_len 14
+static int t_student_nu[m_rmem_nu_len] = {0, 1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 50, 100, 500};
+static double t_student_t[m_rmem_nu_len] = {0.0,   6.314, 2.920, 2.353, 2.132, 2.015, 1.895,
+                                            1.812, 1.753, 1.725, 1.697, 1.676, 1.660, 1.645};
+
+double t_nu_interp(const int nu) {
+    m_assert(nu >= 0, "the nu param = %d must be positive", nu);
+    //--------------------------------------------------------------------------
+    if (nu == 0) {
+        // easy, it's 0
+        return 0.0;
+    } else if (nu <= 5) {
+        // we have an exact entry
+        return t_student_nu[nu];
+    } else if (nu >= t_student_nu[m_rmem_nu_len-1]) {
+        // we are too big, it's like a normal distribution
+        return t_student_nu[m_rmem_nu_len-1];
+    } else {
+        int i = 5;
+        while (t_student_nu[i] < nu) {
+            i++;
+        }
+        const int nu_low = t_student_nu[i - 1];
+        const int nu_up = t_student_nu[i];
+        const double t_low = t_student_t[i - 1];
+        const double t_up = t_student_t[i];
+        // find the right point
+        return t_low + (t_up - t_low) / (nu_up - nu_low) * (nu - nu_low);
+    }
+    //--------------------------------------------------------------------------
+}
 
 typedef struct{
   char name [m_rmem_prof_name_len];
