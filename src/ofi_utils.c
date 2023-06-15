@@ -24,10 +24,10 @@
                 hints->field &= ~(value);                                 \
             } else {                                                      \
                 fi_freeinfo(test_prov);                                   \
-                m_verb("successfully set " #field " to " #value);          \
+                m_verb("successfully set " #field " to " #value);         \
             }                                                             \
         } else {                                                          \
-            m_verb(#field " already has " #value);                         \
+            m_verb(#field " already has " #value);                        \
         }                                                                 \
     } while (0)
 
@@ -122,9 +122,9 @@ int ofi_util_get_prov(struct fi_info** prov) {
     m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_MR_RAW");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_RAW), "need to use FI_MR_RAW");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_LOCAL), "need to use FI_MR_LOCAL");
-    m_assert((*prov)->tx_attr->inject_size >= OFI_INJECT_THRESHOLD,
-             "the inject size = %ld must be >= threshold = %d", (*prov)->tx_attr->inject_size,
-             OFI_INJECT_THRESHOLD);
+    //m_assert((*prov)->tx_attr->inject_size >= OFI_INJECT_THRESHOLD,
+    //         "the inject size = %ld must be >= threshold = %d", (*prov)->tx_attr->inject_size,
+    //         OFI_INJECT_THRESHOLD);
     m_verb("found compatible provider: %s", (*prov)->fabric_attr->prov_name);
 
     // free the hints

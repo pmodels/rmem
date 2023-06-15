@@ -257,7 +257,7 @@ static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id,
     put->ofi.msg.addr =pmem->ofi.trx[rx_id].addr[put->peer];
 
     // do we inject or generate a cq?
-    const bool do_inject = put->count < OFI_INJECT_THRESHOLD;
+    const bool do_inject = put->count < comm->prov->tx_attr->inject_size;
     // get the flags to use
     uint64_t flags = FI_INJECT_COMPLETE;
     if (do_inject) {
