@@ -6,6 +6,7 @@
 #define RMEM_PROFILE_H_
 
 #include <limits.h>
+#include <math.h>
 #include <time.h>
 
 #include "rmem_utils.h"
@@ -17,7 +18,7 @@ static int t_student_nu[m_rmem_nu_len] = {0, 1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 5
 static double t_student_t[m_rmem_nu_len] = {0.0,   6.314, 2.920, 2.353, 2.132, 2.015, 1.895,
                                             1.812, 1.753, 1.725, 1.697, 1.676, 1.660, 1.645};
 
-double t_nu_interp(const int nu) {
+static inline double t_nu_interp(const int nu) {
     m_assert(nu >= 0, "the nu param = %d must be positive", nu);
     //--------------------------------------------------------------------------
     if (nu == 0) {
@@ -42,6 +43,20 @@ double t_nu_interp(const int nu) {
         return t_low + (t_up - t_low) / (nu_up - nu_low) * (nu - nu_low);
     }
     //--------------------------------------------------------------------------
+}
+
+void rmem_get_ci(const int n_data, double* data, double* avg, double* ci) {
+    const double t_nu_val = t_nu_interp(n_data);
+    *avg = 0.0;
+    for (int i = 0; i < n_data; ++i) {
+        *avg += data[i] / n_data;
+    }
+    double std = 0.0;
+    for (int i = 0; i < n_data; ++i) {
+        std += pow(data[i] - *avg, 2);
+    }
+    const double s = sqrt(std / (n_data - 1));
+    *ci = s * t_nu_val * sqrt(1.0 / n_data);
 }
 
 typedef struct{
