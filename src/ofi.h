@@ -158,8 +158,8 @@ typedef struct {
         // completion queue data
         ofi_cq_t cq;
         // data description and ofi msg
-        // struct iovec iov;
-        // struct fi_msg_tagged msg;
+        struct iovec iov;
+        struct fi_msg_tagged msg;
     } ofi;
 } ofi_p2p_t;
 
@@ -172,6 +172,14 @@ typedef struct {
     struct fid_cntr* ccntr;  // Completed CouNTeR put and get
     fi_addr_t* addr;         // address list
 } ofi_rma_trx_t;
+
+typedef struct {
+        // msg structs
+        struct iovec iov;
+        struct fi_msg_tagged msg;
+        // completion queue
+        ofi_cq_t cq;
+} ofi_rma_sync_t;
 
 // memory exposed to the world - public memory
 typedef struct {
@@ -193,7 +201,7 @@ typedef struct {
         countr_t* icntr;  // issued put
 #if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
         // cq data array for sync
-        ofi_cq_t* sync;
+        ofi_rma_sync_t* sync;
 #elif (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
         uint8_t tmp;  // temporary value used for key registration as 0-byte with FI_KEY_NOTAVAIL is
                       // not supported

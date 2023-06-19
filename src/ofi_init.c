@@ -29,7 +29,7 @@ int ofi_ctx_init(const int comm_size, struct fi_info* prov, struct fid_domain* d
     // associate it to the endpoint for inbound and outbound completion
     // add selective completion to NOT have a completion unless requested
     // WARNING: SELECTIVE_COMPLETION is more expensive than discarding the cq entry
-    uint64_t tag = FI_TRANSMIT | FI_RECV;
+    uint64_t tag = FI_TRANSMIT | FI_RECV | FI_SELECTIVE_COMPLETION;
     m_ofi_call(fi_ep_bind((*ctx)->p2p_ep, &(*ctx)->p2p_cq->fid, tag));
 
     // associate the adress vector

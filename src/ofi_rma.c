@@ -121,7 +121,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
             .format = OFI_CQ_FORMAT,
         };
         m_ofi_call(fi_cq_open(comm->domain, &cq_attr, &mem->ofi.trx[i].cq, NULL));
-        uint64_t tcq_trx_flags = FI_TRANSMIT | FI_RECV;
+        uint64_t tcq_trx_flags = FI_TRANSMIT | FI_RECV | FI_SELECTIVE_COMPLETION;
         m_ofi_call(fi_ep_bind(mem->ofi.trx[i].ep, &mem->ofi.trx[i].cq->fid, tcq_trx_flags));
 
         // ------------------- finalize
@@ -166,16 +166,27 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     //---------------------------------------------------------------------------------------------
     // if needed allocate sync data structures
 #if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-    mem->ofi.sync = calloc(comm->size, sizeof(ofi_cq_t));
+    mem->ofi.sync = calloc(comm->size, sizeof(ofi_rma_sync_t));
     for (int i = 0; i < comm->size; ++i) {
-        ofi_cq_t* ccq = mem->ofi.sync + i;
+        ofi_rma_sync_t* csync = mem->ofi.sync + i;
+        // setup the cq
+        ofi_cq_t* ccq = &(mem->ofi.sync[i].cq);
         ccq->kind = m_ofi_cq_kind_sync;
         ccq->cq = mem->ofi.trx[0].cq;
         ccq->sync.cntr = mem->ofi.epoch;
+        // setup the msg
+        csync->iov.iov_base = &ccq->sync.data;
+        csync->iov.iov_len = sizeof(uint64_t);
+        csync->msg.msg_iov = &csync->iov;
+        csync->msg.desc = NULL;
+        csync->msg.iov_count = 1;
+        csync->msg.ignore = 0x0;
+        csync->msg.context = &ccq->ctx;
+        csync->msg.data = 0;
     }
 #endif
     return m_success;
-    }
+}
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     struct fid_ep* nullsrx = NULL;
     struct fid_stx* nullstx = NULL;
@@ -287,17 +298,17 @@ static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id,
     return m_success;
 }
 
-int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_enqueue(put,pmem,ctx_id,comm,RMA_OPT_RPUT);
-}
-
 int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_enqueue(put,pmem,ctx_id,comm,RMA_OPT_PUT);
+    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT);
+}
+int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
+}
+int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
 }
 
-int ofi_rma_free(ofi_rma_t* rma) {
-    return m_success;
-}
+int ofi_rma_free(ofi_rma_t* rma) { return m_success; }
 
 // notify the processes in comm of memory exposure epoch
 int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
@@ -345,11 +356,15 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
     };
 #if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
     for (int i = 0; i < nrank; ++i) {
-        uint64_t ignore = 0x0;
-        uint64_t tag = m_ofi_tag_sync;
-        m_ofi_call(fi_trecv(mem->ofi.trx[0].srx, &mem->ofi.sync[i].sync.data, sizeof(uint64_t),
-                            NULL, mem->ofi.trx[0].addr[rank[i]], tag, ignore,
-                            &mem->ofi.sync[i].ctx));
+        mem->ofi.sync[i].msg.addr = mem->ofi.trx[0].addr[rank[i]];
+        mem->ofi.sync[i].msg.tag = m_ofi_tag_sync;
+        uint64_t flags = FI_COMPLETION;
+        m_ofi_call(fi_trecvmsg(mem->ofi.trx[0].srx, &mem->ofi.sync[i].msg, flags));
+        // uint64_t ignore = 0x0;
+        // uint64_t tag = m_ofi_tag_sync;
+        // m_ofi_call(fi_trecv(mem->ofi.trx[0].srx, &mem->ofi.sync[i].sync.data, sizeof(uint64_t),
+        //                     NULL, mem->ofi.trx[0].addr[rank[i]], tag, ignore,
+        //                     &mem->ofi.sync[i].ctx));
     }
 #endif
     while (m_countr_load(mem->ofi.epoch + 0) < nrank) {
@@ -444,11 +459,15 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     int rma_sync_count = nrank;
 #elif (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
     for (int i = 0; i < nrank; ++i) {
-        uint64_t ignore = 0x0;
-        uint64_t tag = m_ofi_tag_sync;
-        m_ofi_call(fi_trecv(mem->ofi.trx[0].srx, &mem->ofi.sync[i].sync.data, sizeof(uint64_t),
-                            NULL, mem->ofi.trx[0].addr[rank[i]], tag, ignore,
-                            &mem->ofi.sync[i].ctx));
+        mem->ofi.sync[i].msg.addr = mem->ofi.trx[0].addr[rank[i]];
+        mem->ofi.sync[i].msg.tag = m_ofi_tag_sync;
+        uint64_t flags = FI_COMPLETION;
+        m_ofi_call(fi_trecvmsg(mem->ofi.trx[0].srx, &mem->ofi.sync[i].msg, flags));
+        // uint64_t ignore = 0x0;
+        // uint64_t tag = m_ofi_tag_sync;
+        // m_ofi_call(fi_trecv(mem->ofi.trx[0].srx, &mem->ofi.sync[i].sync.data, sizeof(uint64_t),
+        //                     NULL, mem->ofi.trx[0].addr[rank[i]], tag, ignore,
+        //                     &mem->ofi.sync[i].ctx));
     }
     // no rma calls have been made, none to take into account in the remote cntr
     int rma_sync_count = 0;
