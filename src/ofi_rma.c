@@ -22,14 +22,14 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 
     //---------------------------------------------------------------------------------------------
     // reset two atomics for the signals with remote write access only
-    atomic_store(mem->ofi.epoch + 0, 0);
-    atomic_store(mem->ofi.epoch + 1, 0);
-    atomic_store(mem->ofi.epoch + 2, 0);
+    m_countr_init(mem->ofi.epoch + 0);
+    m_countr_init(mem->ofi.epoch + 1);
+    m_countr_init(mem->ofi.epoch + 2);
 
     // allocate the counters tracking the number of issued calls
     mem->ofi.icntr = calloc(comm->size, sizeof(atomic_int));
     for (int i = 0; i < comm->size; ++i) {
-        atomic_store(mem->ofi.icntr + i, 0);
+        m_countr_init(mem->ofi.icntr + i);
     }
 
     //---------------------------------------------------------------------------------------------
@@ -247,30 +247,41 @@ static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id,
     m_assert(ctx_id < comm->n_ctx, "ctx id = %d < the number of ctx = %d", ctx_id, comm->n_ctx);
 
     // increment the global counter tracking the issued calls
-    atomic_fetch_add(&pmem->ofi.icntr[put->peer], 1);
+    m_countr_fetch_add(&pmem->ofi.icntr[put->peer], 1);
 
     // set the completion parameters
     put->ofi.cq.cq = pmem->ofi.trx[ctx_id].cq;
 
-    // address and tag depends on the communicator context
+    // address depends on the communicator context
     const int rx_id = m_get_rx(ctx_id,pmem);
     put->ofi.msg.addr =pmem->ofi.trx[rx_id].addr[put->peer];
+
+    // do we inject or generate a cq?
+    const bool do_inject = put->count < comm->prov->tx_attr->inject_size;
+    // get the flags to use
+    uint64_t flags = FI_INJECT_COMPLETE;
+    if (do_inject) {
+        flags |= FI_INJECT;
+    }
 
     // issue the operation
     switch (op) {
         case (RMA_OPT_PUT): {
             // no increment of the flag with RPUT
             put->ofi.cq.rqst.flag = NULL;
-            uint64_t flags = FI_INJECT_COMPLETE;
             m_ofi_call(fi_writemsg(pmem->ofi.trx[ctx_id].ep, &put->ofi.msg, flags));
         } break;
         case (RMA_OPT_RPUT): {
             // increment the flag with RPUT
             put->ofi.cq.rqst.flag = &put->ofi.completed;
-            atomic_store(put->ofi.cq.rqst.flag, 0);
+            m_countr_store(put->ofi.cq.rqst.flag, 0);
             // do the communication
-            uint64_t flags = FI_COMPLETION | FI_INJECT_COMPLETE;
-            m_ofi_call(fi_writemsg(pmem->ofi.trx[ctx_id].ep, &put->ofi.msg, flags));
+            m_ofi_call(fi_writemsg(pmem->ofi.trx[ctx_id].ep, &put->ofi.msg, FI_COMPLETION | flags));
+
+            // if inject, no CQ entry is generated, so the rput is completed upon exit
+            if (do_inject) {
+                m_countr_fetch_add(put->ofi.cq.rqst.flag, 1);
+            }
         } break;
     }
     return m_success;
@@ -293,8 +304,8 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     // no call access in my memory can be done before the notification, it's safe to reset the
     // counters involved in the memory exposure: epoch[1:2]
     // do NOT reset the epoch[0], it's already exposed to the world!
-    atomic_store(mem->ofi.epoch + 1, 0);
-    atomic_store(mem->ofi.epoch + 2, 0);
+    m_countr_store(mem->ofi.epoch + 1, 0);
+    m_countr_store(mem->ofi.epoch + 2, 0);
 
     uint64_t data = m_ofi_data_set_post;
     // notify readiness to the rank list
@@ -319,7 +330,7 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     // inject_write data will generate a counter update, need to take that into account. we separate
     // the loops to not penalize the other waiting processes
     for (int i = 0; i < nrank; ++i) {
-        atomic_fetch_add(&mem->ofi.icntr[rank[i]], 1);
+        m_countr_fetch_add(&mem->ofi.icntr[rank[i]], 1);
     }
     return m_success;
 }
@@ -341,13 +352,13 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
                             &mem->ofi.sync[i].ctx));
     }
 #endif
-    while (atomic_load(mem->ofi.epoch + 0) < nrank) {
+    while (m_countr_load(mem->ofi.epoch + 0) < nrank) {
         // trigger progress to change the values of the epoch
         ofi_progress(&cq);
     }
     // once we have received everybody's signal, resets epoch[0] for the next iteration
     // nobody can post until I have completed on my side, so it will no lead to data race
-    atomic_store(mem->ofi.epoch + 0, 0);
+    m_countr_store(mem->ofi.epoch + 0, 0);
     return m_success;
 }
 
@@ -363,7 +374,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     // count the number of calls issued for each of the ranks and notify them
     int ttl_issued = 0;
     for (int i = 0; i < nrank; ++i) {
-        int issued_rank = atomic_exchange(&mem->ofi.icntr[rank[i]], 0);
+        int issued_rank = m_countr_exchange(&mem->ofi.icntr[rank[i]], 0);
         ttl_issued += issued_rank;
 
         // notify
@@ -447,16 +458,16 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     // n_rcompleted must be = the total number of calls received (including during the start sync) +
     // the sync from nrank for this sync
     if (mem->ofi.n_rx == 1) {
-        while (atomic_load(mem->ofi.epoch + 1) < nrank) {
+        while (m_countr_load(mem->ofi.epoch + 1) < nrank) {
             ofi_progress(&cq);
         }
-        uint64_t threshold = atomic_load(mem->ofi.epoch + 2) + rma_sync_count;
+        uint64_t threshold = m_countr_load(mem->ofi.epoch + 2) + rma_sync_count;
         fi_cntr_wait(mem->ofi.trx[0].rcntr, threshold, -1);
         fi_cntr_set(mem->ofi.trx[0].rcntr, 0);
     } else {
         uint64_t n_rcompleted = 0;
-        while (mem->ofi.epoch[1] < nrank ||
-               n_rcompleted < (atomic_load(mem->ofi.epoch + 2) + rma_sync_count)) {
+        while (m_countr_load(mem->ofi.epoch + 1) < nrank ||
+               n_rcompleted < (m_countr_load(mem->ofi.epoch + 2) + rma_sync_count)) {
             for (int i = 0; i < mem->ofi.n_rx; ++i) {
                 // count the number of remote calls over the receive contexts
                 uint64_t n_ri = fi_cntr_read(mem->ofi.trx[i].rcntr);

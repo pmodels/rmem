@@ -5,9 +5,10 @@
 #ifndef RMEM_UTILS_H_
 #define RMEM_UTILS_H_
 
-#include <stdlib.h>
-#include <stdio.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "pmi.h"
 
 /*
