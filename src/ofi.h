@@ -13,6 +13,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include "rdma/fi_atomic.h"
 
 //#define OFI_INJECT_THRESHOLD 1024
 
@@ -173,6 +174,15 @@ typedef struct {
     fi_addr_t* addr;         // address list
 } ofi_rma_trx_t;
 
+typedef struct {
+    // signal counter
+    uint32_t inc; // increment value, always 1
+    uint32_t val; // actual counter value
+    // structs for fi_atomics
+    struct fid_mr* mr;
+    uint64_t* key_list;  // list of remote keys
+} ofi_rma_sig_t;
+
 // memory exposed to the world - public memory
 typedef struct {
     // user defined buffer
@@ -194,13 +204,11 @@ typedef struct {
         countr_t* icntr;  // issued put
         // sync data
         uint64_t* sync_data;
+        // signaling
+        ofi_rma_sig_t signal;
 #if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
         // cq data array for sync
-        ofi_cqdata_t *sync;
-#elif (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
-        uint8_t tmp;  // temporary value used for key registration as 0-byte with FI_KEY_NOTAVAIL is
-                      // not supported
-
+        ofi_cqdata_t* sync;
 #endif
     } ofi;
 } ofi_rmem_t;
@@ -261,6 +269,7 @@ int ofi_rma_init(ofi_rma_t* put, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rma_free(ofi_rma_t* rma);
 
 int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
+int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 
 #endif
