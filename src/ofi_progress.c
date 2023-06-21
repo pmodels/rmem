@@ -26,8 +26,8 @@ static void ofi_cq_update_data(uint64_t* data, countr_t* epoch) {
     }
     if (cmpl > 0) {
         m_assert(cmpl <= 1, "post must be <=1");
-        m_countr_fetch_add(epoch + 1, cmpl);
         m_countr_fetch_add(epoch + 2, nops);
+        m_countr_fetch_add(epoch + 1, cmpl);
     }
 }
 

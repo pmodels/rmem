@@ -192,6 +192,8 @@ typedef struct {
         countr_t epoch[3];
         // memory wide counters, tracked the number of issued put/get
         countr_t* icntr;  // issued put
+        // sync data
+        uint64_t* sync_data;
 #if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
         // cq data array for sync
         ofi_cqdata_t *sync;

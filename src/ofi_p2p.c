@@ -9,7 +9,6 @@ int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* ofi) {
     p2p->ofi.cq.kind = m_ofi_cq_kind_rqst;
     // register the flag
     p2p->ofi.cq.rqst.flag = &p2p->ofi.completed;
-
     // init the data stuctures
     p2p->ofi.iov = (struct iovec){
         .iov_base = p2p->buf,
@@ -42,10 +41,15 @@ int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2
     p2p->ofi.msg.tag = ofi_set_tag(ctx_id, p2p->tag);
     p2p->ofi.msg.addr = ctx->p2p_addr[p2p->peer];
 
-    uint64_t flag = FI_INJECT_COMPLETE | FI_COMPLETION;
+    // we can use the inject (or FI_INJECT_COMPLETE) only if autoprogress cap is ON. Otherwise, not
+    // reading the cq will lead to no progress, see issue https://github.com/pmodels/rmem/issues/4
+    const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
+    const bool do_inject = (p2p->count <= comm->prov->tx_attr->inject_size) && auto_progress;
     switch (op) {
         case (P2P_OPT_SEND): {
-            if (p2p->count <= comm->prov->tx_attr->inject_size) {
+            uint64_t flag =
+                (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE) | FI_COMPLETION;
+            if (do_inject) {
                 m_ofi_call(fi_tinject(ctx->p2p_ep, p2p->buf, p2p->count, ctx->p2p_addr[p2p->peer],
                                       p2p->ofi.msg.tag));
                 // need to complete the request as no CQ entry will happen
@@ -57,10 +61,8 @@ int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2
             }
         } break;
         case (P2P_OPT_RECV): {
-            // uint64_t ignore = 0x0;
+            uint64_t flag = FI_COMPLETION;
             m_ofi_call(fi_trecvmsg(ctx->srx, &p2p->ofi.msg, flag));
-            // m_ofi_call(fi_trecv(ctx->srx, p2p->buf, p2p->count, NULL, ctx->p2p_addr[p2p->peer], tag,
-            //                     ignore, &p2p->ofi.cq.ctx));
         } break;
     }
     return m_success;
