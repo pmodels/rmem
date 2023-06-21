@@ -143,7 +143,7 @@ typedef struct {
             uint64_t data;
         } sync;
     };
-} ofi_cq_t;
+} ofi_cqdata_t;
 
 typedef struct {
     // user provided information
@@ -156,7 +156,7 @@ typedef struct {
     struct {
         countr_t completed;
         // completion queue data
-        ofi_cq_t cq;
+        ofi_cqdata_t cq;
         // data description and ofi msg
         struct iovec iov;
         struct fi_msg_tagged msg;
@@ -173,14 +173,6 @@ typedef struct {
     fi_addr_t* addr;         // address list
 } ofi_rma_trx_t;
 
-typedef struct {
-        // msg structs
-        struct iovec iov;
-        struct fi_msg_tagged msg;
-        // completion queue
-        ofi_cq_t cq;
-} ofi_rma_sync_t;
-
 // memory exposed to the world - public memory
 typedef struct {
     // user defined buffer
@@ -193,15 +185,16 @@ typedef struct {
         // buffer addresses
         struct fid_mr* mr;
         uint64_t* key_list;  // list of remote keys
-        // single receive (public) endpoint
-        ofi_rma_trx_t* trx;
+        // transmit and receive contexts
+        ofi_rma_trx_t* sync_trx;
+        ofi_rma_trx_t* data_trx;
         // epoch arrays
         countr_t epoch[3];
         // memory wide counters, tracked the number of issued put/get
         countr_t* icntr;  // issued put
 #if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
         // cq data array for sync
-        ofi_rma_sync_t* sync;
+        ofi_cqdata_t *sync;
 #elif (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
         uint8_t tmp;  // temporary value used for key registration as 0-byte with FI_KEY_NOTAVAIL is
                       // not supported
@@ -221,7 +214,7 @@ typedef struct {
     struct {
         countr_t completed;
         // completion queue data
-        ofi_cq_t cq;
+        ofi_cqdata_t cq;
         // data description and ofi msg
         struct iovec iov;
         struct fi_rma_iov riov;  // remote IOV
@@ -247,7 +240,7 @@ int ofi_send_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
 int ofi_recv_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
 
 // progress
-int ofi_progress(ofi_cq_t* cq);
+int ofi_progress(ofi_cqdata_t* cq);
 int ofi_p2p_wait(ofi_p2p_t* p2p);
 int ofi_rma_wait(ofi_rma_t* p2p);
 
