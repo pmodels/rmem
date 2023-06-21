@@ -76,9 +76,9 @@ int main(int argc, char** argv) {
                 .count = 0,
             };
             ofi_rmem_init(&pmem, &comm);
-            double* src = calloc(ttl_len, sizeof(double));
+            int* src = calloc(ttl_len, sizeof(int));
             for (int i = 0; i < ttl_len; ++i) {
-                src[i] = i;
+                src[i] = i + 1;
             }
             //--------------------------------------------------------------------------------------
             // POINT TO POINT
@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
             for (int i = 0; i < n_msg; ++i) {
                 send[i] = (ofi_p2p_t){
                     .buf = src + i * msg_size,
-                    .count = msg_size * sizeof(double),
+                    .count = msg_size * sizeof(int),
                     .peer = peer,
                     .tag = i,
                 };
@@ -118,8 +118,8 @@ int main(int argc, char** argv) {
             for (int i = 0; i < n_msg; ++i) {
                 put[i] = (ofi_rma_t){
                     .buf = src + i * msg_size,
-                    .count = msg_size * sizeof(double),
-                    .disp = i * msg_size * sizeof(double),
+                    .count = msg_size * sizeof(int),
+                    .disp = i * msg_size * sizeof(int),
                     .peer = peer,
                 };
                 ofi_rma_init(put + i, &pmem, &comm);
@@ -145,7 +145,7 @@ int main(int argc, char** argv) {
             // RPUT
             // rmem_rma_t rput = {
             //     .buf = src,
-            //     .count = msg_size * sizeof(double),
+            //     .count = msg_size * sizeof(int),
             //     .peer = peer,
             // };
             // rmem_prof_t time_rput = {.name = "rput"};
@@ -174,10 +174,10 @@ int main(int argc, char** argv) {
             p2p_retry.peer = peer;
 
             // allocate the receive buffer
-            double* pmem_buf = calloc(ttl_len, sizeof(double));
+            int* pmem_buf = calloc(ttl_len, sizeof(int));
             ofi_rmem_t pmem = {
                 .buf = pmem_buf,
-                .count = ttl_len * sizeof(double),
+                .count = ttl_len * sizeof(int),
             };
             ofi_rmem_init(&pmem, &comm);
 
@@ -187,7 +187,7 @@ int main(int argc, char** argv) {
             for (int i = 0; i < n_msg; ++i) {
                 recv[i] = (ofi_p2p_t){
                     .buf = pmem_buf + i * msg_size,
-                    .count = msg_size * sizeof(double),
+                    .count = msg_size * sizeof(int),
                     .peer = peer,
                     .tag = i,
                 };
@@ -215,9 +215,9 @@ int main(int argc, char** argv) {
                     }
                     // check the result
                     for (int i = 0; i < ttl_len; ++i) {
-                        double res = i;
+                        int res = i + 1;
                         if (pmem_buf[i] != res) {
-                            m_log("pmem[%d] = %f != %f", i, pmem_buf[i], res);
+                            m_log("pmem[%d] = %d != %d", i, pmem_buf[i], res);
                         }
                         pmem_buf[i] = 0.0;
                     }
@@ -256,9 +256,9 @@ int main(int argc, char** argv) {
                     }
                     // check the results
                     for (int i = 0; i < ttl_len; ++i) {
-                        double res = i;
+                        int res = i + 1;
                         if (pmem_buf[i] != res) {
-                            m_log("pmem[%d] = %f != %f", i, pmem_buf[i], res);
+                            m_log("pmem[%d] = %d != %d", i, pmem_buf[i], res);
                         }
                         pmem_buf[i] = 0.0;
                     }
@@ -285,7 +285,7 @@ int main(int argc, char** argv) {
             //         ofi_rmem_wait(1, &peer, &pmem, &comm);
             //     }
             //     for (int i = 0; i < msg_size; ++i) {
-            //         double res = i;
+            //         int res = i + 1;
             //         m_assert(pmem_buf[i] == res,"pmem[%d] = %f != %f",i,pmem_buf[i],res);
             //     }
             // }
