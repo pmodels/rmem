@@ -106,11 +106,11 @@ int ofi_util_get_prov(struct fi_info** prov) {
 
     // try to get more specific behavior
     m_ofi_test_info(hints, ep_attr->type, FI_EP_RDM);
-    m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
-    m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
+    // m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
+    // m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
-    m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
-    m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
+    // m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
+    // m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
     m_ofi_test_info(hints, tx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, tx_attr->comp_order, FI_ORDER_NONE);

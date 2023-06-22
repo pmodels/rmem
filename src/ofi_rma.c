@@ -122,12 +122,13 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         // ------------------- counters
         struct fi_cntr_attr rx_cntr_attr = {
             .events = FI_CNTR_EVENTS_COMP,
+            .wait_obj = FI_WAIT_UNSPEC,
         };
         if (is_rx) {
             // remote counters - count the number of fi_write/fi_read targeted to me
             m_ofi_call(fi_cntr_open(comm->domain, &rx_cntr_attr, &trx[i].rcntr, NULL));
-            uint64_t rcntr_flag = FI_REMOTE_WRITE | FI_REMOTE_READ;
-            m_ofi_call(fi_ep_bind(trx[i].ep, &trx[i].rcntr->fid, rcntr_flag));
+            // uint64_t rcntr_flag = FI_REMOTE_WRITE;
+            // m_ofi_call(fi_ep_bind(trx[i].ep, &trx[i].rcntr->fid, rcntr_flag));
             m_ofi_call(fi_cntr_set(trx[i].rcntr, 0));
         }
         if (is_tx) {
@@ -149,6 +150,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         struct fi_cq_attr cq_attr = {
             // need to be able to recover the data for PSCW
             .format = OFI_CQ_FORMAT,
+            .wait_obj = FI_WAIT_UNSPEC,
         };
         m_ofi_call(fi_cq_open(comm->domain, &cq_attr, &trx[i].cq, NULL));
         if (is_rx || is_tx) {
@@ -166,6 +168,8 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         if (is_rx || is_sync) {
             // get the addresses from others
             m_rmem_call(ofi_util_av(comm->size, trx[i].ep, trx[i].av, &trx[i].addr));
+        }
+        if (is_rx) {
             // bind the memory registration
             if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT && mem->ofi.mr
 #if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
@@ -174,6 +178,11 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
             ) {
                 uint64_t mr_trx_flags = 0;
                 m_ofi_call(fi_mr_bind(mem->ofi.mr, &trx[i].ep->fid, mr_trx_flags));
+            }
+            // bind the remote completion counter
+            if (mem->ofi.mr) {
+                m_ofi_call(
+                    fi_mr_bind(mem->ofi.mr, &mem->ofi.data_trx[i].rcntr->fid, FI_REMOTE_WRITE));
             }
         }
         m_verb("done with EP # %d", i);
@@ -198,6 +207,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     pmi_allgather(sizeof(key), &key, &key_list);
     mem->ofi.key_list = (uint64_t*)key_list;
 
+
     //---------------------------------------------------------------------------------------------
     // allocate the data user for sync
     mem->ofi.sync_data = calloc(comm->size, sizeof(uint64_t));
@@ -216,6 +226,15 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     struct fid_ep* nullsrx = NULL;
     struct fid_stx* nullstx = NULL;
+    // free the MR
+#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
+    if (mem->count > 0) {
+#endif
+        m_ofi_call(fi_close(&mem->ofi.mr->fid));
+#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
+    }
+#endif
+    free(mem->ofi.key_list);
     // free the Tx first, need to close them before closing the AV in the Rx
     const int n_trx = comm->n_ctx + 1;
     for (int i = 0; i < n_trx; ++i) {
@@ -238,15 +257,6 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
         }
     }
     free(mem->ofi.data_trx);
-    // free the MR
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-    if (mem->count > 0) {
-#endif
-        m_ofi_call(fi_close(&mem->ofi.mr->fid));
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-    }
-#endif
-    free(mem->ofi.key_list);
     // free the counters
     free(mem->ofi.icntr);
     // sync stuff
