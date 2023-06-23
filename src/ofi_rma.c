@@ -443,16 +443,8 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
         uint64_t flags = FI_COMPLETION;
         m_ofi_call(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags));
     }
-    // store the flag pointers and the cq to progress
-    ofi_cqdata_t cq = {
-        .kind = m_ofi_cq_kind_sync,
-        .sync.cntr = mem->ofi.epoch,
-        .cq = mem->ofi.sync_trx->cq,
-    };
     while (m_countr_load(mem->ofi.epoch + 0) < nrank) {
-        // trigger progress to change the values of the epoch, only the cq of the sync must be
-        // progressed
-        ofi_progress(&cq);
+        ofi_progress(mem->ofi.sync_trx->cq);
     }
     // once we have received everybody's signal, resets epoch[0] for the next iteration
     // nobody can post until I have completed on my side, so it will no lead to data race
@@ -475,13 +467,6 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
                             mem->ofi.sync_trx->addr[rank[i]], tag, &ctx));
     }
     //----------------------------------------------------------------------------------------------
-    // store the flag pointers and the cq to progress
-    ofi_cqdata_t cq = {
-        .kind = m_ofi_cq_kind_sync,
-        .sync.cntr = mem->ofi.epoch,
-        .cq = mem->ofi.sync_trx->cq,
-    };
-
     // count the number of completed calls and wait till they are all done
     // must complete all the sync call done in rmem_post (if any) + the sync call done with RMA
     uint64_t threshold = ttl_issued;
@@ -492,12 +477,8 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         ttl_completed = threshold;
     } else {
         while (ttl_completed < threshold) {
-            // force progress on the trx[0] cq to make sure we increment the completion counters for
-            // providers where progress is not automatic
-            if (comm->prov->domain_attr->control_progress & FI_PROGRESS_MANUAL) {
-                ofi_progress(&cq);
-            }
             for (int i = 0; i < comm->n_ctx; ++i) {
+                ofi_progress(mem->ofi.data_trx[i].cq);
                 int nc = fi_cntr_read(mem->ofi.data_trx[i].ccntr);
                 if (nc > 0) {
                     ttl_completed += nc;
@@ -541,15 +522,9 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     // compare the number of calls done to the value in the epoch if everybody has finished
     // n_rcompleted must be = the total number of calls received (including during the start sync) +
     // the sync from nrank for this sync
-    // store the flag pointers and the cq to progress
-    ofi_cqdata_t cq = {
-        .kind = m_ofi_cq_kind_sync,
-        .sync.cntr = mem->ofi.epoch,
-        .cq = mem->ofi.sync_trx->cq,
-    };
     if (mem->ofi.n_rx == 1) {
         while (m_countr_load(mem->ofi.epoch + 1) < nrank) {
-            ofi_progress(&cq);
+            ofi_progress(mem->ofi.sync_trx->cq);
         }
         uint64_t threshold = m_countr_load(mem->ofi.epoch + 2);
         fi_cntr_wait(mem->ofi.data_trx[0].rcntr, threshold, -1);
@@ -559,11 +534,9 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         while (m_countr_load(mem->ofi.epoch + 1) < nrank ||
                n_rcompleted < (m_countr_load(mem->ofi.epoch + 2))) {
             // run progress to update the epoch counters
-            cq.cq = mem->ofi.sync_trx->cq;
-            ofi_progress(&cq);
+            ofi_progress(mem->ofi.sync_trx->cq);
             for (int i = 0; i < mem->ofi.n_rx; ++i) {
-                cq.cq = mem->ofi.data_trx[i].cq;
-                ofi_progress(&cq);
+                ofi_progress(mem->ofi.data_trx[i].cq);
                 // count the number of remote calls over the receive contexts
                 uint64_t n_ri = fi_cntr_read(mem->ofi.data_trx[i].rcntr);
                 if (n_ri > 0) {
