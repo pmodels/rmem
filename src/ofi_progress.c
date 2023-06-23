@@ -57,7 +57,7 @@ int ofi_progress(struct fid_cq* cq) {
                 }
             } else if (kind & m_ofi_cq_kind_sync) {
                 countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.cntr));
-                uint64_t* data = (uint64_t*)(op_ctx + m_ofi_cq_offset(sync.data));
+                uint64_t* data = (uint64_t*)(op_ctx + m_ofi_cq_offset(sync.buf));
                 ofi_cq_update_data(data, *epoch);
             } else {
                 m_assert(0, "unknown kind: %d", kind);

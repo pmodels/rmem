@@ -110,26 +110,27 @@ typedef struct {
     ofi_ctx_t* ctx;
 } ofi_comm_t;
 
-// completion queue data structure
+/**
+ * @brief data-structure used in the cq when an operation has completed
+ */
 typedef struct {
     //  ofi structures link to the fi_cq
     struct fid_cq* cq;
+    // context for the CQ entry
     union {
         struct fi_context ctx;
     } ctx;
 
     // kind parameter
     uint8_t kind;
-    // union for the different kind of completion events
     union {
         struct {
             countr_t* flag;
-            struct fid_cntr* cntr;
-        } rqst;
+        } rqst;  // kind == m_ofi_cq_kind_rqst
         struct {
             countr_t* cntr;
-            uint64_t data;
-        } sync;
+            uint64_t buf;    // buffer for communication
+        } sync;  // kind == m_ofi_cq_kind_sync
     };
 } ofi_cqdata_t;
 
@@ -170,12 +171,19 @@ typedef struct {
     uint64_t* key_list;  // list of remote keys
 } ofi_rma_sig_t;
 
+typedef struct {
+    countr_t epoch[3];
+    countr_t* icntr;  // fi_write only!
+    ofi_cqdata_t* cqdata;
+} ofi_rma_sync_t;
+
 // memory exposed to the world - public memory
 typedef struct {
     // user defined buffer
     void* buf;
     size_t count;
 
+    // ofi specifics
     struct {
         int n_rx;  // number of received context
         int n_tx;  // number of transmit contexts
@@ -185,16 +193,9 @@ typedef struct {
         // transmit and receive contexts
         ofi_rma_trx_t* sync_trx;
         ofi_rma_trx_t* data_trx;
-        // epoch arrays
-        countr_t epoch[3];
-        // memory wide counters, tracked the number of issued put/get
-        countr_t* icntr;  // issued put
-        // sync data
-        uint64_t* sync_data;
         // signaling
         ofi_rma_sig_t signal;
-        // cq data array for sync
-        ofi_cqdata_t* sync;
+        ofi_rma_sync_t sync;
     } ofi;
 } ofi_rmem_t;
 
