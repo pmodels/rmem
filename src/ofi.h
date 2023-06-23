@@ -235,7 +235,7 @@ int ofi_send_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
 int ofi_recv_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
 
 // progress
-int ofi_progress(ofi_cqdata_t* cq);
+int ofi_progress(struct fid_cq* cq);
 int ofi_p2p_wait(ofi_p2p_t* p2p);
 int ofi_rma_wait(ofi_rma_t* p2p);
 

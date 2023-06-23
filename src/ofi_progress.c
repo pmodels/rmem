@@ -31,9 +31,9 @@ static void ofi_cq_update_data(uint64_t* data, countr_t* epoch) {
     }
 }
 
-int ofi_progress(ofi_cqdata_t* cq) {
+int ofi_progress(struct fid_cq* cq) {
     ofi_cq_entry event[m_ofi_cq_entries];
-    int ret = fi_cq_read(cq->cq, event, m_ofi_cq_entries);
+    int ret = fi_cq_read(cq, event, m_ofi_cq_entries);
     if (ret > 0) {
         //------------------------------------------------------------------------------------------
         // entries in the buffer
@@ -76,7 +76,7 @@ int ofi_progress(ofi_cqdata_t* cq) {
             .err_data = err_data,
             .err_data_size = sizeof(err_data),
         };
-        ssize_t ret_cqerr = fi_cq_readerr(cq->cq, &err, 0);
+        ssize_t ret_cqerr = fi_cq_readerr(cq, &err, 0);
         if (ret_cqerr == -FI_EAGAIN) {
             m_log("no error to be read");
         } else {
@@ -86,7 +86,7 @@ int ofi_progress(ofi_cqdata_t* cq) {
                     break;
                 default: {
                     char prov_err[m_ofi_cq_err_len];
-                    fi_cq_strerror(cq->cq, err.prov_errno, err_data, prov_err, m_ofi_cq_err_len);
+                    fi_cq_strerror(cq, err.prov_errno, err_data, prov_err, m_ofi_cq_err_len);
                     m_log("OFI-CQ ERROR: %s, provider says %s", fi_strerror(err.err), prov_err);
                 }
             }
@@ -100,7 +100,7 @@ int ofi_wait(ofi_cqdata_t* cq) {
     m_assert(cq->kind == m_ofi_cq_kind_rqst, "wrong kind of request");
     // while the request is not completed, progress the CQ
     while (!m_countr_load(cq->rqst.flag)) {
-        m_rmem_call(ofi_progress(cq));
+        m_rmem_call(ofi_progress(cq->cq));
     }
     return m_success;
 }
