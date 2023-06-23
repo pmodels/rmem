@@ -30,6 +30,7 @@ AM_SILENT_RULES([yes])
 PAC_ADD_CPPFLAGS([-g -Wall -std=c11])
 PAC_ADD_CPPFLAGS([-Wno-deprecated-declarations])
 PAC_ADD_FLAGS([-fopenmp],[-fopenmp])
+PAC_ADD_FLAGS([-lm],[-lm])
 PAC_ADD_LIB_PATH(fabric,[rdma/fabric.h],[fi_getinfo],[ofi])
 PAC_ADD_LIB_PATH(pmi,[pmi.h],[PMI_Init],[pmi])
 

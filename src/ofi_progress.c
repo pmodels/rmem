@@ -10,7 +10,7 @@
 #define m_ofi_cq_entries 16
 #define m_ofi_cq_err_len 512
 
-#define m_ofi_cq_offset(a) (offsetof(ofi_cq_t, a) - offsetof(ofi_cq_t, ctx))
+#define m_ofi_cq_offset(a) (offsetof(ofi_cqdata_t, a) - offsetof(ofi_cqdata_t, ctx))
 
 static void ofi_cq_update_data(uint64_t* data, countr_t* epoch) {
     m_assert(*data > 0, "the value of data should be > 0 (and not %" PRIu64 ")", *data);
@@ -26,12 +26,12 @@ static void ofi_cq_update_data(uint64_t* data, countr_t* epoch) {
     }
     if (cmpl > 0) {
         m_assert(cmpl <= 1, "post must be <=1");
-        m_countr_fetch_add(epoch + 1, cmpl);
         m_countr_fetch_add(epoch + 2, nops);
+        m_countr_fetch_add(epoch + 1, cmpl);
     }
 }
 
-int ofi_progress(ofi_cq_t* cq) {
+int ofi_progress(ofi_cqdata_t* cq) {
     ofi_cq_entry event[m_ofi_cq_entries];
     int ret = fi_cq_read(cq->cq, event, m_ofi_cq_entries);
     if (ret > 0) {
@@ -42,9 +42,9 @@ int ofi_progress(ofi_cq_t* cq) {
             uint8_t* op_ctx = (uint8_t*)event[i].op_context;
             // if the context is null, the cq is used for remote data
 #if (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
+            uint64_t data = event[i].data;
             if (!op_ctx) {
                 m_verb("completion data received");
-                uint64_t data = event[i].data;
                 ofi_cq_update_data(&data, cq->sync.cntr);
             } else {
 #endif
@@ -100,7 +100,7 @@ int ofi_progress(ofi_cq_t* cq) {
     return m_success;
 }
 
-int ofi_wait(ofi_cq_t* cq) {
+int ofi_wait(ofi_cqdata_t* cq) {
     m_assert(cq->kind == m_ofi_cq_kind_rqst, "wrong kind of request");
     // while the request is not completed, progress the CQ
     while (!m_countr_load(cq->rqst.flag)) {

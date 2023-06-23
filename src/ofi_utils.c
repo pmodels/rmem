@@ -106,11 +106,11 @@ int ofi_util_get_prov(struct fi_info** prov) {
 
     // try to get more specific behavior
     m_ofi_test_info(hints, ep_attr->type, FI_EP_RDM);
-    m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
-    m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
+    // m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
+    // m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
-    m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_AUTO);
-    m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_AUTO);
+    // m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
+    // m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
     m_ofi_test_info(hints, tx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, tx_attr->comp_order, FI_ORDER_NONE);
@@ -132,6 +132,21 @@ int ofi_util_get_prov(struct fi_info** prov) {
     return m_success;
 }
 
+/**
+ * @brief creates a new (shared or normal) endpoint associated to the domain
+ *
+ * If shared context is supported by the provider, it optionally create new contexts and associate
+ * them to the endpoint.
+ *
+ * @param[in] new_ctx create new shared rx and tx contexts
+ * @param[out] ep return the created endpoint
+ * @param[in,out] stx the shared transmit context to associate to the endpoint if not NULL. Will be
+ * overwritten if new_ctx is true.
+ * @param[in,out] srx the shared receive context to associate to the endpoint if not NULL. To be
+ * used to queue the receive requests. Will be overwritten if new_ctx is true.
+ *
+ *
+ */
 int ofi_util_new_ep(const bool new_ctx, struct fi_info* prov, struct fid_domain* dom,
                     struct fid_ep** ep, struct fid_stx** stx, struct fid_ep** srx) {
     // get the kind of endpoints to create
