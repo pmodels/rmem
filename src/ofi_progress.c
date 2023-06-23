@@ -41,32 +41,28 @@ int ofi_progress(ofi_cqdata_t* cq) {
             // get the context
             uint8_t* op_ctx = (uint8_t*)event[i].op_context;
             // if the context is null, the cq is used for remote data
-#if (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
-            uint64_t data = event[i].data;
-            if (!op_ctx) {
-                m_verb("completion data received");
-                ofi_cq_update_data(&data, cq->sync.cntr);
-            } else {
-#endif
-                m_assert(op_ctx, "the context cannot be null here");
-                // recover the kind
-                uint8_t kind = *((uint8_t*)op_ctx + m_ofi_cq_offset(kind));
-                if (kind & m_ofi_cq_kind_rqst) {
-                    atomic_int** flag = (atomic_int**)(op_ctx + m_ofi_cq_offset(rqst.flag));
-                    if (*flag) {
-                        atomic_fetch_add(*flag, 1);
-                        m_verb("increasing flag value by 1");
-                    }
-                } else if (kind & m_ofi_cq_kind_sync) {
-                    countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.cntr));
-                    uint64_t* data = (uint64_t*)(op_ctx + m_ofi_cq_offset(sync.data));
-                    ofi_cq_update_data(data, *epoch);
-                } else {
-                    m_assert(0, "unknown kind: %d", kind);
+            // uint64_t data = event[i].data;
+            // if (!op_ctx) {
+            //     m_verb("completion data received");
+            //     ofi_cq_update_data(&data, cq->sync.cntr);
+            // } else {
+            m_assert(op_ctx, "the context cannot be null here");
+            // recover the kind
+            uint8_t kind = *((uint8_t*)op_ctx + m_ofi_cq_offset(kind));
+            if (kind & m_ofi_cq_kind_rqst) {
+                atomic_int** flag = (atomic_int**)(op_ctx + m_ofi_cq_offset(rqst.flag));
+                if (*flag) {
+                    atomic_fetch_add(*flag, 1);
+                    m_verb("increasing flag value by 1");
                 }
-#if (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
+            } else if (kind & m_ofi_cq_kind_sync) {
+                countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.cntr));
+                uint64_t* data = (uint64_t*)(op_ctx + m_ofi_cq_offset(sync.data));
+                ofi_cq_update_data(data, *epoch);
+            } else {
+                m_assert(0, "unknown kind: %d", kind);
             }
-#endif
+            // }
         }
     } else if (ret == (-FI_EAGAIN)) {
         //------------------------------------------------------------------------------------------

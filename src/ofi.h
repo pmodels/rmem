@@ -15,22 +15,9 @@
 #include <stdint.h>
 #include "rdma/fi_atomic.h"
 
-//#define OFI_INJECT_THRESHOLD 1024
-
 //--------------------------------------------------------------------------------------------------
-#define OFI_RMA_SYNC_INJECT_WRITE 0x0
-#define OFI_RMA_SYNC_MSG          0x1
-#define OFI_RMA_SYNC              OFI_RMA_SYNC_MSG
-// #define OFI_RMA_SYNC OFI_RMA_SYNC_INJECT_WRITE
-
-// adapt the cq
-#if (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
-#define OFI_CQ_FORMAT FI_CQ_FORMAT_DATA
-typedef struct fi_cq_data_entry ofi_cq_entry;
-#elif (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-#define OFI_CQ_FORMAT FI_CQ_FORMAT_CONTEXT
+#define OFI_CQ_FORMAT             FI_CQ_FORMAT_CONTEXT
 typedef struct fi_cq_entry ofi_cq_entry;
-#endif
 
 //--------------------------------------------------------------------------------------------------
 #ifndef NDEBUG
@@ -206,10 +193,8 @@ typedef struct {
         uint64_t* sync_data;
         // signaling
         ofi_rma_sig_t signal;
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
         // cq data array for sync
         ofi_cqdata_t* sync;
-#endif
     } ofi;
 } ofi_rmem_t;
 

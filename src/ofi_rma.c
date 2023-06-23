@@ -221,7 +221,6 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     // allocate the data user for sync
     mem->ofi.sync_data = calloc(comm->size, sizeof(uint64_t));
     // if needed allocate sync data structures
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
     mem->ofi.sync = calloc(comm->size, sizeof(ofi_cqdata_t));
     for (int i = 0; i < comm->size; ++i) {
         ofi_cqdata_t* ccq = mem->ofi.sync + i;
@@ -229,7 +228,6 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         ccq->cq = mem->ofi.sync_trx->cq;
         ccq->sync.cntr = mem->ofi.epoch;
     }
-#endif
     return m_success;
 }
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
@@ -269,9 +267,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     free(mem->ofi.icntr);
     // sync stuff
     free(mem->ofi.sync_data);
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
     free(mem->ofi.sync);
-#endif
     return m_success;
 }
 
@@ -417,24 +413,10 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     // notify readiness to the rank list
     fi_cntr_set(mem->ofi.sync_trx->ccntr, 0);
     for (int i = 0; i < nrank; ++i) {
-#if (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
-        // inject prevents the completion counter to be incremented
-        // WARNING: even if the key is unused, not giving it doesn't work
-        uint64_t disp = 0;
-        fi_addr_t* dest_addr = mem->ofi.sync_trx->addr + rank[i];
-        uint64_t key = mem->ofi.key_list[rank[i]];
-        m_assert(key != FI_KEY_NOTAVAIL, "key must be valid");
-        // use any local buffer, we write 0-byte anyway
-        m_ofi_call(fi_inject_writedata(mem->ofi.sync_trx->ep, &mem->ofi.tmp, 0, data, *dest_addr,
-                                       disp, key));
-#elif (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-        // m_ofi_call(fi_inject(mem->ofi.trx[0].ep, &data, 8, mem->ofi.trx[0].addr[rank[i]]));
+        // TODO: fix the context here, it's wrong to share it!
         uint64_t tag = m_ofi_tag_sync;
-        // m_ofi_call(fi_tinject(mem->ofi.sync_trx->ep, &data, sizeof(data),
-        //                       mem->ofi.sync_trx->addr[rank[i]], tag));
         m_ofi_call(fi_tsend(mem->ofi.sync_trx->ep, &data, sizeof(uint64_t), NULL,
                             mem->ofi.sync_trx->addr[rank[i]], tag, &ctx));
-#endif
     }
     // wait for completion of the inject calls
     fi_cntr_wait(mem->ofi.sync_trx->ccntr, nrank, -1);
@@ -443,7 +425,6 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
 
 // wait for the processes in comm to notify their exposure
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
     for (int i = 0; i < nrank; ++i) {
         struct iovec iov = {
             .iov_base = &mem->ofi.sync[i].sync.data,
@@ -461,13 +442,7 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
         };
         uint64_t flags = FI_COMPLETION;
         m_ofi_call(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags));
-        // uint64_t ignore = 0x0;
-        // uint64_t tag = m_ofi_tag_sync;
-        // m_ofi_call(fi_trecv(mem->ofi.sync_trx->srx, &mem->ofi.sync[i].sync.data,
-        //                           sizeof(uint64_t), NULL, mem->ofi.sync_trx->addr[rank[i]], tag,
-        //                           ignore, &mem->ofi.sync[i].ctx));
     }
-#endif
     // store the flag pointers and the cq to progress
     ofi_cqdata_t cq = {
         .kind = m_ofi_cq_kind_sync,
@@ -494,23 +469,10 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     for (int i = 0; i < nrank; ++i) {
         int issued_rank = m_countr_exchange(&mem->ofi.icntr[rank[i]], 0);
         ttl_issued += issued_rank;
-
         // notify
-#if (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
-        uint64_t disp = 0;
-        fi_addr_t* dest_addr = mem->ofi.sync_trx->addr + rank[i];
-        uint64_t key = mem->ofi.key_list[rank[i]];
-        uint64_t data = m_ofi_data_set_cmpl | m_ofi_data_set_nops(issued_rank);
-        m_ofi_call(fi_inject_writedata(mem->ofi.sync_trx->ep, &mem->ofi.tmp, 0, data, *dest_addr,
-                                       disp, key));
-#elif (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-        // todo: to remove the use of inject
         mem->ofi.sync_data[i] = m_ofi_data_set_cmpl | m_ofi_data_set_nops(issued_rank);
-        // m_ofi_call(fi_tinject(mem->ofi.sync_trx->ep, &data, sizeof(data),
-        //                       mem->ofi.sync_trx->addr[rank[i]], tag));
         m_ofi_call(fi_tsend(mem->ofi.sync_trx->ep, mem->ofi.sync_data + i, sizeof(uint64_t), NULL,
                             mem->ofi.sync_trx->addr[rank[i]], tag, &ctx));
-#endif
     }
     //----------------------------------------------------------------------------------------------
     // store the flag pointers and the cq to progress
@@ -556,7 +518,6 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     return m_success;
 }
 int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
     for (int i = 0; i < nrank; ++i) {
         struct iovec iov = {
             .iov_base = &mem->ofi.sync[i].sync.data,
@@ -574,13 +535,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         };
         uint64_t flags = FI_COMPLETION;
         m_ofi_call(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags));
-        // uint64_t ignore = 0x0;
-        // uint64_t tag = m_ofi_tag_sync;
-        // m_ofi_call(fi_trecv(mem->ofi.sync_trx->srx, &mem->ofi.sync[i].sync.data, sizeof(uint64_t),
-        //                     NULL, mem->ofi.sync_trx->addr[rank[i]], tag, ignore,
-        //                     &mem->ofi.sync[i].ctx));
     }
-#endif
 
     //----------------------------------------------------------------------------------------------
     // compare the number of calls done to the value in the epoch if everybody has finished
