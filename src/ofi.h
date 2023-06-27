@@ -8,15 +8,14 @@
 #include <rdma/fi_cm.h>
 #include <rdma/fi_endpoint.h>
 #include <rdma/fi_errno.h>
-#include <rdma/fi_tagged.h>
 #include <rdma/fi_rma.h>
-#include <stdatomic.h>
-#include <stdbool.h>
-#include <stdint.h>
+#include <rdma/fi_tagged.h>
+
 #include "rdma/fi_atomic.h"
+#include "rmem_utils.h"
 
 //--------------------------------------------------------------------------------------------------
-#define OFI_CQ_FORMAT             FI_CQ_FORMAT_CONTEXT
+#define OFI_CQ_FORMAT FI_CQ_FORMAT_CONTEXT
 typedef struct fi_cq_entry ofi_cq_entry;
 
 //--------------------------------------------------------------------------------------------------
@@ -30,6 +29,18 @@ typedef struct fi_cq_entry ofi_cq_entry;
 #define m_ofi_call(func) \
     do {                 \
         func;            \
+    } while (0)
+#endif
+#ifndef NDEBUG
+#define m_pthread_call(func)                                                        \
+    do {                                                                            \
+        int m_pthread_call_res = func;                                              \
+        m_assert(m_pthread_call_res == 0, "PTHREAD ERROR: %d", m_pthread_call_res); \
+    } while (0)
+#else
+#define m_pthread_call(func) \
+    do {                     \
+        func;                \
     } while (0)
 #endif
 
@@ -69,18 +80,6 @@ inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 //--------------------------------------------------------------------------------------------------
 #define m_ofi_cq_kind_sync (0x01)  // 0000 0001
 #define m_ofi_cq_kind_rqst (0x02)  // 0000 0010
-
-//--------------------------------------------------------------------------------------------------
-typedef struct {
-    atomic_int val;
-} countr_t;
-//--------------------------------------------------------------------------------------------------
-#define m_countr_init(a)         atomic_init(&(a)->val, 0)
-#define m_countr_load(a)         atomic_load_explicit(&(a)->val, memory_order_relaxed)
-#define m_countr_store(a, v)     atomic_store_explicit(&(a)->val, v, memory_order_relaxed)
-#define m_countr_exchange(a, v)  atomic_exchange_explicit(&(a)->val, v, memory_order_relaxed)
-#define m_countr_fetch_add(a, v) atomic_fetch_add_explicit(&(a)->val, v, memory_order_relaxed)
-
 
 //--------------------------------------------------------------------------------------------------
 // communication context
@@ -184,6 +183,7 @@ typedef struct {
 
     // implementation specifics
     struct {
+        rmem_qnode_t qnode;
         countr_t completed;
         // data description and ofi msg
         struct {
@@ -196,7 +196,7 @@ typedef struct {
             uint64_t flags;
             struct fi_ioc iov;
             struct fi_rma_ioc riov;
-            struct fi_context ctx; // to replace by cqdata_t if RPUT_SIG is desired
+            struct fi_context ctx;  // to replace by cqdata_t if RPUT_SIG is desired
         } sig;
         fi_addr_t addr;
         struct fid_ep* ep;
@@ -223,8 +223,12 @@ typedef struct {
         // signaling
         ofi_rma_sig_t signal;
         ofi_rma_sync_t sync;
+        // work queue
+        pthread_t progress;
+        rmem_qmpsc_t qtrigr;
     } ofi;
 } ofi_rmem_t;
+
 
 // init and finalize - ofi_init.c
 int ofi_init(ofi_comm_t* ofi);
@@ -247,6 +251,10 @@ int ofi_recv_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
 int ofi_progress(struct fid_cq* cq);
 int ofi_p2p_wait(ofi_p2p_t* p2p);
 int ofi_rma_wait(ofi_rma_t* p2p);
+
+//-------------------------------------------------------------------------------------------------
+// trig
+void* ofi_tthread_main(void* arg);
 
 //-------------------------------------------------------------------------------------------------
 // Remote memory management

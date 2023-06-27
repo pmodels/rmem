@@ -227,11 +227,26 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         ccq->cq = mem->ofi.sync_trx->cq;
         ccq->sync.cntr = mem->ofi.sync.epoch;
     }
+    //---------------------------------------------------------------------------------------------
+    // async progress
+    m_atomicptr_init(&mem->ofi.qtrigr.head);
+    m_atomicptr_init(&mem->ofi.qtrigr.tail);
+    m_atomicptr_init(&mem->ofi.qtrigr.prev);
+    m_atomicptr_init(&mem->ofi.qtrigr.curnt);
+    // create the thread
+    pthread_attr_t pthread_attr;
+    m_pthread_call(pthread_attr_init(&pthread_attr));
+    m_pthread_call(
+        pthread_create(&mem->ofi.progress, &pthread_attr, &ofi_tthread_main, &mem->ofi.qtrigr));
+    m_pthread_call(pthread_attr_destroy(&pthread_attr));
+    m_log("pthread created");
+    //---------------------------------------------------------------------------------------------
     return m_success;
 }
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
-    struct fid_ep* nullsrx = NULL;
-    struct fid_stx* nullstx = NULL;
+    // free the trigger stuff 
+    m_pthread_call(pthread_cancel(mem->ofi.progress));
+    m_pthread_call(pthread_join(mem->ofi.progress,NULL));
     // free the MR
     if (mem->ofi.mr) {
         m_ofi_call(fi_close(&mem->ofi.mr->fid));
@@ -241,6 +256,8 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     free(mem->ofi.signal.key_list);
 
     // free the Tx first, need to close them before closing the AV in the Rx
+    struct fid_ep* nullsrx = NULL;
+    struct fid_stx* nullstx = NULL;
     const int n_trx = comm->n_ctx + 1;
     for (int i = 0; i < n_trx; ++i) {
         const bool is_rx = (i < mem->ofi.n_rx);
@@ -361,6 +378,10 @@ static int ofi_rma_enqueue(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, of
         } break;
     }
     //----------------------------------------------------------------------------------------------
+    // queue the work
+    rma->ofi.qnode.ready = 0;
+    rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
+    //----------------------------------------------------------------------------------------------
     m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
     return m_success;
 }
@@ -375,37 +396,7 @@ int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, o
 }
 
 int ofi_rma_start(ofi_rma_t* rma) {
-    uint64_t flags = rma->ofi.msg.flags;
-    struct fi_msg_rma msg = {
-        .msg_iov = &rma->ofi.msg.iov,
-        .desc = NULL,
-        .iov_count = 1,
-        .addr = rma->ofi.addr,
-        .rma_iov = &rma->ofi.msg.riov,
-        .rma_iov_count = 1,
-        .data = 0x0,
-        .context = &rma->ofi.msg.cq.ctx,
-    };
-    m_ofi_call(fi_writemsg(rma->ofi.ep, &msg, flags));
-    if (rma->ofi.sig.flags) {
-        struct fi_msg_atomic msg = {
-            .msg_iov = &rma->ofi.sig.iov,
-            .desc = NULL,
-            .iov_count = 1,
-            .addr = rma->ofi.addr,
-            .rma_iov = &rma->ofi.sig.riov,
-            .rma_iov_count = 1,
-            .datatype = FI_INT32,
-            .op = FI_SUM,
-            .data = 0,
-            .context = &rma->ofi.sig.ctx,
-        };
-        m_ofi_call(fi_atomicmsg(rma->ofi.ep, &msg, rma->ofi.sig.flags));
-    }
-    // if we had to get a cq entry and the inject, mark is as done
-    if (flags & FI_INJECT && flags & FI_COMPLETION) {
-        m_countr_fetch_add(&rma->ofi.completed, 1);
-    }
+    rma->ofi.qnode.ready ++;
     return m_success;
 }
 
