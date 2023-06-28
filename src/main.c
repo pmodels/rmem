@@ -122,15 +122,18 @@ int main(int argc, char** argv) {
                     .disp = i * msg_size * sizeof(int),
                     .peer = peer,
                 };
-                ofi_rma_init(put + i, &pmem, &comm);
+                // ofi_rma_init(put + i, &pmem, &comm);
             }
             retry = 1;
             while (retry) {
                 for (int it = -n_warmup; it < n_measure; ++it) {
+                    for (int j = 0; j < n_msg; ++j) {
+                        ofi_put_enqueue(put + j, &pmem, 0, &comm);
+                    }
                     PMI_Barrier();  // start exposure
                     ofi_rmem_start(1, &peer, &pmem, &comm);
                     for (int j = 0; j < n_msg; ++j) {
-                        ofi_put_enqueue(put + j, &pmem, 0, &comm);
+                        ofi_rma_start(put + j);
                     }
                     ofi_rmem_complete(1, &peer, &pmem, &comm);
                 }
@@ -151,15 +154,17 @@ int main(int argc, char** argv) {
                     .disp = i * msg_size * sizeof(int),
                     .peer = peer,
                 };
-                ofi_rma_init(psig + i, &pmem, &comm);
             }
             retry = 1;
             while (retry) {
                 for (int it = -n_warmup; it < n_measure; ++it) {
+                    for (int j = 0; j < n_msg; ++j) {
+                        ofi_put_signal_enqueue(psig + j, &pmem, 0, &comm);
+                    }
                     PMI_Barrier();  // start exposure
                     ofi_rmem_start(1, &peer, &pmem, &comm);
                     for (int j = 0; j < n_msg; ++j) {
-                        ofi_put_signal_enqueue(psig + j, &pmem, 0, &comm);
+                        ofi_rma_start(psig + j);
                     }
                     ofi_rmem_complete(1, &peer, &pmem, &comm);
                 }
@@ -286,6 +291,7 @@ int main(int argc, char** argv) {
                     // check the results
                     for (int i = 0; i < ttl_len; ++i) {
                         int res = i + 1;
+                        m_assert(pmem_buf[i] == res,"pmem[%d] = %d != %d", i, pmem_buf[i], res);
                         if (pmem_buf[i] != res) {
                             m_log("pmem[%d] = %d != %d", i, pmem_buf[i], res);
                         }
