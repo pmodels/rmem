@@ -109,7 +109,7 @@ int ofi_p2p_wait(ofi_p2p_t* p2p) {
     return m_success;
 }
 int ofi_rma_wait(ofi_rma_t* rma) {
-    m_rmem_call(ofi_wait(&rma->ofi.cq));
+    m_rmem_call(ofi_wait(&rma->ofi.msg.cq));
     return m_success;
 }
 
