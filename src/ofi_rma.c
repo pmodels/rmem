@@ -268,131 +268,145 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     return m_success;
 }
 
-int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* pmem, ofi_comm_t* comm) {
-    // initialize the context
-    rma->ofi.cq.kind = m_ofi_cq_kind_rqst;
-
-    // local IOV
-    rma->ofi.iov = (struct iovec){
-        .iov_base = rma->buf,
-        .iov_len = rma->count,
-    };
-    // remote IOV
-    rma->ofi.riov = (struct fi_rma_iov){
-        // offset starting from the key registration (FI_MR_SCALABLE)
-        .addr = rma->disp,
-        .len = rma->count,
-        .key = pmem->ofi.key_list[rma->peer],
-    };
-    m_assert(rma->ofi.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
-    rma->ofi.msg = (struct fi_msg_rma){
-        .msg_iov = &rma->ofi.iov,
-        .desc = NULL,
-        .iov_count = 1,
-        .addr = 0,  // set later, once the context ID is known
-        .rma_iov = &rma->ofi.riov,
-        .rma_iov_count = 1,
-        .data = 0,
-        .context = &rma->ofi.cq.ctx,  // needed in case we do RPUT instead of PUT
-                                      // (FI_SELECTIVE_COMPLETION + FI_COMPLETION)
-    };
-    return m_success;
-}
-
 typedef enum {
     RMA_OPT_PUT,
     RMA_OPT_RPUT,
     RMA_OPT_PUT_SIG,
 } rma_opt_t;
 
-static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,
-                           rma_opt_t op) {
+static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_comm_t* comm,
+                        rma_opt_t op) {
     m_assert(ctx_id < comm->n_ctx, "ctx id = %d < the number of ctx = %d", ctx_id, comm->n_ctx);
+    //----------------------------------------------------------------------------------------------
+    // endpoint and address
+    const int rx_id = m_get_rx(ctx_id, mem);
+    rma->ofi.ep = mem->ofi.data_trx[ctx_id].ep;
+    rma->ofi.addr = mem->ofi.data_trx[rx_id].addr[rma->peer];
 
-    // set the completion parameters
-    put->ofi.cq.cq = pmem->ofi.data_trx[ctx_id].cq;
-
-    // address depends on the communicator context
-    const int rx_id = m_get_rx(ctx_id,pmem);
-    put->ofi.msg.addr =pmem->ofi.data_trx[rx_id].addr[put->peer];
-
-    // we can use the inject (or FI_INJECT_COMPLETE) only if autoprogress cap is ON. Otherwise, not
-    // reading the cq will lead to no progress, see issue https://github.com/pmodels/rmem/issues/4
-    const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
-    const bool do_inject = (put->count < comm->prov->tx_attr->inject_size) && auto_progress;
-
-    // get the flags to use
-    uint64_t flags =
-        (do_inject ? FI_INJECT : 0x0) | (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
-    // issue the operation
+    //----------------------------------------------------------------------------------------------
+    // IOVs
+    rma->ofi.msg.iov = (struct iovec){
+        .iov_base = rma->buf,
+        .iov_len = rma->count,
+    };
+    rma->ofi.msg.riov = (struct fi_rma_iov){
+        .addr = rma->disp,  // offset from key
+        .len = rma->count,
+        .key = mem->ofi.key_list[rma->peer],
+    };
+    // cq
+    rma->ofi.msg.cq.kind = m_ofi_cq_kind_rqst;
+    rma->ofi.msg.cq.cq = mem->ofi.data_trx[ctx_id].cq;
     switch (op) {
         case (RMA_OPT_PUT): {
-            // no increment of the flag with PUT
-            put->ofi.cq.rqst.flag = NULL;
-            m_ofi_call(fi_writemsg(pmem->ofi.data_trx[ctx_id].ep, &put->ofi.msg, flags));
-            m_countr_fetch_add(&pmem->ofi.sync.icntr[put->peer], 1);
+            rma->ofi.msg.cq.rqst.flag = NULL;
         } break;
         case (RMA_OPT_RPUT): {
-            // increment the flag with RPUT
-            put->ofi.cq.rqst.flag = &put->ofi.completed;
-            m_countr_store(put->ofi.cq.rqst.flag, 0);
-            // do the communication
-            m_ofi_call(
-                fi_writemsg(pmem->ofi.data_trx[ctx_id].ep, &put->ofi.msg, FI_COMPLETION | flags));
-            m_countr_fetch_add(&pmem->ofi.sync.icntr[put->peer], 1);
-            // if inject, no CQ entry is generated, so the rput is completed upon exit
-            if (do_inject) {
-                m_countr_fetch_add(put->ofi.cq.rqst.flag, 1);
-            }
+            rma->ofi.msg.cq.rqst.flag = &rma->ofi.completed;
+            m_countr_store(rma->ofi.msg.cq.rqst.flag, 0);
         } break;
         case (RMA_OPT_PUT_SIG): {
-            // no increment of the flag with PUT
-            put->ofi.cq.rqst.flag = NULL;
-            // delivery complete is needed to make sure the signal does not overlap in the network
-            // with the actual data
-            uint64_t sig_flags = FI_DELIVERY_COMPLETE | (do_inject ? FI_INJECT : 0x0);
-            m_ofi_call(fi_writemsg(pmem->ofi.data_trx[ctx_id].ep, &put->ofi.msg, sig_flags));
-            // atomic call
-            sig_flags = flags | FI_FENCE;
-            // must be a writemsg to use the flags, the struct msg is copied internally
-            m_assert(pmem->ofi.signal.inc == 1, " the inc value must be 1");
-            struct fi_ioc iov = {
-                .addr = &pmem->ofi.signal.inc,
-                .count = 1,
-            };
-            struct fi_rma_ioc rma_iov = {
-                .addr = 0,
-                .count = 1,
-                .key = pmem->ofi.signal.key_list[put->peer],
-            };
-            struct fi_msg_atomic msg = {
-                .msg_iov = &iov,
-                .desc = NULL,
-                .iov_count = 1,
-                .addr = put->ofi.msg.addr,
-                .rma_iov = &rma_iov,
-                .rma_iov_count = 1,
-                .datatype = FI_INT32,
-                .op = FI_SUM,
-                .data = 0,
-                .context = NULL,  // FI_SELECTIVE_COMPLETION and ! FI_COMPLETION so the ctx is
-                                  // ignored even if FI_CONTEXT mode is set
-            };
-            m_ofi_call(fi_atomicmsg(pmem->ofi.data_trx[ctx_id].ep,&msg,sig_flags));
-            m_countr_fetch_add(&pmem->ofi.sync.icntr[put->peer], 2);
+            rma->ofi.msg.cq.rqst.flag = NULL;
         } break;
     }
+    // flag
+    const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
+    const bool do_inject = (rma->count < comm->prov->tx_attr->inject_size) && auto_progress;
+    rma->ofi.msg.flags = (do_inject ? FI_INJECT : 0x0);
+    switch (op) {
+        case (RMA_OPT_PUT): {
+            rma->ofi.msg.flags |= (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
+        } break;
+        case (RMA_OPT_RPUT): {
+            rma->ofi.msg.flags |= (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
+            rma->ofi.msg.flags |= FI_COMPLETION;
+        } break;
+        case (RMA_OPT_PUT_SIG): {
+            rma->ofi.msg.flags |= FI_DELIVERY_COMPLETE;
+        } break;
+    }
+
+    //----------------------------------------------------------------------------------------------
+    if (op == RMA_OPT_PUT_SIG) {
+        // iovs
+        rma->ofi.sig.iov = (struct fi_ioc){
+            .addr = &mem->ofi.signal.inc,
+            .count = 1,
+        };
+        rma->ofi.sig.riov = (struct fi_rma_ioc){
+            .addr = 0,  // offset from key
+            .count = 1,
+            .key = mem->ofi.signal.key_list[rma->peer],
+        };
+        // flag
+        rma->ofi.sig.flags = FI_FENCE | (do_inject ? FI_INJECT : 0x0) |
+                             (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
+    } else {
+        rma->ofi.sig.flags = 0x0;
+        rma->ofi.sig.iov = (struct fi_ioc){0};
+        rma->ofi.sig.riov = (struct fi_rma_ioc){0};
+    }
+    //----------------------------------------------------------------------------------------------
+    m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
     return m_success;
 }
+int ofi_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT);
+}
+int ofi_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
+}
+int ofi_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
+}
 
-int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT);
+int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
+    uint64_t flags = rma->ofi.msg.flags;
+    struct fi_msg_rma msg = {
+        .msg_iov = &rma->ofi.msg.iov,
+        .desc = NULL,
+        .iov_count = 1,
+        .addr = rma->ofi.addr,
+        .rma_iov = &rma->ofi.msg.riov,
+        .rma_iov_count = 1,
+        .data = 0x0,
+        .context = &rma->ofi.msg.cq.ctx,
+    };
+    m_ofi_call(fi_writemsg(rma->ofi.ep, &msg, flags));
+    if (rma->ofi.sig.flags) {
+        struct fi_msg_atomic msg = {
+            .msg_iov = &rma->ofi.sig.iov,
+            .desc = NULL,
+            .iov_count = 1,
+            .addr = rma->ofi.addr,
+            .rma_iov = &rma->ofi.sig.riov,
+            .rma_iov_count = 1,
+            .datatype = FI_INT32,
+            .op = FI_SUM,
+            .data = 0,
+            .context = &rma->ofi.sig.ctx,
+        };
+        m_ofi_call(fi_atomicmsg(rma->ofi.ep, &msg, rma->ofi.sig.flags));
+    }
+    // increment the counter
+    int increment = (rma->ofi.sig.flags) ? 2 : 1;
+    m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], increment);
+    // if we had to get a cq entry and the inject, mark is as done
+    if (flags & FI_INJECT && flags & FI_COMPLETION) {
+        m_countr_fetch_add(&rma->ofi.completed, 1);
+    }
+    m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
+
+    return m_success;
 }
-int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
+int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT);
 }
-int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
+int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
+}
+int ofi_rma_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
 }
 
 int ofi_rma_free(ofi_rma_t* rma) { return m_success; }

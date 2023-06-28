@@ -35,7 +35,7 @@ void PrintBackTrace() {
         // we start at 1 to not display this function
         for (int i = 1; i < size; i++) {
             //  display the demangled name if we succeeded, weird name if not
-            m_log("%s",strings[i]);
+            m_log("%s", strings[i]);
         }
         m_log("-------------------------------------------------------");
     }

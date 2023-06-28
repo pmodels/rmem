@@ -17,7 +17,7 @@
 #include "rmem_utils.h"
 
 //#define msg_size 1024
-#define n_msg 1
+#define n_msg 27
 #define max_size (1<<18)
 #define n_measure 10
 #define n_warmup 5
@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
                     .disp = i * msg_size * sizeof(int),
                     .peer = peer,
                 };
-                ofi_rma_init(put + i, &pmem, &comm);
+                ofi_rma_put_init(put + i, &pmem, 0, &comm);
             }
             retry = 1;
             while (retry) {
@@ -130,7 +130,7 @@ int main(int argc, char** argv) {
                     PMI_Barrier();  // start exposure
                     ofi_rmem_start(1, &peer, &pmem, &comm);
                     for (int j = 0; j < n_msg; ++j) {
-                        ofi_put_enqueue(put + j, &pmem, 0, &comm);
+                        ofi_rma_start(&pmem, put + j);
                     }
                     ofi_rmem_complete(1, &peer, &pmem, &comm);
                 }
@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
                     .disp = i * msg_size * sizeof(int),
                     .peer = peer,
                 };
-                ofi_rma_init(psig + i, &pmem, &comm);
+                ofi_rma_put_signal_init(psig + i, &pmem, 0, &comm);
             }
             retry = 1;
             while (retry) {
@@ -159,7 +159,7 @@ int main(int argc, char** argv) {
                     PMI_Barrier();  // start exposure
                     ofi_rmem_start(1, &peer, &pmem, &comm);
                     for (int j = 0; j < n_msg; ++j) {
-                        ofi_put_signal_enqueue(psig + j, &pmem, 0, &comm);
+                        ofi_rma_start(&pmem, psig + j);
                     }
                     ofi_rmem_complete(1, &peer, &pmem, &comm);
                 }
@@ -286,6 +286,7 @@ int main(int argc, char** argv) {
                     // check the results
                     for (int i = 0; i < ttl_len; ++i) {
                         int res = i + 1;
+                        m_assert(pmem_buf[i] == res,"pmem[%d] = %d != %d", i, pmem_buf[i], res);
                         if (pmem_buf[i] != res) {
                             m_log("pmem[%d] = %d != %d", i, pmem_buf[i], res);
                         }
@@ -360,17 +361,18 @@ int main(int argc, char** argv) {
             //--------------------------------------------------------------------------------------
             // display the results
             m_log(
-                "time (%ld B - %d msgs):\n"
+                "time/msg (%ld B - %d msgs):\n"
                 "\tP2P       = %f +-[%f]\n"
                 "\tPUT       = %f +-[%f] (ratio = %f)\n"
                 "\tPUT + SIG = %f +-[%f] (ratio = %f)",
-                ttl_len * sizeof(int), n_msg, tavg_p2p, ci_p2p, tavg_put, ci_put,
-                tavg_put / tavg_p2p, tavg_psig, ci_psig, tavg_psig / tavg_p2p);
+                ttl_len * sizeof(int), n_msg, tavg_p2p / n_msg, ci_p2p / n_msg, tavg_put / n_msg,
+                ci_put / n_msg, tavg_put / tavg_p2p, tavg_psig / n_msg, ci_psig / n_msg,
+                tavg_psig / tavg_p2p);
             // write to csv
             FILE* file = fopen(fullname, "a");
             m_assert(file, "file must be open");
-            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f\n", ttl_len * sizeof(int), tavg_p2p, tavg_put,
-                    tavg_psig, ci_p2p, ci_put, ci_psig);
+            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f\n", ttl_len * sizeof(int), tavg_p2p/n_msg, tavg_put/n_msg,
+                    tavg_psig/n_msg, ci_p2p/n_msg, ci_put/n_msg, ci_psig/n_msg);
             fclose(file);
             //--------------------------------------------------------------------------------------
         }

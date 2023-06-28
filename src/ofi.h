@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "rdma/fi_atomic.h"
+#include "rmem.h"
 
 //--------------------------------------------------------------------------------------------------
 #define OFI_CQ_FORMAT             FI_CQ_FORMAT_CONTEXT
@@ -71,18 +72,6 @@ inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 #define m_ofi_cq_kind_rqst (0x02)  // 0000 0010
 
 //--------------------------------------------------------------------------------------------------
-typedef struct {
-    atomic_int val;
-} countr_t;
-//--------------------------------------------------------------------------------------------------
-#define m_countr_init(a)         atomic_init(&(a)->val, 0)
-#define m_countr_load(a)         atomic_load_explicit(&(a)->val, memory_order_relaxed)
-#define m_countr_store(a, v)     atomic_store_explicit(&(a)->val, v, memory_order_relaxed)
-#define m_countr_exchange(a, v)  atomic_exchange_explicit(&(a)->val, v, memory_order_relaxed)
-#define m_countr_fetch_add(a, v) atomic_fetch_add_explicit(&(a)->val, v, memory_order_relaxed)
-
-
-//--------------------------------------------------------------------------------------------------
 // communication context
 typedef struct {
     // shared rx/tx contexts
@@ -117,9 +106,7 @@ typedef struct {
     //  ofi structures link to the fi_cq
     struct fid_cq* cq;
     // context for the CQ entry
-    union {
-        struct fi_context ctx;
-    } ctx;
+    struct fi_context ctx;
 
     // kind parameter
     uint8_t kind;
@@ -167,8 +154,8 @@ typedef struct {
     uint32_t inc; // increment value, always 1
     uint32_t val; // actual counter value
     // structs for fi_atomics
-    struct fid_mr* mr;
     uint64_t* key_list;  // list of remote keys
+    struct fid_mr* mr;
 } ofi_rma_sig_t;
 
 typedef struct {
@@ -177,6 +164,35 @@ typedef struct {
     ofi_cqdata_t* cqdata;
 } ofi_rma_sync_t;
 
+typedef struct {
+    // user provided information
+    void* buf;     // address of the buffer
+    size_t count;  // count in bytes
+    int peer;      // destination/origin rank
+    ssize_t disp;  // displacement compared to the rmem base ptr (in bytes)
+
+    // implementation specifics
+    struct {
+        countr_t completed;
+        // data description and ofi msg
+        struct {
+            uint64_t flags;
+            struct iovec iov;
+            struct fi_rma_iov riov;
+            ofi_cqdata_t cq;
+        } msg;
+        struct {
+            uint64_t flags;
+            struct fi_ioc iov;
+            struct fi_rma_ioc riov;
+            struct fi_context ctx; // to replace by cqdata_t if RPUT_SIG is desired
+        } sig;
+        fi_addr_t addr;
+        struct fid_ep* ep;
+    } ofi;
+} ofi_rma_t;
+
+//-------------------------------------------------------------------------------------------------
 // memory exposed to the world - public memory
 typedef struct {
     // user defined buffer
@@ -198,25 +214,6 @@ typedef struct {
         ofi_rma_sync_t sync;
     } ofi;
 } ofi_rmem_t;
-
-typedef struct {
-    // user provided information
-    void* buf;     // address of the buffer
-    size_t count;  // count in bytes
-    int peer;      // destination/origin rank
-    ssize_t disp;  // displacement compared to the rmem base ptr (in bytes)
-
-    // implementation specifics
-    struct {
-        countr_t completed;
-        // completion queue data
-        ofi_cqdata_t cq;
-        // data description and ofi msg
-        struct iovec iov;
-        struct fi_rma_iov riov;  // remote IOV
-        struct fi_msg_rma msg;
-    } ofi;
-} ofi_rma_t;
 
 // init and finalize - ofi_init.c
 int ofi_init(ofi_comm_t* ofi);
@@ -250,12 +247,12 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 
+// operation creation
+int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
+int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
+int ofi_rma_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 // operation management
-int ofi_rma_init(ofi_rma_t* put, ofi_rmem_t* mem, ofi_comm_t* comm);
+int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma);
 int ofi_rma_free(ofi_rma_t* rma);
-
-int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
-int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
-int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 
 #endif
