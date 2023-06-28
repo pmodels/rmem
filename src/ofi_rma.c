@@ -2,23 +2,23 @@
  * Copyright (C) by Argonne National Laboratory
  *	See COPYRIGHT in top-level directory
  */
+#include <inttypes.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <inttypes.h>
 
 #include "ofi.h"
 #include "ofi_utils.h"
 #include "pmi_utils.h"
+#include "rdma/fi_atomic.h"
 #include "rdma/fi_domain.h"
 #include "rdma/fi_endpoint.h"
 #include "rdma/fi_rma.h"
 #include "rmem_utils.h"
 
-
-#define m_get_rx(i,mem) (i%mem->ofi.n_rx)
+#define m_get_rx(i, mem) (i % mem->ofi.n_rx)
 
 int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
-    m_assert(!(comm->prov->mode &FI_RX_CQ_DATA),"provider needs FI_RX_CQ_DATA");
+    m_assert(!(comm->prov->mode & FI_RX_CQ_DATA), "provider needs FI_RX_CQ_DATA");
 
     //---------------------------------------------------------------------------------------------
     // reset two atomics for the signals with remote write access only
@@ -33,40 +33,42 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     }
 
     //---------------------------------------------------------------------------------------------
-    // register the memory given by the user
-    // if we use RMA_INJECT_WRITE we need a valid registration key even if the memory is NULL and
-    // the count is 0
-#if (OFI_RMA_SYNC_INJECT_WRITE == OFI_RMA_SYNC)
-    struct iovec iov = {
-        .iov_base = (mem->buf) ? mem->buf : &mem->ofi.tmp,
-        .iov_len = (mem->count) ? mem->count : 1,
-    };
-#elif (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-    if (mem->count > 0) {
-        struct iovec iov = {
-            .iov_base = mem->buf,
-            .iov_len = mem->count,
-        };
-#endif
+    // register the memory given by the user together with the memory used for signaling
+    uint64_t flags = 0;
+    struct iovec iov;
     struct fi_mr_attr mr_attr = {
         .mr_iov = &iov,
         .iov_count = 1,
-        .access = FI_READ | FI_WRITE | FI_REMOTE_READ | FI_REMOTE_WRITE,
+        .access = FI_REMOTE_READ | FI_REMOTE_WRITE,
         .offset = 0,
         .requested_key = 0,
         .context = NULL,
     };
-    uint64_t flags = 0;
-    m_ofi_call(fi_mr_regattr(comm->domain, &mr_attr, flags, &mem->ofi.mr));
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
+    // register the user memory if not NULL
+    if (mem->buf && mem->count > 0) {
+        iov = (struct iovec){
+            .iov_base = mem->buf,
+            .iov_len = mem->count,
+        };
+        m_ofi_call(fi_mr_regattr(comm->domain, &mr_attr, flags, &mem->ofi.mr));
     } else {
         mem->ofi.mr = NULL;
     }
-#endif
-
+    // register the signal then
+    iov = (struct iovec){
+        .iov_base = &mem->ofi.signal.val,
+        .iov_len = sizeof(mem->ofi.signal.val),
+    };
+    // we need to request another key if the prov doesn't handle them
+    if (!(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY)) {
+        mr_attr.requested_key++;
+    }
+    m_ofi_call(fi_mr_regattr(comm->domain, &mr_attr, flags, &mem->ofi.signal.mr));
+    // set the signal inc to 1
+    mem->ofi.signal.inc = 1;
     //---------------------------------------------------------------------------------------------
-    // allocate one Tx/Rx endpoint per thread context, they all share the transmit queue of the thread
-    // the first n_rx endpoints will be Transmit and Receive, the rest is Transmit only
+    // allocate one Tx/Rx endpoint per thread context, they all share the transmit queue of the
+    // thread the first n_rx endpoints will be Transmit and Receive, the rest is Transmit only
     mem->ofi.n_rx = 1;
     mem->ofi.n_tx = comm->n_ctx;
     const int n_ttl_trx = comm->n_ctx + 1;
@@ -171,42 +173,49 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         }
         if (is_rx) {
             // bind the memory registration
-            if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT && mem->ofi.mr
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-                && mem->count > 0
-#endif
-            ) {
+            if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
                 uint64_t mr_trx_flags = 0;
-                m_ofi_call(fi_mr_bind(mem->ofi.mr, &trx[i].ep->fid, mr_trx_flags));
+                if (mem->ofi.mr) {
+                    m_ofi_call(fi_mr_bind(mem->ofi.mr, &trx[i].ep->fid, mr_trx_flags));
+                }
+                m_ofi_call(fi_mr_bind(mem->ofi.signal.mr, &trx[i].ep->fid, mr_trx_flags));
             }
             // bind the remote completion counter
             if (mem->ofi.mr) {
                 m_ofi_call(
                     fi_mr_bind(mem->ofi.mr, &mem->ofi.data_trx[i].rcntr->fid, FI_REMOTE_WRITE));
             }
+            m_ofi_call(
+                fi_mr_bind(mem->ofi.signal.mr, &mem->ofi.data_trx[i].rcntr->fid, FI_REMOTE_WRITE));
         }
         m_verb("done with EP # %d", i);
     }
 
     //---------------------------------------------------------------------------------------------
     // if needed, enable the MR and then get the corresponding key and share it
-    // obtain the key
-    uint64_t key = FI_KEY_NOTAVAIL;
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-    if (mem->count > 0) {
-#endif
+    // first the user region's key
+    uint64_t usr_key = FI_KEY_NOTAVAIL;
+    uint64_t sig_key = FI_KEY_NOTAVAIL;
+    if (mem->ofi.mr) {
         if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
             m_ofi_call(fi_mr_enable(mem->ofi.mr));
         }
-        key = fi_mr_key(mem->ofi.mr);
-        m_assert(key != FI_KEY_NOTAVAIL, "the key registration failed");
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
+        usr_key = fi_mr_key(mem->ofi.mr);
+        m_assert(usr_key != FI_KEY_NOTAVAIL, "the key registration failed");
     }
-#endif
     void* key_list = calloc(ofi_get_size(comm), sizeof(uint64_t));
-    pmi_allgather(sizeof(key), &key, &key_list);
+    pmi_allgather(sizeof(usr_key), &usr_key, &key_list);
     mem->ofi.key_list = (uint64_t*)key_list;
 
+    // then the signal key
+    if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+        m_ofi_call(fi_mr_enable(mem->ofi.signal.mr));
+    }
+    sig_key = fi_mr_key(mem->ofi.signal.mr);
+    m_assert(sig_key != FI_KEY_NOTAVAIL, "the key registration failed");
+    key_list = calloc(ofi_get_size(comm), sizeof(uint64_t));
+    pmi_allgather(sizeof(sig_key), &sig_key, &key_list);
+    mem->ofi.signal.key_list = (uint64_t*)key_list;
 
     //---------------------------------------------------------------------------------------------
     // allocate the data user for sync
@@ -227,14 +236,13 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     struct fid_ep* nullsrx = NULL;
     struct fid_stx* nullstx = NULL;
     // free the MR
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
-    if (mem->count > 0) {
-#endif
+    if (mem->ofi.mr) {
         m_ofi_call(fi_close(&mem->ofi.mr->fid));
-#if (OFI_RMA_SYNC_MSG == OFI_RMA_SYNC)
     }
-#endif
+    m_ofi_call(fi_close(&mem->ofi.signal.mr->fid));
     free(mem->ofi.key_list);
+    free(mem->ofi.signal.key_list);
+
     // free the Tx first, need to close them before closing the AV in the Rx
     const int n_trx = comm->n_ctx + 1;
     for (int i = 0; i < n_trx; ++i) {
@@ -278,9 +286,10 @@ int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* pmem, ofi_comm_t* comm) {
     };
     // remote IOV
     rma->ofi.riov = (struct fi_rma_iov){
-        .addr = rma->disp,  // offset starting from the key registration (FI_MR_SCALABLE)
-        .len = rma->count,  // size of the msg
-        .key = pmem->ofi.key_list[rma->peer],  // accessing key
+        // offset starting from the key registration (FI_MR_SCALABLE)
+        .addr = rma->disp,
+        .len = rma->count,
+        .key = pmem->ofi.key_list[rma->peer],
     };
     m_assert(rma->ofi.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
     rma->ofi.msg = (struct fi_msg_rma){
@@ -290,8 +299,9 @@ int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* pmem, ofi_comm_t* comm) {
         .addr = 0,  // set later, once the context ID is known
         .rma_iov = &rma->ofi.riov,
         .rma_iov_count = 1,
-        .context = &rma->ofi.cq.ctx,
         .data = 0,
+        .context = &rma->ofi.cq.ctx,  // needed in case we do RPUT instead of PUT
+                                      // (FI_SELECTIVE_COMPLETION + FI_COMPLETION)
     };
     return m_success;
 }
@@ -299,14 +309,12 @@ int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* pmem, ofi_comm_t* comm) {
 typedef enum {
     RMA_OPT_PUT,
     RMA_OPT_RPUT,
+    RMA_OPT_PUT_SIG,
 } rma_opt_t;
 
-static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id,
-                           ofi_comm_t* comm, rma_opt_t op) {
+static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,
+                           rma_opt_t op) {
     m_assert(ctx_id < comm->n_ctx, "ctx id = %d < the number of ctx = %d", ctx_id, comm->n_ctx);
-
-    // increment the global counter tracking the issued calls
-    m_countr_fetch_add(&pmem->ofi.icntr[put->peer], 1);
 
     // set the completion parameters
     put->ofi.cq.cq = pmem->ofi.data_trx[ctx_id].cq;
@@ -326,9 +334,10 @@ static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id,
     // issue the operation
     switch (op) {
         case (RMA_OPT_PUT): {
-            // no increment of the flag with RPUT
+            // no increment of the flag with PUT
             put->ofi.cq.rqst.flag = NULL;
             m_ofi_call(fi_writemsg(pmem->ofi.data_trx[ctx_id].ep, &put->ofi.msg, flags));
+            m_countr_fetch_add(&pmem->ofi.icntr[put->peer], 1);
         } break;
         case (RMA_OPT_RPUT): {
             // increment the flag with RPUT
@@ -337,10 +346,47 @@ static int ofi_rma_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id,
             // do the communication
             m_ofi_call(
                 fi_writemsg(pmem->ofi.data_trx[ctx_id].ep, &put->ofi.msg, FI_COMPLETION | flags));
+            m_countr_fetch_add(&pmem->ofi.icntr[put->peer], 1);
             // if inject, no CQ entry is generated, so the rput is completed upon exit
             if (do_inject) {
                 m_countr_fetch_add(put->ofi.cq.rqst.flag, 1);
             }
+        } break;
+        case (RMA_OPT_PUT_SIG): {
+            // no increment of the flag with PUT
+            put->ofi.cq.rqst.flag = NULL;
+            // delivery complete is needed to make sure the signal does not overlap in the network
+            // with the actual data
+            uint64_t sig_flags = FI_DELIVERY_COMPLETE | (do_inject ? FI_INJECT : 0x0);
+            m_ofi_call(fi_writemsg(pmem->ofi.data_trx[ctx_id].ep, &put->ofi.msg, sig_flags));
+            // atomic call
+            sig_flags = flags | FI_FENCE;
+            // must be a writemsg to use the flags, the struct msg is copied internally
+            m_assert(pmem->ofi.signal.inc == 1, " the inc value must be 1");
+            struct fi_ioc iov = {
+                .addr = &pmem->ofi.signal.inc,
+                .count = 1,
+            };
+            struct fi_rma_ioc rma_iov = {
+                .addr = 0,
+                .count = 1,
+                .key = pmem->ofi.signal.key_list[put->peer],
+            };
+            struct fi_msg_atomic msg = {
+                .msg_iov = &iov,
+                .desc = NULL,
+                .iov_count = 1,
+                .addr = put->ofi.msg.addr,
+                .rma_iov = &rma_iov,
+                .rma_iov_count = 1,
+                .datatype = FI_INT32,
+                .op = FI_SUM,
+                .data = 0,
+                .context = NULL,  // FI_SELECTIVE_COMPLETION and ! FI_COMPLETION so the ctx is
+                                  // ignored even if FI_CONTEXT mode is set
+            };
+            m_ofi_call(fi_atomicmsg(pmem->ofi.data_trx[ctx_id].ep,&msg,sig_flags));
+            m_countr_fetch_add(&pmem->ofi.icntr[put->peer], 2);
         } break;
     }
     return m_success;
@@ -352,9 +398,9 @@ int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm
 int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
     return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
 }
-// int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-//     return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
-// }
+int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
+}
 
 int ofi_rma_free(ofi_rma_t* rma) { return m_success; }
 
