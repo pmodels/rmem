@@ -27,7 +27,6 @@ void* ofi_tthread_main(void* arg) {
             m_ofi_rma_structgetptr(ofi_cqdata_t, msg_cq, msg.cq, task);
             m_ofi_rma_structgetptr(struct iovec, msg_iov, msg.iov, task);
             m_ofi_rma_structgetptr(struct fi_rma_iov, msg_riov, msg.riov, task);
-            m_log("executing the RMA operation");
             struct fi_msg_rma msg = {
                 .msg_iov = msg_iov,
                 .desc = NULL,

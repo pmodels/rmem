@@ -51,6 +51,7 @@ void PrintBackTrace() {
  *
  */
 void rmem_qmpsc_enq(rmem_qmpsc_t *q, rmem_qnode_t *elem) {
+    m_verb("enqueueing task %p",elem);
     rmem_qnode_t *prev_tail = (rmem_qnode_t *)m_atomicptr_exchange(&q->tail, (intptr_t)elem);
     if (prev_tail) {
         // head != tail, update the new next
@@ -103,47 +104,51 @@ void rmem_qmpsc_deq_ifready(rmem_qmpsc_t *q, rmem_qnode_t **elem) {
         // read the current status, dequeue it if it's ready
         *elem = (rmem_qnode_t *)m_atomicptr_load(&q->curnt);
         if (*elem && (*elem)->ready) {
-            m_log("THREAD: element %p is ready", *elem);
+            m_verb("THREAD: element %p is ready", *elem);
             // item must be dequeue, q->prev stays the same
             if (m_atomicptr_load(&(*elem)->next)) {
                 //----------------------------------------------------------------------------------
                 // dequeued != tail, so it's safe to update
                 m_atomicptr_copy(&q->curnt, &(*elem)->next);
-                m_log("THREAD: current is now %p", (void *)m_atomicptr_load(&q->curnt));
+                m_verb("THREAD: current is now %p", (void *)m_atomicptr_load(&q->curnt));
                 rmem_qnode_t *prev = (rmem_qnode_t *)m_atomicptr_load(&q->prev);
                 if (prev) {
                     m_atomicptr_copy(&prev->next, &(*elem)->next);
-                    m_log("THREAD: update the link from the prev");
+                    m_verb("THREAD: update the link from the prev");
                 } else {
                     // if we remove the head, get a new head
                     m_atomicptr_copy(&q->head, &(*elem)->next);
-                    m_log("THREAD: head is now %p", (void *)m_atomicptr_load(&q->head));
+                    m_verb("THREAD: head is now %p", (void *)m_atomicptr_load(&q->head));
                 }
             } else {
                 //----------------------------------------------------------------------------------
                 // dequeued = tail, the current is now NULL
                 m_atomicptr_store(&q->curnt, 0);
+                // if dequeued is the head, update the head
+                m_atomicptr_compare_exchange(&q->head, (intptr_t *)(elem),0);
+                // try to update the tail, unless is has been changed
                 if (!m_atomicptr_compare_exchange(&q->tail, (intptr_t *)(elem), 0)) {
-                    // if someone is currently updating the tail, wait for the update to be done
-                    // if the tail is not the dequeued element anymore, wait for the new tail
-                    // asignment
+                    // if someone has changed the tail, wait for the update to be done
                     while (!m_atomicptr_load(&(*elem)->next)) {
                         continue;
                     }
                     // the tail is now modified, it's safe to mess around
-                    // update the current to the new tail
+                    // update the current to the new first 
                     m_atomicptr_copy(&q->curnt, &(*elem)->next);
-                    // if the element we remove is the head, update it as well
+                    // if dequeued is the head, update the new head
                     m_atomicptr_compare_copy(&q->head, (intptr_t *)(elem), &(*elem)->next);
                 }
-                m_log("THREAD: current is now %p", (void *)m_atomicptr_load(&q->curnt));
+                m_verb("THREAD: current is now %p", (void *)m_atomicptr_load(&q->curnt));
             }
+            m_verb("returning task %p",*elem);
             break;
         } else {
             // go to the next item
             m_atomicptr_copy(&q->prev, &q->curnt);
             if (*elem) {
                 m_atomicptr_copy(&q->curnt, &(*elem)->next);
+                // the element found is not ready, overwrite to NULL
+                *elem = NULL;
             }
         }
     } while (!stop);
