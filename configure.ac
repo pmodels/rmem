@@ -15,9 +15,9 @@ AC_USE_SYSTEM_EXTENSIONS
 AC_CONFIG_SRCDIR([src/main.c])
 AC_CONFIG_HEADERS([.aux/rmem_config.h])
 
-# required programs
+# required programs - C
 AC_PROG_CC
-# AC_C__GENERIC
+AC_LANG([C])
 AC_C_RESTRICT
 AC_CONFIG_FILES([Makefile])
 
@@ -30,10 +30,22 @@ AM_SILENT_RULES([yes])
 PAC_ADD_CPPFLAGS([-g -Wall -std=c11])
 PAC_ADD_CPPFLAGS([-Wno-deprecated-declarations])
 PAC_ADD_FLAGS([-pthread],[-pthread])
-PAC_ADD_FLAGS([-fopenmp],[-fopenmp])
 PAC_ADD_FLAGS([-lm],[-lm])
-PAC_ADD_LIB_PATH(fabric,[rdma/fabric.h],[fi_getinfo],[ofi])
-PAC_ADD_LIB_PATH(pmi,[pmi.h],[PMI_Init],[pmi])
+# requirement functions
+AC_C_INLINE
+AC_FUNC_MALLOC
+AC_TYPE_SIZE_T
+AC_TYPE_SSIZE_T
+AC_TYPE_UINT8_T
+AC_TYPE_UINT32_T
+AC_TYPE_UINT64_T
+AC_CHECK_FUNCS([clock_gettime memset mkdir pow sqrt])
+AC_CHECK_HEADERS([limits.h stddef.h])
+AC_CHECK_HEADER_STDBOOL
+
+# dependencies
+PAC_ADD_LIB_PATH(fabric,[rdma/fabric.h],[fi_getinfo],[ofi],[])
+PAC_ADD_LIB_PATH(pmi,[pmi.h],[PMI_Init],[pmi],[])
 
 
 PAC_ADD_ENABLE_MODE([verbose],
@@ -48,5 +60,10 @@ PAC_ADD_ENABLE_MODE([asan],
                     [-g -pg -O0 -fsanitize=address],
                     [-fsanitize=address],
                     [enable address sanitizer, conflicts with --enable-fast])
+
+# add cuda specific treatment
+AC_ARG_VAR([NVCC], [nvcc compiler to use, see --with-cuda])
+PAC_ADD_LIB_PATH(cuda,[cuda.h],[cudaGetDevice],[cuda],[-lcudart])
+
 
 AC_OUTPUT

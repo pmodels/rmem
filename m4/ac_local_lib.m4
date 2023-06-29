@@ -3,13 +3,13 @@ dnl Copyright (C) by Argonne National Laboratory
 dnl  See COPYRIGHT in top-level directory
 dnl 
 dnl ==================================================================================================
-dnl PAC_CHECK_HEADER_LIB(header.h, libname, function, action-if-yes, action-if-no)
+dnl PAC_CHECK_HEADER_LIB(header.h, libname, function, action-if-yes, action-if-no, other libs)
 dnl This macro checks for a header and lib.
 dnl from https://github.com/pmodels/mpich/blob/main/confdb/aclocal_libs.m4
 AC_DEFUN([PAC_CHECK_HEADER_LIB],[
     failure=no
     AC_CHECK_HEADER([$1],,failure=yes)
-    AC_CHECK_LIB($2,$3,,failure=yes)
+    AC_CHECK_LIB($2,$3,,failure=yes,$6)
     if test "$failure" = "no" ; then
     $4
     else
@@ -32,7 +32,7 @@ dnl from https://github.com/pmodels/mpich/blob/main/confdb/aclocal_util.m4
   ])
 
 dnl ==================================================================================================
-dnl PAC_ADD_LIB_PATH(name, header.h, function, abbrv)
+dnl PAC_ADD_LIB_PATH(name, header.h, function, abbrv, additional libs)
 dnl creates the option "--with-abbr" to load a library
 dnl add the include and lib director of lib<name>.
 dnl uses "header.h" to verify the existence of the header files and "function" to test linking to it
@@ -62,7 +62,7 @@ AC_DEFUN([PAC_ADD_LIB_PATH],[
     dnl make sure we can link to the lib now
     PAC_CHECK_HEADER_LIB([$2],[$1],[$3],
         [AC_MSG_NOTICE([successfully linked to <$4/lib$1>]) ],
-        [AC_MSG_ERROR([impossible to link correctly to <$4/lib$1>])])
+        [AC_MSG_ERROR([impossible to link correctly to <$4/lib$1>])], $5)
 ])
 
 dnl ==================================================================================================
@@ -95,7 +95,9 @@ dnl - a description
 AC_DEFUN([PAC_ADD_ENABLE_MODE],[
     AC_ARG_ENABLE([$1],
         [AS_HELP_STRING([--enable-$1],[$4])],
-        [PAC_ADD_FLAGS([$2],[$3])],[])
+        [PAC_ADD_FLAGS([$2],[$3])
+        pac_enable_$1=true],[
+        pac_enable_$1=false])
 ])
 
 dnl ==================================================================================================
