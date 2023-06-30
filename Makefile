@@ -1,6 +1,8 @@
 #***************************************************************************************************
+#
 # Copyright (C) by Argonne National Laboratory
 # 	See COPYRIGHT in top-level directory
+#
 #***************************************************************************************************
 
 #***************************************************************************************************
@@ -18,7 +20,6 @@ include $(ARCH_FILE)
 CC ?= gcc
 CXX ?= g++
 LD ?= gcc
-
 NVCC ?= nvcc
 
 #-----------------------------------------------------------------------------
@@ -56,9 +57,8 @@ LIB += -L$(OFI_LIB) $(OFI_LIBNAME) -Wl,-rpath,$(OFI_LIB)
 ## add the time lib
 INC += -D_POSIX_C_SOURCE=199309L
 INC += -pthread
-INC += -pthread -lm
-# LIB += -lcuda -lcudart -lm
-LIB += -pthread -lcuda -lcudart -lm
+LIB += -pthread -lm
+LIB += -pthread -lm -lcuda -lcudart
 
 
 #-----------------------------------------------------------------------------
@@ -74,7 +74,7 @@ DEP := $(CC_SRC:%.c=$(OBJ_DIR)/%.d)
 
 ################################################################################
 # mandatory flags
-# CCFLAGS ?=
+CCFLAGS ?=
 GENCODE = -gencode=arch=compute_80,code=sm_80
 #-fPIC -DGIT_COMMIT=\"$(GIT_COMMIT)\"   
 
@@ -93,6 +93,7 @@ default:
 # get the full list of flags for CC
 REAL_CC_FLAGS:=$(strip $(OPTS) $(CCFLAGS) $(INC))
 REAL_CU_FLAGS := $(subst $(space),$(comma),$(strip $(REAL_CC_FLAGS)))
+REAL_LD_FLAGS := $(strip $(OPTS) $(LDFLAGS) $(LIB))
 
 $(OBJ_DIR)/%.o : $(SRC_DIR)/%.c
 	$(CC) -std=c11 $(REAL_CC_FLAGS) -MMD -c $< -o $@
@@ -100,7 +101,7 @@ $(OBJ_DIR)/%.o : $(SRC_DIR)/%.c
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cu
 	$(NVCC) $(GENCODE) -Xcompiler $(REAL_CU_FLAGS) -c $< -o $@
 
-	# $(NVCC) $(CUFLAGS) -Xcompiler $(REAL_CU_FLAGS) -dc -c $< -o $@
+# $(NVCC) $(CUFLAGS) -Xcompiler $(REAL_CU_FLAGS) -dc -c $< -o $@
 
 $(OBJ_DIR)/$(TARGET)_dlink.o: $(CU_OBJ)
 	$(NVCC) $(CUFLAGS) -dlink $^ -o $@
@@ -116,7 +117,7 @@ REAL_LD_FLAGS := $(strip $(OPTS) $(LDFLAGS) $(LIB))
 $(TARGET):$(CC_OBJ) $(CU_OBJ)
 	$(CC) $(REAL_LD_FLAGS) $^ -o $@
 
-	# $(NVCC) $(CUFLAGS) -Xlinker $(REAL_LD_FLAGS) $^ -o $@
+# $(NVCC) $(CUFLAGS) -Xlinker $(REAL_LD_FLAGS) $^ -o $@
 
 # $(TARGET): $(CC_OBJ) $(OBJ_DIR)/$(TARGET)_dlink.o
 # 	$(CC) $(OPTS) $(LDFLAGS) $(LIB) $^ -o $@
@@ -124,19 +125,19 @@ $(TARGET):$(CC_OBJ) $(CU_OBJ)
 ################################################################################
 .PHONY: debug
 debug:
-	@OPTS="-O0 -g" $(MAKE) $(TARGET)
+	@OPTS="-O0 -g -fsanitizer" $(MAKE) $(TARGET)
 .PHONY: fast
 fast:
 	@OPTS="-O3 -DNEBUG" $(MAKE) $(TARGET)
 ################################################################################
 clean:
-	@rm -f $(CC_OBJ)
-	@rm -f $(CU_OBJ)
 	@rm -f $(TARGET)_dlink.o
+	@rm -f $(OBJ_DIR)/*.o
+	@rm -f $(TARGET)
 
 reallyclean:
 	$(MAKE) clean
-	@rm -f $(DEP)
+	@rm -f $(OBJ_DIR)/*.d
 	@rm -rf rmem
 
 #-------------------------------------------------------------------------------

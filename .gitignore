@@ -1,6 +1,7 @@
 build
 compile_commands.json
 rmem
+src/.deps
 .dirstamp
 configure.ac~
 *.svg

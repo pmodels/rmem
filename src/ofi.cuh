@@ -6,7 +6,7 @@
 #ifdef HAVE_LIBcuda
 #define M_HAVE_CUDA 1
 #else
-#define M_HAVE_CUDA 0
+#define M_HAVE_CUDA 1
 #endif
 
 

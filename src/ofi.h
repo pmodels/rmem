@@ -16,7 +16,6 @@
 // cuda specific 
 #include "ofi.cuh"
 
-
 //--------------------------------------------------------------------------------------------------
 #define OFI_CQ_FORMAT FI_CQ_FORMAT_CONTEXT
 typedef struct fi_cq_entry ofi_cq_entry;
@@ -207,7 +206,6 @@ typedef struct {
     } ofi;
 } ofi_rma_t;
 
-
 //-------------------------------------------------------------------------------------------------
 // memory exposed to the world - public memory
 typedef struct {
@@ -233,7 +231,6 @@ typedef struct {
         rmem_qmpsc_t qtrigr;
     } ofi;
 } ofi_rmem_t;
-
 
 // init and finalize - ofi_init.c
 int ofi_init(ofi_comm_t* ofi);

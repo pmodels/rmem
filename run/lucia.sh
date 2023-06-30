@@ -28,20 +28,13 @@ echo "--------------------------------------------------"
 #-------------------------------------------------------------------------------
 mkdir -p ${SCRATCH_DIR}
 cd ${SCRATCH_DIR}
-cp -r ${HOME_DIR}/m4 .
 cp -r ${HOME_DIR}/src .
-cp -r ${HOME_DIR}/Makefile.am .
-cp -r ${HOME_DIR}/configure.ac .
-cp -r ${HOME_DIR}/autogen.sh .
+cp -r ${HOME_DIR}/make_arch .
+cp -r ${HOME_DIR}/Makefile .
 
 #-------------------------------------------------------------------------------
-./autogen.sh
-CC=gcc CXX=g++ ./configure --enable-fast \
-    --with-ofi=${DBS_DIR} \
-    --with-pmi=${DBS_DIR} 
-
 make clean
-make -j 8
+make fast
 
 #-------------------------------------------------------------------------------
 FI_PROVIDER="psm3" ${DBS_DIR}/bin/mpiexec -n 2 -ppn 1 -l --bind-to core ./rmem
