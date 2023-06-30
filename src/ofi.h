@@ -47,7 +47,7 @@ typedef struct fi_cq_entry ofi_cq_entry;
 #define m_ofi_tag_get_ctx(tag) ((tag & m_ofi_tag_ctx_mask) >> m_ofi_tag_ctx_shift)
 #define m_ofi_tag_set_ctx(ctx) ((ctx << m_ofi_tag_ctx_shift) & m_ofi_tag_ctx_mask)
 
-inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
+static inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
     uint64_t ofi_tag = ctx_id;
     return ((ofi_tag << m_ofi_tag_ctx_shift) & m_ofi_tag_ctx_mask) | tag;
 }
@@ -220,8 +220,8 @@ int ofi_init(ofi_comm_t* ofi);
 int ofi_finalize(ofi_comm_t* ofi);
 
 // utility function
-inline int ofi_get_rank(ofi_comm_t* ofi) { return ofi->rank; }
-inline int ofi_get_size(ofi_comm_t* ofi) { return ofi->size; }
+static inline int ofi_get_rank(ofi_comm_t* ofi) { return ofi->rank; }
+static inline int ofi_get_size(ofi_comm_t* ofi) { return ofi->size; }
 
 //-------------------------------------------------------------------------------------------------
 // create a point to point communication
