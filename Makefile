@@ -17,14 +17,14 @@ include $(ARCH_FILE)
 #-----------------------------------------------------------------------------
 CC ?= gcc
 CXX ?= g++
-LD ?= $(CC)
+LD ?= gcc
+
+NVCC ?= nvcc
 
 #-----------------------------------------------------------------------------
 TARGET := rmem
 # git commit
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
-# prefix
-PREFIX ?= ./
+# GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
 
 #-----------------------------------------------------------------------------
 BUILDDIR := ./build
@@ -42,6 +42,7 @@ PMI_LIB ?= $(PMI_DIR)/lib
 PMI_LIBNAME ?= -lpmi
 INC += -I$(PMI_INC)
 LIB += -L$(PMI_LIB) $(PMI_LIBNAME) -Wl,-rpath,$(PMI_LIB)
+# LIB += -L$(PMI_LIB) $(PMI_LIBNAME) -rpath=$(PMI_LIB)
 
 #---- OFI
 OFI_DIR ?= /usr
@@ -50,26 +51,37 @@ OFI_LIB ?= $(OFI_DIR)/lib
 OFI_LIBNAME ?= -lfabric
 INC += -I$(OFI_INC)
 LIB += -L$(OFI_LIB) $(OFI_LIBNAME) -Wl,-rpath,$(OFI_LIB)
+# LIB += -L$(OFI_LIB) $(OFI_LIBNAME) -rpath=$(OFI_LIB)
+
+## add the time lib
+INC += -D_POSIX_C_SOURCE=199309L
+INC += -pthread
+INC += -pthread -lm
+# LIB += -lcuda -lcudart -lm
+LIB += -pthread -lcuda -lcudart -lm
 
 
 #-----------------------------------------------------------------------------
 ## add the wanted folders - common folders
 CC_SRC := $(notdir $(wildcard $(SRC_DIR)/*.c))
+CU_SRC := $(notdir $(wildcard $(SRC_DIR)/*.cu))
 CC_HEAD := $(wildcard $(SRC_DIR)/*.h)
 
 ## generate object list
 CC_OBJ := $(CC_SRC:%.c=$(OBJ_DIR)/%.o)
+CU_OBJ := $(CU_SRC:%.cu=$(OBJ_DIR)/%.o)
 DEP := $(CC_SRC:%.c=$(OBJ_DIR)/%.d)
 
 ################################################################################
 # mandatory flags
-CCFLAGS = -std=c11
+# CCFLAGS ?=
+GENCODE = -gencode=arch=compute_80,code=sm_80
 #-fPIC -DGIT_COMMIT=\"$(GIT_COMMIT)\"   
 
-################################################################################
-$(OBJ_DIR)/%.o : $(SRC_DIR)/%.c $(CC_HEAD) 
-	$(CC) $(OPTS) $(CCFLAGS) $(INC) -MMD -c $< -o $@
-
+# shenanigans
+comma:= ,
+empty:=
+space:= $(empty) $(empty)
 
 ################################################################################
 .PHONY: default
@@ -77,22 +89,54 @@ default:
 	@$(MAKE) info 
 	@$(MAKE) $(TARGET)
 
-$(TARGET):$(CC_OBJ)
-	$(CC) $(OPTS) $(LDFLAGS) $(LIB) $^ -o $@
+################################################################################
+# get the full list of flags for CC
+REAL_CC_FLAGS:=$(strip $(OPTS) $(CCFLAGS) $(INC))
+REAL_CU_FLAGS := $(subst $(space),$(comma),$(strip $(REAL_CC_FLAGS)))
+
+$(OBJ_DIR)/%.o : $(SRC_DIR)/%.c
+	$(CC) -std=c11 $(REAL_CC_FLAGS) -MMD -c $< -o $@
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cu
+	$(NVCC) $(GENCODE) -Xcompiler $(REAL_CU_FLAGS) -c $< -o $@
+
+	# $(NVCC) $(CUFLAGS) -Xcompiler $(REAL_CU_FLAGS) -dc -c $< -o $@
+
+$(OBJ_DIR)/$(TARGET)_dlink.o: $(CU_OBJ)
+	$(NVCC) $(CUFLAGS) -dlink $^ -o $@
+
+################################################################################
+.PHONY: default
+default: 
+	@$(MAKE) info 
+	@$(MAKE) $(TARGET)
+
+# REAL_LD_FLAGS := $(subst $(space),$(comma),$(strip $(OPTS) $(LDFLAGS) $(LIB)))
+REAL_LD_FLAGS := $(strip $(OPTS) $(LDFLAGS) $(LIB))
+$(TARGET):$(CC_OBJ) $(CU_OBJ)
+	$(CC) $(REAL_LD_FLAGS) $^ -o $@
+
+	# $(NVCC) $(CUFLAGS) -Xlinker $(REAL_LD_FLAGS) $^ -o $@
+
+# $(TARGET): $(CC_OBJ) $(OBJ_DIR)/$(TARGET)_dlink.o
+# 	$(CC) $(OPTS) $(LDFLAGS) $(LIB) $^ -o $@
 
 ################################################################################
 .PHONY: debug
 debug:
-	@OPTS="-O0 -pg -g -fsanitize=address" $(MAKE) default
+	@OPTS="-O0 -g" $(MAKE) $(TARGET)
 .PHONY: fast
 fast:
-	@OPTS="-O3 -DNEBUG" $(MAKE) default
+	@OPTS="-O3 -DNEBUG" $(MAKE) $(TARGET)
 ################################################################################
 clean:
 	@rm -f $(CC_OBJ)
+	@rm -f $(CU_OBJ)
+	@rm -f $(TARGET)_dlink.o
 
-destroy:
+reallyclean:
 	$(MAKE) clean
+	@rm -f $(DEP)
 	@rm -rf rmem
 
 #-------------------------------------------------------------------------------
@@ -100,7 +144,7 @@ destroy:
 .EXPORT_ALL_VARIABLES:
 .PHONY: info
 info: 
-	@$(MAKE) --file=info.mak
+	@$(MAKE) --file=make_arch/info.mak
 #-------------------------------------------------------------------------------
 
 -include $(DEP)

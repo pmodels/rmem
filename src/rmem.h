@@ -35,7 +35,7 @@ typedef struct {
 //--------------------------------------------------------------------------------------------------
 // Multiple Producers, Single Consumer queue
 typedef struct {
-    volatile int* ready;
+    volatile int ready;
     atomic_ptr_t next;
 } rmem_qnode_t;  // node
 typedef struct {

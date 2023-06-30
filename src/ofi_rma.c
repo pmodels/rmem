@@ -380,13 +380,35 @@ static int ofi_rma_enqueue(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, of
         } break;
     }
 
-#if (M_HAVE_CUDA)
     //---------------------------------------------------------------------------------------------
+    int device_count;
+    m_cuda_call(cudaGetDeviceCount(&device_count));
+    m_log("I have %d devices", device_count);
+    m_cuda_call(cudaSetDevice(0));
+    m_log("malloc of size %zu",sizeof(ofi_drma_t));
+    PMI_Barrier();
+    size_t free, ttl;
+    m_cuda_call(cudaMemGetInfo(&free,&ttl));
+    m_log("free mem = %zu, ttl mem = %zu",free,ttl);
+
+#if (M_HAVE_CUDA)
+    int device;
+    struct cudaDeviceProp device_prop;
+    m_cuda_call(cudaGetDevice(&device));
+    m_cuda_call(cudaGetDeviceProperties(&device_prop,device));
+    m_assert(device_prop.canMapHostMemory,"device cannot map host memory");
+    // m_assert(device_prop.canUseHostPointerForRegisteredMem,"device cannot use host registered memory");
     // GPU request
-    cudaMalloc((void**)d_rma, sizeof(ofi_drma_t));
+    m_cuda_call(cudaMalloc((void**)d_rma, sizeof(ofi_drma_t)));
     // fix the host memory page and share it to the device
-    cudaHostAlloc((void**)&rma->ofi.qnode.ready, sizeof(int), cudaHostAllocMapped);
-    cudaHostGetDevicePointer((void**)&(*d_rma)->ready, (void*)rma->ofi.qnode.ready, 0);
+    // cudaHostAlloc((void**)&rma->ofi.qnode.ready, sizeof(int), cudaHostAllocMapped);
+    m_cuda_call(
+        cudaHostRegister((void*)&rma->ofi.qnode.ready, sizeof(int), cudaHostRegisterMapped));
+    m_cuda_call(
+        cudaHostGetDevicePointer((void**)&(*d_rma)->ready, (void*)&rma->ofi.qnode.ready, 0));
+    m_log("cuda device ptr for %p = %p", &rma->ofi.qnode.ready, (*d_rma)->ready);
+#else
+    (*d_rma)->ready = &rma->ofi.qnode.ready;
 #endif
 
     //----------------------------------------------------------------------------------------------
@@ -422,7 +444,8 @@ int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, o
 // }
 
 int ofi_rma_free(ofi_rma_t* rma, ofi_drma_t* drma) {
-    cudaFreeHost((void*)rma->ofi.qnode.ready);
+    // cudaFreeHost((void*)rma->ofi.qnode.ready);
+    cudaHostUnregister((void*)&rma->ofi.qnode.ready);
     cudaFree((void*)drma);
     return m_success;
 }
