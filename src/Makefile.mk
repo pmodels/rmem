@@ -11,7 +11,8 @@ rmem_SOURCES += src/main.c \
 				src/ofi_utils.c \
 				src/ofi_thread.c \
 				src/pmi_utils.c \
-				src/rmem_utils.c
+				src/rmem_utils.c \
+				src/dofi_rma.cu
 
 
 # if willing to install some headers, use

@@ -3,7 +3,6 @@
  *	See COPYRIGHT in top-level directory
  */
 #include "ofi.h"
-#include "rmem_utils.h"
 #include <inttypes.h>
 #include <stdint.h>
 

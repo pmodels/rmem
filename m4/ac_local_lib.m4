@@ -66,24 +66,27 @@ AC_DEFUN([PAC_ADD_LIB_PATH],[
 ])
 
 dnl ==================================================================================================
-dnl add $1 to CPPFLAGS and $2 to LDFLAGS + attempt to compile an empty program with it
+dnl add $1 to CFLAGS, $2 to CPPFLAGS and $3 to LDFLAGS + attempt to compile an empty program with it
 AC_DEFUN([PAC_ADD_FLAGS],[
-    AC_MSG_NOTICE([trying to add cc flag <$1> and ld flag <$2>])
+    AC_MSG_NOTICE([trying to add cc flag <$1>, cpp flag <$2>, and ld flag <$3>])
     failure=no
     for flag in $1; do
-        PAC_APPEND_FLAG([$1],[CPPFLAGS])
+        PAC_APPEND_FLAG([$1],[CFLAGS])
     done
     for flag in $2; do
-        PAC_APPEND_FLAG([$2],[LDFLAGS])
+        PAC_APPEND_FLAG([$2],[CPPFLAGS])
+    done
+    for flag in $3; do
+        PAC_APPEND_FLAG([$3],[LDFLAGS])
     done
 
     dnl try to link a stupid program with it
     AC_LINK_IFELSE([AC_LANG_SOURCE([int main() { return 0; }])],,failure=yes)
 
     if test "$failure" = "yes"; then
-        AC_MSG_ERROR([impossible to compile with cc flag <$1> and ld flags <$2>])
+        AC_MSG_ERROR([impossible to compile with cc flag <$1>, cpp flag <$2>, and ld flags <$3>])
     else
-        AC_MSG_NOTICE([successfully compiled with cc flag <$1> and ld flag <$2>])
+        AC_MSG_NOTICE([successfully compiled with cc flag <$1>, cpp flag <$2>, and ld flag <$2>])
     fi
 ])
 
@@ -95,7 +98,7 @@ dnl - a description
 AC_DEFUN([PAC_ADD_ENABLE_MODE],[
     AC_ARG_ENABLE([$1],
         [AS_HELP_STRING([--enable-$1],[$4])],
-        [PAC_ADD_FLAGS([$2],[$3])
+        [PAC_ADD_FLAGS([],[$2],[$3])
         pac_enable_$1=true],[
         pac_enable_$1=false])
 ])
@@ -103,7 +106,10 @@ AC_DEFUN([PAC_ADD_ENABLE_MODE],[
 dnl ==================================================================================================
 dnl add a list of CPPLFAGS
 AC_DEFUN([PAC_ADD_CPPFLAGS],[
-    PAC_ADD_FLAGS([$1],[ ])
+    PAC_ADD_FLAGS([],[$1],[ ])
+])
+AC_DEFUN([PAC_ADD_CFLAGS],[
+    PAC_ADD_FLAGS([$1],[],[ ])
 ])
 
 

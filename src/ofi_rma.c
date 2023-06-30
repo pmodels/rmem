@@ -2,6 +2,8 @@
  * Copyright (C) by Argonne National Laboratory
  *	See COPYRIGHT in top-level directory
  */
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -13,7 +15,6 @@
 #include "rdma/fi_domain.h"
 #include "rdma/fi_endpoint.h"
 #include "rdma/fi_rma.h"
-#include "rmem_utils.h"
 
 #define m_get_rx(i, mem) (i % mem->ofi.n_rx)
 
@@ -240,6 +241,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         pthread_create(&mem->ofi.progress, &pthread_attr, &ofi_tthread_main, &mem->ofi.qtrigr));
     m_pthread_call(pthread_attr_destroy(&pthread_attr));
     m_log("pthread created");
+
     //---------------------------------------------------------------------------------------------
     return m_success;
 }
@@ -292,7 +294,7 @@ typedef enum {
 } rma_opt_t;
 
 static int ofi_rma_enqueue(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_comm_t* comm,
-                           rma_opt_t op) {
+                           rma_opt_t op, ofi_drma_t** d_rma) {
     m_assert(ctx_id < comm->n_ctx, "ctx id = %d < the number of ctx = %d", ctx_id, comm->n_ctx);
     //----------------------------------------------------------------------------------------------
     // endpoint and address
@@ -377,6 +379,16 @@ static int ofi_rma_enqueue(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, of
             m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 2);
         } break;
     }
+
+#if (M_HAVE_CUDA)
+    //---------------------------------------------------------------------------------------------
+    // GPU request
+    cudaMalloc((void**)d_rma, sizeof(ofi_drma_t));
+    // fix the host memory page and share it to the device
+    cudaHostAlloc((void**)&rma->ofi.qnode.ready, sizeof(int), cudaHostAllocMapped);
+    cudaHostGetDevicePointer((void**)&(*d_rma)->ready, (void*)rma->ofi.qnode.ready, 0);
+#endif
+
     //----------------------------------------------------------------------------------------------
     // queue the work
     rma->ofi.qnode.ready = 0;
@@ -385,22 +397,35 @@ static int ofi_rma_enqueue(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, of
     m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
     return m_success;
 }
-int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT);
+int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,
+                    ofi_drma_t** d_rma) {
+    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT,d_rma);
 }
-int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
+int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,
+                     ofi_drma_t** d_rma) {
+    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_RPUT,d_rma);
 }
-int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
+int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,
+                           ofi_drma_t** d_rma) {
+    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG,d_rma);
 }
 
-int ofi_rma_start(ofi_rma_t* rma) {
-    rma->ofi.qnode.ready ++;
+// static void hofi_rma_start(ofi_drma_t* rma) { rma->ofi.qnode.ready++; }
+//
+// int ofi_rma_start(ofi_drma_t* rma) {
+// #if (M_HAVE_CUDA)
+//     dofi_rma_start<<<1, 1>>>(ofi_drma_t * rma);
+// #else
+//     hofi_rma_start(rma);
+// #endif
+//     return m_success;
+// }
+
+int ofi_rma_free(ofi_rma_t* rma, ofi_drma_t* drma) {
+    cudaFreeHost((void*)rma->ofi.qnode.ready);
+    cudaFree((void*)drma);
     return m_success;
 }
-
-int ofi_rma_free(ofi_rma_t* rma) { return m_success; }
 
 // notify the processes in comm of memory exposure epoch
 int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {

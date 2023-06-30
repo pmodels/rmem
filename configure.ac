@@ -27,10 +27,11 @@ AC_PREFIX_DEFAULT(.)
 # configure automake
 AM_INIT_AUTOMAKE([foreign -Wall -Werror subdir-objects])
 AM_SILENT_RULES([yes])
-PAC_ADD_CPPFLAGS([-g -Wall -std=c11])
+PAC_ADD_CFLAGS([-std=c11])
+PAC_ADD_CPPFLAGS([-g -Wall])
 PAC_ADD_CPPFLAGS([-Wno-deprecated-declarations])
-PAC_ADD_FLAGS([-pthread],[-pthread])
-PAC_ADD_FLAGS([-lm],[-lm])
+PAC_ADD_FLAGS([-pthread],[],[-pthread])
+PAC_ADD_FLAGS([-lm],[],[-lm])
 # requirement functions
 AC_C_INLINE
 AC_FUNC_MALLOC
@@ -42,6 +43,7 @@ AC_TYPE_UINT64_T
 AC_CHECK_FUNCS([clock_gettime memset mkdir pow sqrt])
 AC_CHECK_HEADERS([limits.h stddef.h])
 AC_CHECK_HEADER_STDBOOL
+AC_CHECK_TYPES([atomic_int], [], [], [[#include <stdatomic.h>]])
 
 # dependencies
 PAC_ADD_LIB_PATH(fabric,[rdma/fabric.h],[fi_getinfo],[ofi],[])
@@ -63,7 +65,8 @@ PAC_ADD_ENABLE_MODE([asan],
 
 # add cuda specific treatment
 AC_ARG_VAR([NVCC], [nvcc compiler to use, see --with-cuda])
-PAC_ADD_LIB_PATH(cuda,[cuda.h],[cudaGetDevice],[cuda],[-lcudart])
+AC_SUBST([NVCC],[nvcc])
+PAC_ADD_LIB_PATH(cudart,[cuda.h],[cudaGetDevice],[cuda],[])
 
 
 AC_OUTPUT

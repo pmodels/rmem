@@ -9,7 +9,6 @@
 #include "pmi_utils.h"
 #include "rdma/fabric.h"
 #include "rdma/fi_domain.h"
-#include "rmem_utils.h"
 
 
 // create a communication context

@@ -2,7 +2,7 @@
  * Copyright (C) by Argonne National Laboratory
  *	See COPYRIGHT in top-level directory
  */
-#include "rmem_utils.h"
+#include "rmem.h"
 
 #include <execinfo.h>
 #include <stdio.h>

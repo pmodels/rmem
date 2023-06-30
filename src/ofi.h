@@ -12,7 +12,10 @@
 #include <rdma/fi_tagged.h>
 
 #include "rdma/fi_atomic.h"
-#include "rmem_utils.h"
+#include "rmem.h"
+// cuda specific 
+#include "ofi.cuh"
+
 
 //--------------------------------------------------------------------------------------------------
 #define OFI_CQ_FORMAT FI_CQ_FORMAT_CONTEXT
@@ -159,6 +162,7 @@ typedef struct {
     fi_addr_t* addr;         // address list
 } ofi_rma_trx_t;
 
+
 typedef struct {
     // signal counter
     uint32_t inc; // increment value, always 1
@@ -202,6 +206,7 @@ typedef struct {
         struct fid_ep* ep;
     } ofi;
 } ofi_rma_t;
+
 
 //-------------------------------------------------------------------------------------------------
 // memory exposed to the world - public memory
@@ -267,11 +272,11 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
 int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 
 // operation management
-int ofi_rma_start(ofi_rma_t* rma);
-int ofi_rma_free(ofi_rma_t* rma);
+int ofi_rma_start(ofi_drma_t* d_rma);
+int ofi_rma_free(ofi_rma_t* rma, ofi_drma_t* d_rma);
 
-int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
-int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
-int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
+int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,ofi_drma_t** d_rma);
+int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,ofi_drma_t** d_rma);
+int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,ofi_drma_t** d_rma);
 
 #endif

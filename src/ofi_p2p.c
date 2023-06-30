@@ -3,6 +3,7 @@
  *	See COPYRIGHT in top-level directory
  */
 #include "ofi.h"
+#include <pmi.h>
 #include "rmem_utils.h"
 
 int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* ofi) {
