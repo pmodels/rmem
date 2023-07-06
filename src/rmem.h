@@ -20,18 +20,16 @@ typedef struct {
 typedef struct {
     atomic_intptr_t ptr;
 } atomic_ptr_t;
-#define m_atomicptr_init(a)        atomic_init(&(a)->ptr, 0)
-#define m_atomicptr_load(a)        atomic_load_explicit(&(a)->ptr, m_default_mem_model)
-#define m_atomicptr_copy(a, p)     atomic_store_explicit(&(a)->ptr, (p)->ptr, m_default_mem_model)
-#define m_atomicptr_store(a, p)    atomic_store_explicit(&(a)->ptr, p, m_default_mem_model)
-#define m_atomicptr_exchange(a, p) atomic_exchange_explicit(&(a)->ptr, p, m_default_mem_model)
+#define m_atomicptr_init(a)     atomic_init(&(a)->ptr, 0)
+#define m_atomicptr_load(a)     atomic_load_explicit(&(a)->ptr, m_default_mem_model)
+#define m_atomicptr_copy(a, p)  atomic_store_explicit(&(a)->ptr, (p)->ptr, m_default_mem_model)
+#define m_atomicptr_swap(a, p)  atomic_exchange_explicit(&(a)->ptr, p, m_default_mem_model)
+#define m_atomicptr_store(a, p) atomic_store_explicit(&(a)->ptr, p, m_default_mem_model)
 
-#define m_atomicptr_compare_exchange(a, e, p)                                     \
+#define m_atomicptr_cas(a, e, p)                                     \
     atomic_compare_exchange_strong_explicit(&(a)->ptr, e, p, m_default_mem_model, \
                                             m_default_mem_model)
-#define m_atomicptr_compare_copy(a, e, p)                                                \
-    atomic_compare_exchange_strong_explicit(&(a)->ptr, e, (p)->ptr, m_default_mem_model, \
-                                            m_default_mem_model)
+// #define m_atomicptr_cas_copy(a, e, p) m_atomicptr_cas(&(a)->ptr, e, (p)->ptr)
 //--------------------------------------------------------------------------------------------------
 // Multiple Producers, Single Consumer queue
 typedef struct {
