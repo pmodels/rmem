@@ -3,7 +3,8 @@
 
 .PHONY: info
 info: logo
-	$(info compiler: $(shell $(CC) --version))
+	$(info compiler: $(CC) $(shell $(CC) -dumpversion))
+	$(info linker: $(LD))
 	$(info cc flags: $(CCFLAGS))
 	$(info opts    : $(OPTS))
 	$(info ld flags: $(LDFLAGS))
