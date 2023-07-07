@@ -16,7 +16,7 @@
 #include "rmem_profile.h"
 
 //#define msg_size 1024
-#define n_msg 1
+#define n_msg 2
 #define max_size (1<<18)
 #define n_measure 10
 #define n_warmup 5
@@ -114,7 +114,6 @@ int main(int argc, char** argv) {
             //--------------------------------------------------------------------------------------
             // PUT
             ofi_rma_t* put = calloc(n_msg, sizeof(ofi_rma_t));
-            ofi_drma_t* dput = calloc(n_msg, sizeof(ofi_drma_t));
             for (int i = 0; i < n_msg; ++i) {
                 put[i] = (ofi_rma_t){
                     .buf = src + i * msg_size,
@@ -122,19 +121,18 @@ int main(int argc, char** argv) {
                     .disp = i * msg_size * sizeof(int),
                     .peer = peer,
                 };
-                // ofi_rma_init(put + i, &pmem, &comm);
+                ofi_rma_put_init(put + i, &pmem, 0, &comm);
             }
             retry = 1;
             while (retry) {
                 for (int it = -n_warmup; it < n_measure; ++it) {
                     for (int j = 0; j < n_msg; ++j) {
-                        ofi_drma_t* c_dput = dput + j;
-                        ofi_put_enqueue(put + j, &pmem, 0, &comm, &(c_dput));
+                        ofi_rma_enqueue(&pmem, put + j);
                     }
                     PMI_Barrier();  // start exposure
                     ofi_rmem_start(1, &peer, &pmem, &comm);
                     for (int j = 0; j < n_msg; ++j) {
-                        ofi_rma_start(dput + j);
+                        ofi_rma_start(put+j);
                     }
                     ofi_rmem_complete(1, &peer, &pmem, &comm);
                 }
@@ -142,14 +140,12 @@ int main(int argc, char** argv) {
                 ofi_p2p_wait(&p2p_retry);
             }
             for (int i = 0; i < n_msg; ++i) {
-                ofi_rma_free(put + i, dput + i);
+                ofi_rma_free(put + i);
             }
             free(put);
-            free(dput);
             //--------------------------------------------------------------------------------------
             // PUT + SIGNAL
             ofi_rma_t* psig = calloc(n_msg, sizeof(ofi_rma_t));
-            ofi_drma_t* dpsig = calloc(n_msg, sizeof(ofi_drma_t));
             for (int i = 0; i < n_msg; ++i) {
                 psig[i] = (ofi_rma_t){
                     .buf = src + i * msg_size,
@@ -157,18 +153,18 @@ int main(int argc, char** argv) {
                     .disp = i * msg_size * sizeof(int),
                     .peer = peer,
                 };
+                ofi_rma_put_signal_init(psig + i, &pmem, 0, &comm);
             }
             retry = 1;
             while (retry) {
                 for (int it = -n_warmup; it < n_measure; ++it) {
                     for (int j = 0; j < n_msg; ++j) {
-                        ofi_drma_t* c_dpsig = dpsig + j;
-                        ofi_put_signal_enqueue(psig + j, &pmem, 0, &comm,&c_dpsig);
+                        ofi_rma_enqueue(&pmem, psig + j);
                     }
                     PMI_Barrier();  // start exposure
                     ofi_rmem_start(1, &peer, &pmem, &comm);
                     for (int j = 0; j < n_msg; ++j) {
-                        ofi_rma_start(dpsig + j);
+                        ofi_rma_start(psig + j);
                     }
                     ofi_rmem_complete(1, &peer, &pmem, &comm);
                 }
@@ -176,10 +172,9 @@ int main(int argc, char** argv) {
                 ofi_p2p_wait(&p2p_retry);
             }
             for (int i = 0; i < n_msg; ++i) {
-                ofi_rma_free(psig + i,dpsig + i);
+                ofi_rma_free(psig + i);
             }
             free(psig);
-            free(dpsig);
             //--------------------------------------------------------------------------------------
             // RPUT
             // rmem_rma_t rput = {

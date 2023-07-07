@@ -2,8 +2,6 @@
  * Copyright (C) by Argonne National Laboratory
  *	See COPYRIGHT in top-level directory
  */
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -15,6 +13,10 @@
 #include "rdma/fi_domain.h"
 #include "rdma/fi_endpoint.h"
 #include "rdma/fi_rma.h"
+#if (M_HAVE_CUDA)
+#include <cuda.h>
+#include <cuda_runtime.h>
+#endif
 
 #define m_get_rx(i, mem) (i % mem->ofi.n_rx)
 
@@ -240,7 +242,18 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_pthread_call(
         pthread_create(&mem->ofi.progress, &pthread_attr, &ofi_tthread_main, &mem->ofi.qtrigr));
     m_pthread_call(pthread_attr_destroy(&pthread_attr));
-    m_log("pthread created");
+    //---------------------------------------------------------------------------------------------
+    // GPU 
+    // int device_count;
+    // m_cuda_call(cudaGetDeviceCount(&device_count));
+    // m_log("I have %d devices", device_count);
+    // m_cuda_call(cudaSetDevice(0));
+    // m_log("malloc of size %zu",sizeof(ofi_drma_t));
+    // PMI_Barrier();
+    // size_t free, ttl;
+    // m_cuda_call(cudaMemGetInfo(&free,&ttl));
+    // m_log("free mem = %zu, ttl mem = %zu",free,ttl);
+
 
     //---------------------------------------------------------------------------------------------
     return m_success;
@@ -293,8 +306,8 @@ typedef enum {
     RMA_OPT_PUT_SIG,
 } rma_opt_t;
 
-static int ofi_rma_enqueue(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_comm_t* comm,
-                           rma_opt_t op, ofi_drma_t** d_rma) {
+static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_comm_t* comm,
+                           rma_opt_t op) {
     m_assert(ctx_id < comm->n_ctx, "ctx id = %d < the number of ctx = %d", ctx_id, comm->n_ctx);
     //----------------------------------------------------------------------------------------------
     // endpoint and address
@@ -365,71 +378,60 @@ static int ofi_rma_enqueue(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, of
         rma->ofi.sig.iov = (struct fi_ioc){0};
         rma->ofi.sig.riov = (struct fi_rma_ioc){0};
     }
-
-    //----------------------------------------------------------------------------------------------
-    // add the call count
-    switch (op) {
-        case (RMA_OPT_PUT): {
-            m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
-        } break;
-        case (RMA_OPT_RPUT): {
-            m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
-        } break;
-        case (RMA_OPT_PUT_SIG): {
-            m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 2);
-        } break;
-    }
+    m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
 
     //---------------------------------------------------------------------------------------------
-    int device_count;
-    m_cuda_call(cudaGetDeviceCount(&device_count));
-    m_log("I have %d devices", device_count);
-    m_cuda_call(cudaSetDevice(0));
-    m_log("malloc of size %zu",sizeof(ofi_drma_t));
-    PMI_Barrier();
-    size_t free, ttl;
-    m_cuda_call(cudaMemGetInfo(&free,&ttl));
-    m_log("free mem = %zu, ttl mem = %zu",free,ttl);
-
 #if (M_HAVE_CUDA)
+    int attr;
     int device;
     struct cudaDeviceProp device_prop;
     m_cuda_call(cudaGetDevice(&device));
-    m_cuda_call(cudaGetDeviceProperties(&device_prop,device));
-    m_assert(device_prop.canMapHostMemory,"device cannot map host memory");
-    // m_assert(device_prop.canUseHostPointerForRegisteredMem,"device cannot use host registered memory");
-    // GPU request
-    m_cuda_call(cudaMalloc((void**)d_rma, sizeof(ofi_drma_t)));
-    // fix the host memory page and share it to the device
-    // cudaHostAlloc((void**)&rma->ofi.qnode.ready, sizeof(int), cudaHostAllocMapped);
-    m_cuda_call(
-        cudaHostRegister((void*)&rma->ofi.qnode.ready, sizeof(int), cudaHostRegisterMapped));
-    m_cuda_call(
-        cudaHostGetDevicePointer((void**)&(*d_rma)->ready, (void*)&rma->ofi.qnode.ready, 0));
-    m_log("cuda device ptr for %p = %p", &rma->ofi.qnode.ready, (*d_rma)->ready);
-#else
-    (*d_rma)->ready = &rma->ofi.qnode.ready;
-#endif
+    m_cuda_call(cudaGetDeviceProperties(&device_prop, device));
+    m_assert(device_prop.canMapHostMemory, "device cannot map host memory");
+    // m_assert(device_prop.canUseHostPointerForRegisteredMem,"device cannot use host registered
+    // memory");
 
-    //----------------------------------------------------------------------------------------------
-    // queue the work
-    rma->ofi.qnode.ready = 0;
-    rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
-    //----------------------------------------------------------------------------------------------
-    m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
+    // GPU request - allocated to the GPU
+    int* d_ready_ptr;
+    volatile int* h_ready_ptr = &rma->ofi.qnode.ready;
+    m_cuda_call(cudaMalloc((void**)&rma->ofi.drma, sizeof(struct ofi_device_rma_t)));
+    m_cuda_call(cudaHostRegister((void*)h_ready_ptr, sizeof(int), cudaHostRegisterMapped));
+    m_cuda_call(cudaHostGetDevicePointer((void**)&d_ready_ptr, (void*)h_ready_ptr, 0));
+    m_cuda_call(cudaMemcpy((void*)&rma->ofi.drma->ready, (void*)&d_ready_ptr, sizeof(int*),
+                           cudaMemcpyHostToDevice));
+#endif
     return m_success;
 }
-int ofi_put_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,
-                    ofi_drma_t** d_rma) {
-    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT,d_rma);
+int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT);
 }
-int ofi_rput_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,
-                     ofi_drma_t** d_rma) {
-    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_RPUT,d_rma);
+int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
 }
-int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm,
-                           ofi_drma_t** d_rma) {
-    return ofi_rma_enqueue(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG,d_rma);
+int ofi_rma_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
+    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
+}
+
+int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma) {
+    m_log("queueing the thread");
+    rma->ofi.qnode.ready = 0;
+    m_log("queueing the thread, ready value = %d",rma->ofi.qnode.ready);
+    rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
+
+    //----------------------------------------------------------------------------------------------
+    // increment the counter
+    int increment = (rma->ofi.sig.flags) ? 2 : 1;
+    m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], increment);
+    //----------------------------------------------------------------------------------------------
+    return m_success;
+}
+int ofi_rma_start(ofi_rma_t* rma) {
+#if (M_HAVE_CUDA)
+    ofi_rma_start_device(rma->ofi.drma);
+#else
+    rma->ofi.qnode.ready++;
+#endif
+    return m_success;
 }
 
 // static void hofi_rma_start(ofi_drma_t* rma) { rma->ofi.qnode.ready++; }
@@ -443,10 +445,12 @@ int ofi_put_signal_enqueue(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, o
 //     return m_success;
 // }
 
-int ofi_rma_free(ofi_rma_t* rma, ofi_drma_t* drma) {
-    // cudaFreeHost((void*)rma->ofi.qnode.ready);
-    cudaHostUnregister((void*)&rma->ofi.qnode.ready);
-    cudaFree((void*)drma);
+int ofi_rma_free(ofi_rma_t* rma) {
+#if (M_HAVE_CUDA)
+    m_cuda_call(cudaDeviceSynchronize());
+    m_cuda_call(cudaHostUnregister((void*)&rma->ofi.qnode.ready));
+    m_cuda_call(cudaFree((void*)rma->ofi.drma));
+#endif
     return m_success;
 }
 
