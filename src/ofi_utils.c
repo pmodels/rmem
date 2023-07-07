@@ -67,7 +67,12 @@ int ofi_prov_score(char* provname) {
 
 #define ofi_cap_mode     FI_MSG | FI_TAGGED | FI_RMA
 #define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND
-#define ofi_cap_ops_rx   FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_RMA_EVENT | FI_DIRECTED_RECV
+#if (M_HAVE_RMA_EVENT)
+#define ofi_cap_ops_rx FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_RMA_EVENT | FI_DIRECTED_RECV
+#else
+#define ofi_cap_ops_rx \
+    FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_REMOTE_CQ_DATA | FI_DIRECTED_RECV
+#endif
 
 int ofi_util_get_prov(struct fi_info** prov) {
     // get the list of available providers and select the best one
@@ -99,22 +104,28 @@ int ofi_util_get_prov(struct fi_info** prov) {
 
     // hint and best_prov bothe evolve as we add capabilities. "hints" is used to test the
     // capability, while best_prov stores them if they match a provider set the minimal requirements
-    m_ofi_fatal_info(hints, caps, FI_RMA | FI_RMA_EVENT);  // implies (REMOTE_)READ/WRITE
+    m_ofi_fatal_info(hints, domain_attr->mr_mode, FI_MR_PROV_KEY);
+    m_ofi_fatal_info(hints, caps, FI_RMA);  // implies (REMOTE_)READ/WRITE
+#if (M_HAVE_RMA_EVENT)
+    m_ofi_fatal_info(hints, caps, FI_RMA_EVENT);
+#endif
     m_ofi_fatal_info(hints, caps, FI_ATOMIC);              // implies (REMOTE_)READ/WRITE
     m_ofi_fatal_info(hints, caps, FI_MSG | FI_TAGGED | FI_DIRECTED_RECV);  // implies SEND/RECV
 
     // try to get more specific behavior
     m_ofi_test_info(hints, ep_attr->type, FI_EP_RDM);
-    m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
-    m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
+    // m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
+    // m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
+    // m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
+    // m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
     m_ofi_test_info(hints, tx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, tx_attr->comp_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->comp_order, FI_ORDER_NONE);
 
     // get_info is free to waive those requirements, but they are supported
-    m_ofi_fatal_info(hints, domain_attr->mr_mode, FI_MR_RMA_EVENT);
+    m_ofi_test_info(hints, domain_attr->mr_mode, FI_MR_RMA_EVENT);
 
     // check the mode arguments now
     m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, hints, prov));

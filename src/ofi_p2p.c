@@ -7,8 +7,6 @@
 
 int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* ofi) {
     p2p->ofi.cq.kind = m_ofi_cq_kind_rqst;
-    // register the flag
-    p2p->ofi.cq.rqst.flag = &p2p->ofi.completed;
     // init the data stuctures
     p2p->ofi.iov = (struct iovec){
         .iov_base = p2p->buf,
@@ -33,10 +31,11 @@ typedef enum {
 int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2p_opt_t op) {
     m_assert(ctx_id < comm->n_ctx, "ctx id = %d < the number of ctx = %d", ctx_id, comm->n_ctx);
     ofi_ctx_t* ctx = comm->ctx + ctx_id;
-
-    // set the completion param
-    p2p->ofi.cq.cq = ctx->p2p_cq;
-    m_countr_store(p2p->ofi.cq.rqst.flag, 0);
+    // set the progress param
+    p2p->ofi.progress.cq = ctx->p2p_cq;
+    p2p->ofi.progress.fallback_ctx = NULL;
+    // busy counter
+    m_countr_store(&p2p->ofi.cq.rqst.busy, 1);
     // address and tag depends on the communicator context
     p2p->ofi.msg.tag = ofi_set_tag(ctx_id, p2p->tag);
     p2p->ofi.msg.addr = ctx->p2p_addr[p2p->peer];
@@ -53,7 +52,7 @@ int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2
                 m_ofi_call(fi_tinject(ctx->p2p_ep, p2p->buf, p2p->count, ctx->p2p_addr[p2p->peer],
                                       p2p->ofi.msg.tag));
                 // need to complete the request as no CQ entry will happen
-                m_countr_fetch_add(p2p->ofi.cq.rqst.flag, 1);
+                m_countr_fetch_add(&p2p->ofi.cq.rqst.busy, -1);
             } else {
                 m_ofi_call(fi_tsendmsg(ctx->p2p_ep, &p2p->ofi.msg, flag));
                 // m_ofi_call(fi_tsend(ctx->p2p_ep, p2p->buf, p2p->count, NULL,

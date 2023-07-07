@@ -16,9 +16,17 @@
 #include "rdma/fi_atomic.h"
 #include "rmem.h"
 
-//--------------------------------------------------------------------------------------------------
-#define OFI_CQ_FORMAT             FI_CQ_FORMAT_CONTEXT
+#ifdef HAVE_RMA_EVENT
+#define M_HAVE_RMA_EVENT 1
+#define OFI_CQ_FORMAT    FI_CQ_FORMAT_CONTEXT
 typedef struct fi_cq_entry ofi_cq_entry;
+#else
+#define M_HAVE_RMA_EVENT 0
+#define OFI_CQ_FORMAT    FI_CQ_FORMAT_DATA
+typedef struct fi_cq_data_entry ofi_cq_entry;
+#endif
+
+//--------------------------------------------------------------------------------------------------
 
 //--------------------------------------------------------------------------------------------------
 #ifndef NDEBUG
@@ -38,38 +46,54 @@ typedef struct fi_cq_entry ofi_cq_entry;
 // TAGGED SEND-RECV
 #define m_ofi_tag_tot    48  // total number of bits in the tag
 #define m_ofi_tag_ctx    7   // number of bits to encode the comm context id
-#define m_ofi_tag_intern 5
-#define m_ofi_tag_avail  (m_ofi_tag_tot - m_ofi_tag_ctx - m_ofi_tag_intern)
+#define m_ofi_tag_intern 9
+#define m_ofi_tag_usr    32
+#define m_ofi_tag_avail  (m_ofi_tag_tot - m_ofi_tag_intern - m_ofi_tag_ctx )
 
-#define m_ofi_tag_ctx_shift    (m_ofi_tag_avail)
+// internal
+#define m_ofi_tag_bit_sync (m_ofi_tag_tot - 1)
+#define m_ofi_tag_set_sync ((uint64_t)0x1 << m_ofi_tag_bit_sync)
+// ctx
+#define m_ofi_tag_ctx_shift    (m_ofi_tag_avail - m_ofi_tag_intern)
 #define m_ofi_tag_ctx_bits     ((uint64_t)0x7f)  // mask to get the context
 #define m_ofi_tag_ctx_mask     ((m_ofi_tag_ctx_bits) << m_ofi_tag_ctx_shift)
 #define m_ofi_tag_get_ctx(tag) ((tag & m_ofi_tag_ctx_mask) >> m_ofi_tag_ctx_shift)
 #define m_ofi_tag_set_ctx(ctx) ((ctx << m_ofi_tag_ctx_shift) & m_ofi_tag_ctx_mask)
+//usr
+#define m_ofi_tag_set_usr(a) (((uint64_t)a) & ((uint64_t)0xffffffff))
 
 static inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
+    m_assert(m_ofi_tag_usr <= m_ofi_tag_avail,
+             "the number of available bit for the tag is too short: %d vs %d", m_ofi_tag_usr,
+             m_ofi_tag_avail);
     uint64_t ofi_tag = ctx_id;
-    return ((ofi_tag << m_ofi_tag_ctx_shift) & m_ofi_tag_ctx_mask) | tag;
+    return ((ofi_tag << m_ofi_tag_ctx_shift) & m_ofi_tag_ctx_mask) | m_ofi_tag_set_usr(tag);
 }
 
 //--------------------------------------------------------------------------------------------------
 // rma flags sent either as REMOTE_CQ_DATA or as 64 bit msg
-// 64 bits total: [ 5b header | 1b post | 1b complete | ... | 32 bits # of operations]
-#define m_ofi_data_bit_post (m_ofi_tag_tot - 1)
-#define m_ofi_data_bit_cmpl (m_ofi_tag_tot - 2)
-#define m_ofi_tag_bit_sync  (m_ofi_tag_tot - 3)
+// 48 bits total: [ unsu | 1b post | 1b complete | ... | 32 bits # of operations]
+#define m_ofi_data_tot      48
+#define m_ofi_data_internal 16
+#define m_ofi_data_avail    (m_ofi_data_tot - m_ofi_data_intern)
 
+#define m_ofi_data_bit_post (m_ofi_data_tot - 1)
+#define m_ofi_data_bit_cmpl (m_ofi_data_tot - 2)
+#define m_ofi_data_bit_rcq  (m_ofi_data_tot - 3)
+
+#define m_ofi_data_set_rcq     ((uint64_t)0x1 << m_ofi_data_bit_rcq)
 #define m_ofi_data_set_post    ((uint64_t)0x1 << m_ofi_data_bit_post)
 #define m_ofi_data_set_cmpl    ((uint64_t)0x1 << m_ofi_data_bit_cmpl)
+#define m_ofi_data_get_rcq(a)  ((a >> m_ofi_data_bit_rcq) & 0x1)
 #define m_ofi_data_get_post(a) ((a >> m_ofi_data_bit_post) & 0x1)
 #define m_ofi_data_get_cmpl(a) ((a >> m_ofi_data_bit_cmpl) & 0x1)
 #define m_ofi_data_set_nops(a) (((uint64_t)a) & ((uint64_t)0xffffffff))
 #define m_ofi_data_get_nops(a) ((uint32_t)(a & 0xffffffff))
-#define m_ofi_tag_sync         ((uint64_t)0x1 << m_ofi_tag_bit_sync)
 
 //--------------------------------------------------------------------------------------------------
-#define m_ofi_cq_kind_sync (0x01)  // 0000 0001
-#define m_ofi_cq_kind_rqst (0x02)  // 0000 0010
+#define m_ofi_cq_kind_null (0x01)  // 0000 0001
+#define m_ofi_cq_kind_sync (0x02)  // 0000 0010
+#define m_ofi_cq_kind_rqst (0x04)  // 0000 0100
 
 //--------------------------------------------------------------------------------------------------
 // communication context
@@ -103,23 +127,28 @@ typedef struct {
  * @brief data-structure used in the cq when an operation has completed
  */
 typedef struct {
-    //  ofi structures link to the fi_cq
-    struct fid_cq* cq;
-    // context for the CQ entry
+    // context mandatory the CQ entry
     struct fi_context ctx;
-
     // kind parameter
     uint8_t kind;
     union {
         struct {
-            countr_t* flag;
-        } rqst;  // kind == m_ofi_cq_kind_rqst
+            countr_t busy;  // completed if 0
+        } rqst;             // kind == m_ofi_cq_kind_rqst
         struct {
-            countr_t* cntr;
+            countr_t* cntr;  // array of epochs
             uint64_t buf;    // buffer for communication
-        } sync;  // kind == m_ofi_cq_kind_sync
+        } sync;              // kind == m_ofi_cq_kind_sync
     };
 } ofi_cqdata_t;
+
+typedef struct {
+    //  ofi structures link to the fi_cq
+    struct fid_cq* cq;
+    // fallback context pointer, used if the ctx received is NULL, aka the entry is a REMOTE_CQ_DATA
+    // value cannot be null if used explicitely to progress 
+    void* fallback_ctx;
+} ofi_progress_t;
 
 typedef struct {
     // user provided information
@@ -130,7 +159,7 @@ typedef struct {
 
     // implementation specifics
     struct {
-        countr_t completed;
+        ofi_progress_t progress;  // to make progress
         // completion queue data
         ofi_cqdata_t cq;
         // data description and ofi msg
@@ -140,14 +169,17 @@ typedef struct {
 } ofi_p2p_t;
 
 typedef struct {
+    fi_addr_t* addr;  // address list
     struct fid_ep* ep;
     struct fid_ep* srx;
     struct fid_cq* cq;       // completion queue for RECEIVE and REMOTE_DATA
     struct fid_av* av;       // address vector
-    struct fid_cntr* rcntr;  // Remotely issued CouNTeR put and get
     struct fid_cntr* ccntr;  // Completed CouNTeR put and get
-    fi_addr_t* addr;         // address list
+#if (HAVE_RMA_EVENT)
+    struct fid_cntr* rcntr;  // Completed CouNTeR put and get
+#endif
 } ofi_rma_trx_t;
+
 
 typedef struct {
     // signal counter
@@ -160,7 +192,7 @@ typedef struct {
 
 typedef struct {
     countr_t epoch[3];
-    countr_t* icntr;  // fi_write only!
+    countr_t* icntr;  // performed fi_write only for each rank
     ofi_cqdata_t* cqdata;
 } ofi_rma_sync_t;
 
@@ -173,7 +205,7 @@ typedef struct {
 
     // implementation specifics
     struct {
-        countr_t completed;
+        ofi_progress_t progress;  // used to trigger progress
         // data description and ofi msg
         struct {
             uint64_t flags;
@@ -233,7 +265,7 @@ int ofi_send_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
 int ofi_recv_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
 
 // progress
-int ofi_progress(struct fid_cq* cq);
+int ofi_progress(ofi_progress_t* progress);
 int ofi_p2p_wait(ofi_p2p_t* p2p);
 int ofi_rma_wait(ofi_rma_t* p2p);
 

@@ -10,6 +10,6 @@ OFI_DIR=${HOME}/lib-OFI-1.18.0
 #---------------------------------------------------------------------------------------------------
 else
 CC=clang
-PMI_DIR=/Users/tgillis/dbs_lib/lib_OFI-1.18.0-dbg
-OFI_DIR=/Users/tgillis/dbs_lib/lib_OFI-1.18.0-dbg
+PMI_DIR=/Users/tgillis/dbs_lib/lib_OFI-1.18.1-dbg
+OFI_DIR=/Users/tgillis/dbs_lib/lib_OFI-1.18.1-dbg
 endif
