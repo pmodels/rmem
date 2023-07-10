@@ -34,7 +34,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 
     //---------------------------------------------------------------------------------------------
     // register the memory given by the user together with the memory used for signaling
-    uint64_t flags = 0;
+    uint64_t flags = FI_RMA_EVENT;
     struct iovec iov;
     struct fi_mr_attr mr_attr = {
         .mr_iov = &iov,
@@ -197,7 +197,8 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     uint64_t usr_key = FI_KEY_NOTAVAIL;
     uint64_t sig_key = FI_KEY_NOTAVAIL;
     if (mem->ofi.mr) {
-        if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+        if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT ||
+            comm->prov->domain_attr->mr_mode & FI_MR_RMA_EVENT) {
             m_ofi_call(fi_mr_enable(mem->ofi.mr));
         }
         usr_key = fi_mr_key(mem->ofi.mr);
@@ -208,7 +209,8 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     mem->ofi.key_list = (uint64_t*)key_list;
 
     // then the signal key
-    if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+    if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT ||
+        comm->prov->domain_attr->mr_mode & FI_MR_RMA_EVENT) {
         m_ofi_call(fi_mr_enable(mem->ofi.signal.mr));
     }
     sig_key = fi_mr_key(mem->ofi.signal.mr);
