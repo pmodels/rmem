@@ -11,7 +11,7 @@ int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* comm) {
         m_assert(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY, "we assume prov key here");
         uint64_t flags = 0;
         uint64_t access = FI_SEND | FI_RECV;
-        m_ofi_call(fi_mr_reg(comm->domain, p2p->buf, p2p->count, access, 0, 0, flags,
+        m_ofi_call(fi_mr_reg(comm->domain, p2p->buf, p2p->count, access, 0, comm->unique_mr_key++, flags,
                              &p2p->ofi.mr_local, NULL));
         p2p->ofi.desc_local = fi_mr_desc(p2p->ofi.mr_local);
     } else {

@@ -65,8 +65,8 @@ int ofi_prov_score(char* provname) {
     return 0;
 }
 
-#define ofi_cap_mode     FI_MSG | FI_TAGGED | FI_RMA
-#define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND
+#define ofi_cap_mode     FI_MSG | FI_TAGGED | FI_RMA | FI_ATOMIC
+#define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND | FI_ATOMIC
 #if (M_HAVE_RMA_EVENT)
 #define ofi_cap_ops_rx FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_RMA_EVENT | FI_DIRECTED_RECV
 #else
@@ -104,7 +104,6 @@ int ofi_util_get_prov(struct fi_info** prov) {
 
     // hint and best_prov bothe evolve as we add capabilities. "hints" is used to test the
     // capability, while best_prov stores them if they match a provider set the minimal requirements
-    m_ofi_fatal_info(hints, domain_attr->mr_mode, FI_MR_PROV_KEY);
     m_ofi_fatal_info(hints, caps, FI_RMA);  // implies (REMOTE_)READ/WRITE
 #if (M_HAVE_RMA_EVENT)
     m_ofi_fatal_info(hints, caps, FI_RMA_EVENT);
@@ -126,18 +125,29 @@ int ofi_util_get_prov(struct fi_info** prov) {
 
     // get_info is free to waive those requirements, but they are supported
     m_ofi_test_info(hints, domain_attr->mr_mode, FI_MR_RMA_EVENT);
+    m_ofi_test_info(hints, domain_attr->mr_mode, FI_MR_LOCAL);
+    m_ofi_test_info(hints, domain_attr->mr_mode, FI_MR_PROV_KEY);
+    m_ofi_test_info(hints, domain_attr->mr_mode, FI_MR_ALLOCATED);
 
     // check the mode arguments now
     m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, hints, prov));
     m_assert(*prov, "The provider list is empty");
-    m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_MR_RAW");
+    m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_RX_CQ_DATA");
     m_assert(!((*prov)->mode & FI_ASYNC_IOV), "need to use FI_ASYNC_IOV");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_RAW), "need to use FI_MR_RAW");
     // m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_LOCAL), "need to use FI_MR_LOCAL");
+    // m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_VIRT_ADDR), "need to use FI_MR_VIRT_ADDR");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_BASIC), "need to support FI_MR_BASIC");
-    //m_assert((*prov)->tx_attr->inject_size >= OFI_INJECT_THRESHOLD,
-    //         "the inject size = %ld must be >= threshold = %d", (*prov)->tx_attr->inject_size,
-    //         OFI_INJECT_THRESHOLD);
+
+    // improsing the modes must happen on (*prov), otherwise it's overwritten when done in hints
+    m_verb("%s: is FI_MR_LOCAL required? %d", (*prov)->fabric_attr->prov_name,
+          ((*prov)->domain_attr->mr_mode & FI_MR_LOCAL) > 0);
+    m_verb("%s: is FI_MR_PROV_KEY required? %d", (*prov)->fabric_attr->prov_name,
+          ((*prov)->domain_attr->mr_mode & FI_MR_PROV_KEY) > 0);
+    m_verb("%s: is FI_MR_ALLOCATED required? %d", (*prov)->fabric_attr->prov_name,
+          ((*prov)->domain_attr->mr_mode & FI_MR_ALLOCATED) > 0);
+    m_verb("%s: is FI_MR_VIRT_ADDR required? %d", (*prov)->fabric_attr->prov_name,
+          ((*prov)->domain_attr->mr_mode & FI_MR_VIRT_ADDR) > 0);
     m_verb("found compatible provider: %s", (*prov)->fabric_attr->prov_name);
 
     // free the hints

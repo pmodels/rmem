@@ -115,6 +115,7 @@ typedef struct {
     int size;
     int rank;
 
+    uint64_t unique_mr_key; // used for MR
     struct fi_info* prov;
     struct fid_fabric* fabric;
     struct fid_domain* domain;
@@ -189,13 +190,14 @@ typedef struct {
 
 
 typedef struct {
-    // signal counter
-    uint32_t inc; // increment value, always 1
-    uint32_t val;  // actual counter value
+    // signal counter - must be allocated to comply with FI_MR_ALLOCATE
+    uint32_t* inc;  // increment value, always 1
+    uint32_t* val;  // actual counter value
     // mr for MR_LOCAL
     void* desc_local;
     struct fid_mr* mr_local;
     // structs for fi_atomics
+    uint64_t* base_list;  // list of base addresses
     uint64_t* key_list;  // list of remote keys
     struct fid_mr* mr;
 } ofi_rma_sig_t;
@@ -219,7 +221,7 @@ typedef struct {
         // data description and ofi msg
         struct {
             uint64_t flags;
-            // mr for MR_LOCAL
+            // mr for MR_LOCAL for the local buffer associated to the operation
             void* desc_local;
             struct fid_mr* mr_local;
             // iovs
@@ -252,6 +254,7 @@ typedef struct {
         int n_tx;  // number of transmit contexts
         // buffer addresses
         struct fid_mr* mr;
+        uint64_t* base_list;  // list of base addresses
         uint64_t* key_list;  // list of remote keys
         // transmit and receive contexts
         ofi_rma_trx_t* sync_trx;

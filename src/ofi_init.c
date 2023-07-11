@@ -90,6 +90,8 @@ int ofi_init(ofi_comm_t* ofi) {
     m_rmem_call(pmi_init());
     m_rmem_call(pmi_get_comm_id(&ofi->rank, &ofi->size));
 
+    // set the initial value of unique_key
+    ofi->unique_mr_key = 0;
     //----------------------------------------------------------------------------------------------
     // open different communication contexts
     ofi->ctx = calloc(ofi->n_ctx, sizeof(ofi_ctx_t));
