@@ -135,9 +135,13 @@ typedef struct {
         struct {
             countr_t busy;  // completed if 0
         } rqst;             // kind == m_ofi_cq_kind_rqst
-        struct {
-            countr_t* cntr;  // array of epochs
-            uint64_t buf;    // buffer for communication
+        struct { 
+            // array of epochs
+            countr_t* cntr;
+            // communication buffer
+            uint64_t buf;  
+            void* buf_desc; 
+            struct fid_mr* buf_mr;
         } sync;              // kind == m_ofi_cq_kind_sync
     };
 } ofi_cqdata_t;
@@ -162,7 +166,10 @@ typedef struct {
         ofi_progress_t progress;  // to make progress
         // completion queue data
         ofi_cqdata_t cq;
-        // data description and ofi msg
+        // mr for MR_LOCAL
+        void* desc_local;
+        struct fid_mr* mr_local;
+        // iovs
         struct iovec iov;
         struct fi_msg_tagged msg;
     } ofi;
@@ -184,16 +191,19 @@ typedef struct {
 typedef struct {
     // signal counter
     uint32_t inc; // increment value, always 1
-    uint32_t val; // actual counter value
+    uint32_t val;  // actual counter value
+    // mr for MR_LOCAL
+    void* desc_local;
+    struct fid_mr* mr_local;
     // structs for fi_atomics
     uint64_t* key_list;  // list of remote keys
     struct fid_mr* mr;
 } ofi_rma_sig_t;
 
 typedef struct {
-    countr_t epoch[3];
-    countr_t* icntr;  // performed fi_write only for each rank
-    ofi_cqdata_t* cqdata;
+    countr_t epoch[3];  // epoch[0] = # of post, epoch[1] = # of completed, epoch[2] = working cntr
+    countr_t* icntr;    // array of fi_write counter (for each rank)
+    ofi_cqdata_t* cqdata;  // completion data for each rank
 } ofi_rma_sync_t;
 
 typedef struct {
@@ -209,12 +219,17 @@ typedef struct {
         // data description and ofi msg
         struct {
             uint64_t flags;
+            // mr for MR_LOCAL
+            void* desc_local;
+            struct fid_mr* mr_local;
+            // iovs
             struct iovec iov;
             struct fi_rma_iov riov;
             ofi_cqdata_t cq;
         } msg;
         struct {
             uint64_t flags;
+            // iovs
             struct fi_ioc iov;
             struct fi_rma_ioc riov;
             struct fi_context ctx; // to replace by cqdata_t if RPUT_SIG is desired
@@ -243,6 +258,7 @@ typedef struct {
         ofi_rma_trx_t* data_trx;
         // signaling
         ofi_rma_sig_t signal;
+        // synchronization (PSCW)
         ofi_rma_sync_t sync;
     } ofi;
 } ofi_rmem_t;

@@ -114,8 +114,8 @@ int ofi_util_get_prov(struct fi_info** prov) {
 
     // try to get more specific behavior
     m_ofi_test_info(hints, ep_attr->type, FI_EP_RDM);
-    // m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
-    // m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
+    m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
+    m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
     // m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
     // m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
@@ -133,7 +133,8 @@ int ofi_util_get_prov(struct fi_info** prov) {
     m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_MR_RAW");
     m_assert(!((*prov)->mode & FI_ASYNC_IOV), "need to use FI_ASYNC_IOV");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_RAW), "need to use FI_MR_RAW");
-    m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_LOCAL), "need to use FI_MR_LOCAL");
+    // m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_LOCAL), "need to use FI_MR_LOCAL");
+    m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_BASIC), "need to support FI_MR_BASIC");
     //m_assert((*prov)->tx_attr->inject_size >= OFI_INJECT_THRESHOLD,
     //         "the inject size = %ld must be >= threshold = %d", (*prov)->tx_attr->inject_size,
     //         OFI_INJECT_THRESHOLD);

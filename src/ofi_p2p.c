@@ -5,7 +5,20 @@
 #include "ofi.h"
 #include "rmem_utils.h"
 
-int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* ofi) {
+int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* comm) {
+    //----------------------------------------------------------------------------------------------
+    if (comm->prov->domain_attr->mr_mode & FI_MR_LOCAL) {
+        m_assert(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY, "we assume prov key here");
+        uint64_t flags = 0;
+        uint64_t access = FI_SEND | FI_RECV;
+        m_ofi_call(fi_mr_reg(comm->domain, p2p->buf, p2p->count, access, 0, 0, flags,
+                             &p2p->ofi.mr_local, NULL));
+        p2p->ofi.desc_local = fi_mr_desc(p2p->ofi.mr_local);
+    } else {
+        p2p->ofi.mr_local = NULL;
+        p2p->ofi.desc_local = NULL;
+    }
+    //----------------------------------------------------------------------------------------------
     p2p->ofi.cq.kind = m_ofi_cq_kind_rqst;
     // init the data stuctures
     p2p->ofi.iov = (struct iovec){
@@ -77,4 +90,9 @@ int ofi_recv_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm) {
     return m_success;
 }
 
-int ofi_p2p_free(ofi_p2p_t* p2p) { return m_success; }
+int ofi_p2p_free(ofi_p2p_t* p2p) {
+    if (p2p->ofi.mr_local) {
+        m_ofi_call(fi_close(&p2p->ofi.mr_local->fid));
+    }
+    return m_success;
+}

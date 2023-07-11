@@ -78,7 +78,8 @@ OBJ := $(CC_OBJ)
 
 ################################################################################
 # mandatory flags
-CCFLAGS =
+CCFLAGS ?=
+CCFLAGS += -Wno-deprecated-declarations
 #-fPIC -DGIT_COMMIT=\"$(GIT_COMMIT)\"   
 
 # Makefile shenanigans
