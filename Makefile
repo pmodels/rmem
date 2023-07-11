@@ -112,10 +112,13 @@ $(TARGET):$(OBJ)
 ################################################################################
 .PHONY: debug
 debug:
-	@OPTS="-O0 -g -fsanitize=address -fsanitize=undefined" $(MAKE) $(TARGET)
+	@OPTS="${OPTS} -O0 -g -fsanitize=address -fsanitize=undefined" $(MAKE) $(TARGET)
+.PHONY: verbose
+verbose:
+	@OPTS="${OPTS} -DVERBOSE" $(MAKE) debug
 .PHONY: fast
 fast:
-	@OPTS="-O3 -DNEBUG" $(MAKE) $(TARGET)
+	@OPTS="${OPTS} -O3 -DNEBUG" $(MAKE) $(TARGET)
 ################################################################################
 clean:
 	@rm -f $(OBJ_DIR)/*.o
