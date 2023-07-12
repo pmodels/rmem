@@ -48,11 +48,11 @@ int main(int argc, char** argv) {
     }
 
     //----------------------------------------------------------------------------------------------
-    // create the send/recv for retry
-    int retry = 0;
+    // create the send/recv for retry, must be allocated to comply with FI_MR_ALLOCATED
+    int* retry_ptr = malloc(sizeof(int));
     ofi_p2p_t p2p_retry = {
-        .buf = &retry,
-        .count = sizeof(retry),
+        .buf = retry_ptr,
+        .count = sizeof(int),
         .tag = n_msg + 1,
     };
     // no peer is needed to create the request
@@ -92,8 +92,8 @@ int main(int argc, char** argv) {
                 };
                 ofi_p2p_create(send + i, &comm);
             }
-            retry = 1;
-            while (retry) {
+            *retry_ptr = 1;
+            while (*retry_ptr) {
                 for (int it = -n_warmup; it < n_measure; ++it) {
                     PMI_Barrier();
                     // start exposure
@@ -124,8 +124,8 @@ int main(int argc, char** argv) {
                 };
                 ofi_rma_put_init(put + i, &pmem, 0, &comm);
             }
-            retry = 1;
-            while (retry) {
+            *retry_ptr = 1;
+            while (*retry_ptr) {
                 for (int it = -n_warmup; it < n_measure; ++it) {
                     PMI_Barrier();  // start exposure
                     ofi_rmem_start(1, &peer, &pmem, &comm);
@@ -153,8 +153,8 @@ int main(int argc, char** argv) {
                 };
                 ofi_rma_put_signal_init(psig + i, &pmem, 0, &comm);
             }
-            retry = 1;
-            while (retry) {
+            *retry_ptr = 1;
+            while (*retry_ptr) {
                 for (int it = -n_warmup; it < n_measure; ++it) {
                     PMI_Barrier();  // start exposure
                     ofi_rmem_start(1, &peer, &pmem, &comm);
@@ -229,8 +229,8 @@ int main(int argc, char** argv) {
             double ci_p2p;
 
             // let's go
-            retry = 1;
-            while (retry) {
+            *retry_ptr = 1;
+            while (*retry_ptr) {
                 double time[n_measure];
                 for (int it = -n_warmup; it < n_measure; ++it) {
                     PMI_Barrier();
@@ -254,11 +254,11 @@ int main(int argc, char** argv) {
                 // get the CI + the retry
                 rmem_get_ci(n_measure, time, &tavg_p2p, &ci_p2p);
                 m_verb("SEND: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d", tavg_p2p, ci_p2p,
-                       ci_p2p / tavg_p2p, retry_threshold, retry, retry_max);
-                if (retry > retry_max || (ci_p2p / tavg_p2p) < retry_threshold) {
-                    retry = 0;
+                       ci_p2p / tavg_p2p, retry_threshold, *retry_ptr, retry_max);
+                if (*retry_ptr > retry_max || (ci_p2p / tavg_p2p) < retry_threshold) {
+                    *retry_ptr = 0;
                 } else {
-                    retry++;
+                    (*retry_ptr)++;
                 }
                 // send the information to the sender side
                 ofi_send_enqueue(&p2p_retry, 0, &comm);
@@ -274,8 +274,8 @@ int main(int argc, char** argv) {
             double tavg_put;
             double ci_put;
             rmem_prof_t prof_put = {.name = "put"};
-            retry = 1;
-            while (retry) {
+            *retry_ptr = 1;
+            while (*retry_ptr) {
                 double time[n_measure];
                 for (int it = -n_warmup; it < n_measure; ++it) {
                     PMI_Barrier();
@@ -295,13 +295,13 @@ int main(int argc, char** argv) {
                 }
                 // get the CI + the retry
                 rmem_get_ci(n_measure, time, &tavg_put, &ci_put);
-                if (retry > retry_max || (ci_put / tavg_put) < retry_threshold) {
-                    retry = 0;
+                if (*retry_ptr > retry_max || (ci_put / tavg_put) < retry_threshold) {
+                    *retry_ptr = 0;
                 } else {
-                    retry++;
+                    (*retry_ptr)++;
                 }
                 m_verb("PUT: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d", tavg_put, ci_put,
-                       ci_put / tavg_put, retry_threshold, retry, retry_max);
+                       ci_put / tavg_put, retry_threshold, *retry_ptr, retry_max);
                 // send the information to the sender side
                 ofi_send_enqueue(&p2p_retry, 0, &comm);
                 ofi_p2p_wait(&p2p_retry);
@@ -311,8 +311,8 @@ int main(int argc, char** argv) {
             double tavg_psig;
             double ci_psig;
             rmem_prof_t prof_psig = {.name = "put-signal"};
-            retry = 1;
-            while (retry) {
+            *retry_ptr = 1;
+            while (*retry_ptr) {
                 double time[n_measure];
                 for (int it = -n_warmup; it < n_measure; ++it) {
                     PMI_Barrier();
@@ -331,13 +331,13 @@ int main(int argc, char** argv) {
                 }
                 // get the CI + the retry
                 rmem_get_ci(n_measure, time, &tavg_psig, &ci_psig);
-                if (retry > retry_max || (ci_psig / tavg_psig) < retry_threshold) {
-                    retry = 0;
+                if (*retry_ptr > retry_max || (ci_psig / tavg_psig) < retry_threshold) {
+                    *retry_ptr = 0;
                 } else {
-                    retry++;
+                    (*retry_ptr)++;
                 }
                 m_verb("PUT+SIG: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d", tavg_psig, ci_psig,
-                       ci_psig / tavg_psig, retry_threshold, retry, retry_max);
+                       ci_psig / tavg_psig, retry_threshold, *retry_ptr, retry_max);
                 // send the information to the sender side
                 ofi_send_enqueue(&p2p_retry, 0, &comm);
                 ofi_p2p_wait(&p2p_retry);
