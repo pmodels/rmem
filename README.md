@@ -42,21 +42,27 @@ fi_pingpong & fi_pingpong localhost
 
 ## build `rmem`
 
-```bash
-./autogen.sh
-CC=$(CC) CXX=$(CXX) ./configure --enable-fast --with-ofi=<path_to_ofi> --with-pmi=<path-to-pmi>
-make -j 8
-```
+We use a handmade `Makefile` to compile.
+To handle the different systems, the file `make_arch/default.mak` contains the different variable definitions needed to find the dependencies etc.
+Specifically we rely on the following variables:
+
+- `CC` gives the compiler to use
+- `PMI_DIR` the root directory of `pmi`
+- `OFI_DIR` the root directory of `ofi`
+- `OPTS` (optional) contains flags to be passed to the compilers for more flexibility. E.g. `-fsanitize=address`, `-flto` etc
+
+The `Makefile` offers various targets by defaults:
+
+- `rmem`: builds `rmem`
+- `info`: display info about the build
+- `default`: displays the info and build `rmem`
+- `fast`: compiles for fast execution (equivalent to `OPTS=-O3 -DNDEBUG -flto`)
+- `debug`: compiles for debug (equivalent to `OPTS=-O0 -g -fsanitize=address -fsanitize=undefined`)
+- `verbose`: compiles for debug with added verbosity (equivalent to `OPTS=-DVERBOSE make debug`)
+- `clean`/`reallyclean`: cleans the build
 
 
-## configure options
-
-- `--enable-verbose`: enable the `m_verb` macros, leading to a more verbose log
-- `--enable-fast`: enable a few optimizations including `-flto` and `-DNDEBUG`. WARNING: conflicts with `--enable-asan`
-- `--enable-asan`: enable the address sanitizer, on macos use `ASAN_OPTIONS=detect_leaks=1` to get a report on the memory leaks. WARNING: conflicts with `--enable-fast`
-- `--with-ofi=<path>` set the path for `libfabric`
-- `--with-pmi=<path>` set the path for `PMI`
-
+Note: if you prefer to add another make_arch file, you can also invoke it using `ARCH_FILE=make_arch/myfile make`.
 
 ## license
 
