@@ -99,7 +99,6 @@ int ofi_util_get_prov(struct fi_info** prov) {
 
     // hint and best_prov bothe evolve as we add capabilities. "hints" is used to test the
     // capability, while best_prov stores them if they match a provider set the minimal requirements
-    m_ofi_fatal_info(hints, domain_attr->mr_mode, FI_MR_PROV_KEY);
     m_ofi_fatal_info(hints, caps, FI_RMA | FI_RMA_EVENT);  // implies (REMOTE_)READ/WRITE
     m_ofi_fatal_info(hints, caps, FI_ATOMIC);              // implies (REMOTE_)READ/WRITE
     m_ofi_fatal_info(hints, caps, FI_MSG | FI_TAGGED | FI_DIRECTED_RECV);  // implies SEND/RECV
@@ -113,6 +112,9 @@ int ofi_util_get_prov(struct fi_info** prov) {
     m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, tx_attr->comp_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->comp_order, FI_ORDER_NONE);
+
+    // get_info is free to waive those requirements, but they are supported
+    m_ofi_fatal_info(hints, domain_attr->mr_mode, FI_MR_RMA_EVENT);
 
     // check the mode arguments now
     m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, hints, prov));
