@@ -454,6 +454,28 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     }
     // wait for completion of the inject calls
     fi_cntr_wait(mem->ofi.sync_trx->ccntr, nrank, -1);
+
+    //----------------------------------------------------------------------------------------------
+    // once done, prepost the recv buffers
+    struct iovec iov = {
+        .iov_len = sizeof(uint64_t),
+    };
+    struct fi_msg_tagged msg = {
+        .msg_iov = &iov,
+        .iov_count = 1,
+        .tag = m_ofi_tag_set_sync,
+        .ignore = 0x0,
+        .data = 0,
+    };
+    for (int i = 0; i < nrank; ++i) {
+        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
+        iov.iov_base = &cqdata->sync.buf;
+        msg.desc = &cqdata->sync.buf_desc;
+        msg.context = &cqdata->ctx;
+        msg.addr = mem->ofi.sync_trx->addr[rank[i]];
+        uint64_t flags = FI_COMPLETION;
+        m_ofi_call(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags));
+    }
     return m_success;
 }
 
@@ -545,27 +567,6 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     return m_success;
 }
 int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
-    struct iovec iov = {
-        .iov_len = sizeof(uint64_t),
-    };
-    struct fi_msg_tagged msg = {
-        .msg_iov = &iov,
-        .iov_count = 1,
-        .tag = m_ofi_tag_set_sync,
-        .ignore = 0x0,
-        .data = 0,
-    };
-    for (int i = 0; i < nrank; ++i) {
-        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata+i;
-        iov.iov_base = &cqdata->sync.buf;
-        msg.desc = &cqdata->sync.buf_desc;
-        msg.context = &cqdata->ctx;
-        msg.addr = mem->ofi.sync_trx->addr[rank[i]];
-        uint64_t flags = FI_COMPLETION;
-        m_ofi_call(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags));
-    }
-
-    //----------------------------------------------------------------------------------------------
     // compare the number of calls done to the value in the epoch if everybody has finished
     // n_rcompleted must be = the total number of calls received (including during the start sync) +
     // the sync from nrank for this sync
