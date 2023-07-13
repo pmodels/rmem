@@ -17,6 +17,7 @@
 
 #define m_get_rx(i, mem) (i % mem->ofi.n_rx)
 
+
 int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_assert(!(comm->prov->mode & FI_RX_CQ_DATA), "provider needs FI_RX_CQ_DATA");
     //---------------------------------------------------------------------------------------------
@@ -33,59 +34,20 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 
     //---------------------------------------------------------------------------------------------
     // register the memory given by the user
-#if (M_HAVE_RMA_EVENT)
-    uint64_t flags = FI_RMA_EVENT;
-#else
-    uint64_t flags = 0;
-#endif
-    struct iovec iov;
-    struct fi_mr_attr mr_attr = {
-        .mr_iov = &iov,
-        .iov_count = 1,
-        .access = FI_REMOTE_READ | FI_REMOTE_WRITE,
-        .offset = 0,
-        .requested_key = comm->unique_mr_key++,
-        .context = NULL,
-    };
-    // register the user memory if not NULL
-    if (mem->buf && mem->count > 0) {
-        iov = (struct iovec){
-            .iov_base = mem->buf,
-            .iov_len = mem->count,
-        };
-        m_ofi_call(fi_mr_regattr(comm->domain, &mr_attr, flags, &mem->ofi.mr));
-    } else {
-        mem->ofi.mr = NULL;
-    }
-
-    //---------------------------------------------------------------------------------------------
+    m_verb("registering user memory");
+    m_rmem_call(ofi_util_mr_reg(mem->buf, mem->count, FI_REMOTE_READ | FI_REMOTE_WRITE, comm,
+                                &mem->ofi.mr, NULL, &mem->ofi.base_list));
     // register the signal then
+    m_verb("registering the signal memory");
     mem->ofi.signal.val = malloc(sizeof(uint32_t));
     mem->ofi.signal.inc = malloc(sizeof(uint32_t));
     mem->ofi.signal.val[0] = 0;
     mem->ofi.signal.inc[0] = 1;
-    iov = (struct iovec){
-        .iov_base = mem->ofi.signal.val,
-        .iov_len = sizeof(uint32_t),
-    };
-    // we need to request another key if the prov doesn't handle them
-    mr_attr.requested_key = comm->unique_mr_key++;
-    m_ofi_call(fi_mr_regattr(comm->domain, &mr_attr, flags, &mem->ofi.signal.mr));
-    // register the local inc variable if needed
-    // set the signal inc to 1
-    if (comm->prov->domain_attr->mr_mode & FI_MR_LOCAL) {
-        m_log("registering memory");
-        m_assert(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY, "prov key should be enabled");
-        uint64_t mr_flags = 0;
-        uint64_t access = FI_READ | FI_WRITE;
-        m_ofi_call(fi_mr_reg(comm->domain, mem->ofi.signal.inc, sizeof(uint32_t), access, 0,
-                             comm->unique_mr_key++, mr_flags, &mem->ofi.signal.mr_local, NULL));
-        mem->ofi.signal.desc_local = fi_mr_desc(mem->ofi.signal.mr_local);
-    }
-    else{
-        mem->ofi.signal.mr_local = NULL;
-        mem->ofi.signal.desc_local = NULL;
-    }
+    m_rmem_call(ofi_util_mr_reg(mem->ofi.signal.val, sizeof(uint32_t),
+                                FI_REMOTE_READ | FI_REMOTE_WRITE, comm, &mem->ofi.signal.mr, NULL,
+                                &mem->ofi.signal.base_list));
+    m_rmem_call(ofi_util_mr_reg(mem->ofi.signal.inc, sizeof(uint32_t), FI_READ | FI_WRITE, comm,
+                                &mem->ofi.signal.mr_local, &mem->ofi.signal.desc_local, NULL));
     //---------------------------------------------------------------------------------------------
     // allocate one Tx/Rx endpoint per thread context, they all share the transmit queue of the
     // thread the first n_rx endpoints will be Transmit and Receive, the rest is Transmit only
@@ -146,7 +108,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
             .events = FI_CNTR_EVENTS_COMP,
             .wait_obj = FI_WAIT_UNSPEC,
         };
-#if (M_HAVE_RMA_EVENT)
+#if (M_SYNC_RMA_EVENT)
         if (is_rx) {
             // remote counters - count the number of fi_write/fi_read targeted to me
             m_ofi_call(fi_cntr_open(comm->domain, &rx_cntr_attr, &trx[i].rcntr, NULL));
@@ -173,17 +135,13 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         // ------------------- completion queue
         struct fi_cq_attr cq_attr = {
             .format = OFI_CQ_FORMAT,
-            .wait_obj = FI_WAIT_UNSPEC,
+            .wait_obj = FI_WAIT_NONE,
         };
         m_ofi_call(fi_cq_open(comm->domain, &cq_attr, &trx[i].cq, NULL));
         if (is_rx || is_tx) {
             uint64_t tcq_trx_flags = FI_TRANSMIT | FI_RECV;
-            // if(comm->rank ==0){
-            // tcq_trx_flags |= FI_SELECTIVE_COMPLETION;
-            // }
             m_ofi_call(fi_ep_bind(trx[i].ep, &trx[i].cq->fid, tcq_trx_flags));
         } else if (is_sync) {
-            // uint64_t tcq_trx_flags = FI_RECV;
             uint64_t tcq_trx_flags = FI_TRANSMIT | FI_RECV | FI_SELECTIVE_COMPLETION;
             m_ofi_call(fi_ep_bind(trx[i].ep, &trx[i].cq->fid, tcq_trx_flags));
         }
@@ -196,22 +154,14 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
             m_rmem_call(ofi_util_av(comm->size, trx[i].ep, trx[i].av, &trx[i].addr));
         }
         if (is_rx) {
-            // bind the memory registration
-            if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
-                uint64_t mr_trx_flags = 0;
-                if (mem->ofi.mr) {
-                    m_ofi_call(fi_mr_bind(mem->ofi.mr, &trx[i].ep->fid, mr_trx_flags));
-                }
-                m_ofi_call(fi_mr_bind(mem->ofi.signal.mr, &trx[i].ep->fid, mr_trx_flags));
-            }
-// bind the remote completion counter
-#if (M_HAVE_RMA_EVENT)
-            if (mem->ofi.mr) {
-                m_ofi_call(
-                    fi_mr_bind(mem->ofi.mr, &mem->ofi.data_trx[i].rcntr->fid, FI_REMOTE_WRITE));
-            }
-            m_ofi_call(
-                fi_mr_bind(mem->ofi.signal.mr, &mem->ofi.data_trx[i].rcntr->fid, FI_REMOTE_WRITE));
+#if (M_SYNC_RMA_EVENT)
+            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.mr, trx[i].rcntr, comm));
+            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.signal.mr, trx[i].rcntr, comm));
+            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.signal.mr_local, NULL, comm));
+#else
+            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.mr, NULL, comm));
+            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.signal.mr, NULL, comm));
+            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.signal.mr_local, NULL, comm));
 #endif
         }
         m_verb("done with EP # %d", i);
@@ -220,44 +170,9 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     //---------------------------------------------------------------------------------------------
     // if needed, enable the MR and then get the corresponding key and share it
     // first the user region's key
-    uint64_t usr_key = FI_KEY_NOTAVAIL;
-    uint64_t sig_key = FI_KEY_NOTAVAIL;
-    if (mem->ofi.mr) {
-        if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT ||
-            comm->prov->domain_attr->mr_mode & FI_MR_RMA_EVENT) {
-            m_ofi_call(fi_mr_enable(mem->ofi.mr));
-        }
-        usr_key = fi_mr_key(mem->ofi.mr);
-        m_assert(usr_key != FI_KEY_NOTAVAIL, "the key registration failed");
-    }
-    void* key_list = calloc(ofi_get_size(comm), sizeof(uint64_t));
-    pmi_allgather(sizeof(usr_key), &usr_key, &key_list);
-    mem->ofi.key_list = (uint64_t*)key_list;
-    // then the base addresses
-    void* base_list = calloc(ofi_get_size(comm), sizeof(uint64_t));
-    if (comm->prov->domain_attr->mr_mode & FI_MR_VIRT_ADDR) {
-        uint64_t usr_base = (uint64_t)mem->buf;
-        pmi_allgather(sizeof(usr_base), &usr_base, &base_list);
-    }
-    mem->ofi.base_list = base_list;
-
-    // then the signal key
-    if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT ||
-        comm->prov->domain_attr->mr_mode & FI_MR_RMA_EVENT) {
-        m_ofi_call(fi_mr_enable(mem->ofi.signal.mr));
-    }
-    sig_key = fi_mr_key(mem->ofi.signal.mr);
-    m_assert(sig_key != FI_KEY_NOTAVAIL, "the key registration failed");
-    key_list = calloc(ofi_get_size(comm), sizeof(uint64_t));
-    pmi_allgather(sizeof(sig_key), &sig_key, &key_list);
-    mem->ofi.signal.key_list = (uint64_t*)key_list;
-    // signal address
-    base_list = calloc(ofi_get_size(comm), sizeof(uint64_t));
-    if (comm->prov->domain_attr->mr_mode & FI_MR_VIRT_ADDR) {
-        uint64_t usr_base = (uint64_t)mem->ofi.signal.val;
-        pmi_allgather(sizeof(usr_base), &usr_base, &base_list);
-    }
-    mem->ofi.signal.base_list = base_list;
+    m_rmem_call(ofi_util_mr_enable(mem->ofi.mr, comm, &mem->ofi.key_list));
+    m_rmem_call(ofi_util_mr_enable(mem->ofi.signal.mr, comm, &mem->ofi.signal.key_list));
+    m_rmem_call(ofi_util_mr_enable(mem->ofi.signal.mr_local, comm, NULL));
 
     //---------------------------------------------------------------------------------------------
     // allocate the data user for sync
@@ -268,17 +183,21 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         ofi_cqdata_t* ccq = mem->ofi.sync.cqdata + i;
         ccq->kind = m_ofi_cq_kind_sync;
         ccq->sync.cntr = mem->ofi.sync.epoch;
-        if(comm->prov->domain_attr->mr_mode & FI_MR_LOCAL){
-            m_assert(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY,"we assume prov key here");
-            uint64_t access = FI_SEND | FI_RECV;
-            uint64_t sync_flags = 0;
-            m_ofi_call(fi_mr_reg(comm->domain, &ccq->sync.buf, sizeof(uint64_t), access, 0,
-                                 comm->unique_mr_key++, sync_flags, &ccq->sync.buf_mr, NULL));
-            ccq->sync.buf_desc = fi_mr_desc(ccq->sync.buf_mr);
-        } else {
-            ccq->sync.buf_mr = NULL;
-            ccq->sync.buf_desc = NULL;
-        }
+        m_rmem_call(ofi_util_mr_reg(&ccq->sync.buf, sizeof(uint64_t), FI_SEND | FI_RECV, comm,
+                                    &ccq->sync.buf_mr, &ccq->sync.buf_desc, NULL));
+        m_rmem_call(ofi_util_mr_bind(mem->ofi.sync_trx->ep, ccq->sync.buf_mr, NULL, comm));
+        m_rmem_call(ofi_util_mr_enable(ccq->sync.buf_mr, comm, NULL));
+        // if(comm->prov->domain_attr->mr_mode & FI_MR_LOCAL){
+        //     m_assert(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY,"we assume prov key here");
+        //     uint64_t access = FI_SEND | FI_RECV;
+        //     uint64_t sync_flags = 0;
+        //     m_ofi_call(fi_mr_reg(comm->domain, &ccq->sync.buf, sizeof(uint64_t), access, 0,
+        //                          comm->unique_mr_key++, sync_flags, &ccq->sync.buf_mr, NULL));
+        //     ccq->sync.buf_desc = fi_mr_desc(ccq->sync.buf_mr);
+        // } else {
+        //     ccq->sync.buf_mr = NULL;
+        //     ccq->sync.buf_desc = NULL;
+        // }
     }
     return m_success;
 }
@@ -287,24 +206,17 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     struct fid_stx* nullstx = NULL;
     // free the sync
     for (int i = 0; i < comm->size; ++i) {
-        if (mem->ofi.sync.cqdata[i].sync.buf_mr) {
-            m_ofi_call(fi_close(&mem->ofi.sync.cqdata[i].sync.buf_mr->fid));
-        }
+        m_rmem_call(ofi_util_mr_close(mem->ofi.sync.cqdata[i].sync.buf_mr));
     }
     free(mem->ofi.sync.cqdata);
-    // free the MR
-    if (mem->ofi.mr) {
-        m_ofi_call(fi_close(&mem->ofi.mr->fid));
-    }
+    // free the MRs
+    m_rmem_call(ofi_util_mr_close(mem->ofi.mr));
+    m_rmem_call(ofi_util_mr_close(mem->ofi.signal.mr));
+    m_rmem_call(ofi_util_mr_close(mem->ofi.signal.mr_local));
     free(mem->ofi.key_list);
     free(mem->ofi.base_list);
-    // signal
-    m_ofi_call(fi_close(&mem->ofi.signal.mr->fid));
     free(mem->ofi.signal.key_list);
     free(mem->ofi.signal.base_list);
-    if (mem->ofi.signal.mr_local) {
-        m_ofi_call(fi_close(&mem->ofi.signal.mr_local->fid));
-    }
     free(mem->ofi.signal.val);
     free(mem->ofi.signal.inc);
 
@@ -320,7 +232,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
         if (is_tx || is_sync) {
                 m_ofi_call(fi_close(&trx->ccntr->fid));
         }
-#if (M_HAVE_RMA_EVENT)
+#if (M_SYNC_RMA_EVENT)
         if (is_rx) {
                 m_ofi_call(fi_close(&trx->rcntr->fid));
         }
@@ -353,17 +265,21 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     rma->ofi.addr = mem->ofi.data_trx[rx_id].addr[rma->peer];
     //----------------------------------------------------------------------------------------------
     // if needed, register the memory
-    if (comm->prov->domain_attr->mr_mode & FI_MR_LOCAL) {
-        m_assert(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY,"prov key is needed here");
-        uint64_t access = FI_WRITE | FI_READ;
-        uint64_t flags = 0;
-        m_ofi_call(fi_mr_reg(comm->domain, rma->buf, rma->count, access, 0, comm->unique_mr_key++,
-                             flags, &rma->ofi.msg.mr_local, NULL));
-        rma->ofi.msg.desc_local = fi_mr_desc(rma->ofi.msg.mr_local);
-    } else {
-        rma->ofi.msg.mr_local = NULL;
-        rma->ofi.msg.desc_local = NULL;
-    }
+    m_rmem_call(ofi_util_mr_reg(rma->buf, rma->count, FI_WRITE | FI_READ, comm,
+                                &rma->ofi.msg.mr_local, &rma->ofi.msg.desc_local, NULL));
+    m_rmem_call(ofi_util_mr_bind(rma->ofi.ep, rma->ofi.msg.mr_local, NULL, comm));
+    m_rmem_call(ofi_util_mr_enable(rma->ofi.msg.mr_local, comm, NULL));
+    // if (comm->prov->domain_attr->mr_mode & FI_MR_LOCAL) {
+    //     m_assert(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY,"prov key is needed here");
+    //     uint64_t access = FI_WRITE | FI_READ;
+    //     uint64_t flags = 0;
+    //     m_ofi_call(fi_mr_reg(comm->domain, rma->buf, rma->count, access, 0, comm->unique_mr_key++,
+    //                          flags, &rma->ofi.msg.mr_local, NULL));
+    //     rma->ofi.msg.desc_local = fi_mr_desc(rma->ofi.msg.mr_local);
+    // } else {
+    //     rma->ofi.msg.mr_local = NULL;
+    //     rma->ofi.msg.desc_local = NULL;
+    // }
 
     //----------------------------------------------------------------------------------------------
     // IOVs
@@ -414,8 +330,8 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
             rma->ofi.msg.flags |= FI_DELIVERY_COMPLETE;
         } break;
     }
-    // add the remote cq data if supported
-#if (!M_HAVE_RMA_EVENT)
+    // if we don't use the remote event, need to use FI_REMOTE_CQ_DATA
+#if (!M_SYNC_RMA_EVENT)
     rma->ofi.msg.flags |= FI_REMOTE_CQ_DATA;
 #endif
 
@@ -434,8 +350,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
         // flag
         rma->ofi.sig.flags = FI_FENCE | (do_inject ? FI_INJECT : 0x0) |
                              (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
-        // add the remote cq data if supported
-#if (!M_HAVE_RMA_EVENT)
+#if (!M_SYNC_RMA_EVENT)
         rma->ofi.sig.flags |= FI_REMOTE_CQ_DATA;
 #endif
     } else {
@@ -458,6 +373,7 @@ int ofi_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_
 }
 
 int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
+    //----------------------------------------------------------------------------------------------
     uint64_t flags = rma->ofi.msg.flags;
     struct fi_msg_rma msg = {
         .msg_iov = &rma->ofi.msg.iov,
@@ -466,16 +382,16 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
         .addr = rma->ofi.addr,
         .rma_iov = &rma->ofi.msg.riov,
         .rma_iov_count = 1,
-#if (M_HAVE_RMA_EVENT)
         .data = 0x0,
-#else
-        .data = m_ofi_data_set_rcq,
-#endif
         .context = &rma->ofi.msg.cq.ctx,
     };
+#if (!M_SYNC_RMA_EVENT)
+    msg.data |= m_ofi_data_set_rcq;
+#endif
     m_ofi_call(fi_writemsg(rma->ofi.ep, &msg, flags));
+    //----------------------------------------------------------------------------------------------
     if (rma->ofi.sig.flags) {
-        struct fi_msg_atomic msg = {
+        struct fi_msg_atomic sigmsg = {
             .msg_iov = &rma->ofi.sig.iov,
             .desc = &mem->ofi.signal.desc_local,
             .iov_count = 1,
@@ -484,18 +400,17 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
             .rma_iov_count = 1,
             .datatype = FI_INT32,
             .op = FI_SUM,
-#if (M_HAVE_RMA_EVENT)
-            .data = 0x0,
-#else
-            .data = m_ofi_data_set_rcq,
-#endif
+            .data = 0x0,  // atomics does NOT support FI_REMOTE_CQ_DATA
             .context = &rma->ofi.sig.ctx,
         };
-        m_ofi_call(fi_atomicmsg(rma->ofi.ep, &msg, rma->ofi.sig.flags));
+#if (!M_SYNC_RMA_EVENT)
+        sigmsg.data |= m_ofi_data_set_rcq;
+#endif
+        m_ofi_call(fi_atomicmsg(rma->ofi.ep, &sigmsg, rma->ofi.sig.flags));
     }
+    //----------------------------------------------------------------------------------------------
     // increment the counter
-    int increment = (rma->ofi.sig.flags) ? 2 : 1;
-    m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], increment);
+    m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], (rma->ofi.sig.flags) ? 2 : 1);
     // if we had to get a cq entry and the inject, mark is as done
     if (flags & FI_INJECT && rma->ofi.msg.cq.kind == m_ofi_cq_kind_rqst) {
         m_countr_fetch_add(&rma->ofi.msg.cq.rqst.busy, -1);
@@ -515,9 +430,7 @@ int ofi_rma_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, 
 }
 
 int ofi_rma_free(ofi_rma_t* rma) {
-    if (rma->ofi.msg.mr_local) {
-        m_ofi_call(fi_close(&rma->ofi.msg.mr_local->fid));
-    }
+    m_rmem_call(ofi_util_mr_close(rma->ofi.msg.mr_local));
     return m_success;
 }
 
@@ -664,7 +577,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         while (m_countr_load(mem->ofi.sync.epoch + 1) < nrank) {
             ofi_progress(&progress);
         }
-#if (M_HAVE_RMA_EVENT)
+#if (M_SYNC_RMA_EVENT)
         uint64_t threshold = m_countr_load(mem->ofi.sync.epoch + 2);
         // the counter is linked to the MR so waiting on it will trigger progress
         fi_cntr_wait(mem->ofi.data_trx[0].rcntr, threshold, -1);
@@ -683,7 +596,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         };
         uint64_t n_rcompleted = 0;
         while (m_countr_load(mem->ofi.sync.epoch + 1) < nrank ||
-#if (M_HAVE_RMA_EVENT)
+#if (M_SYNC_RMA_EVENT)
                n_rcompleted < m_countr_load(mem->ofi.sync.epoch + 2)) {
 #else
                m_countr_load(mem->ofi.sync.epoch + 2) > 0) {
@@ -694,7 +607,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
             for (int i = 0; i < mem->ofi.n_rx; ++i) {
                 progress.cq = mem->ofi.data_trx[i].cq;
                 ofi_progress(&progress);
-#if (M_HAVE_RMA_EVENT)
+#if (M_SYNC_RMA_EVENT)
                 // count the number of remote calls over the receive contexts
                 uint64_t n_ri = fi_cntr_read(mem->ofi.data_trx[i].rcntr);
                 if (n_ri > 0) {

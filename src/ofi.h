@@ -16,12 +16,17 @@
 #include "rdma/fi_atomic.h"
 #include "rmem.h"
 
-#ifdef HAVE_RMA_EVENT
-#define M_HAVE_RMA_EVENT 1
+#ifdef USE_RMA_EVENT
+#define M_SYNC_RMA_EVENT 1
+#else
+#define M_SYNC_RMA_EVENT 0
+#endif
+
+
+#if (M_SYNC_RMA_EVENT)
 #define OFI_CQ_FORMAT    FI_CQ_FORMAT_CONTEXT
 typedef struct fi_cq_entry ofi_cq_entry;
 #else
-#define M_HAVE_RMA_EVENT 0
 #define OFI_CQ_FORMAT    FI_CQ_FORMAT_DATA
 typedef struct fi_cq_data_entry ofi_cq_entry;
 #endif
@@ -183,7 +188,7 @@ typedef struct {
     struct fid_cq* cq;       // completion queue for RECEIVE and REMOTE_DATA
     struct fid_av* av;       // address vector
     struct fid_cntr* ccntr;  // Completed CouNTeR put and get
-#if (HAVE_RMA_EVENT)
+#if (M_SYNC_RMA_EVENT)
     struct fid_cntr* rcntr;  // Completed CouNTeR put and get
 #endif
 } ofi_rma_trx_t;
