@@ -34,7 +34,7 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
         m_assert(rcqd <= 1, "post must be <=1");
         m_countr_fetch_add(epoch + 2, -1);
     }
-#if (M_WRITEDATA)
+#if (M_WRITE_DATA)
     uint32_t sig = m_ofi_data_get_sig(*data);
     if (sig > 0) {
         m_assert(sig <= 1, "post must be <=1");
@@ -59,7 +59,7 @@ int ofi_progress(ofi_progress_t* progress) {
             m_verb("processing #%d/%d",i,ret);
             // get the context
             uint8_t* op_ctx = (uint8_t*)event[i].op_context;
-#if (!M_SYNC_RMA_EVENT)
+#if (!M_SYNC_RMA_EVENT || M_WRITE_DATA)
             // is it a remote data?
             if (!op_ctx) {
                 m_verb("data entry completed: using the fallback");

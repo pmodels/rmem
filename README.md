@@ -64,6 +64,11 @@ The `Makefile` offers various targets by defaults:
 
 Note: if you prefer to add another make_arch file, you can also invoke it using `ARCH_FILE=make_arch/myfile make`.
 
+### build variables
+
+- `NO_RMA_EVENT`: disactivate the use of RMA events to track of the RMA calls on the target side, uses `writedata` based approach instead.
+- `NO_WRITE_DATA`: disactivate the use of `fi_writedata` to complete the `put + signal` operation, uses a `FI_FENCE` approach instead.
+
 ## license
 
 ```

@@ -4,31 +4,42 @@
  */
 #ifndef OFI_H_
 #define OFI_H_
+#include <assert.h>
 #include <rdma/fabric.h>
 #include <rdma/fi_cm.h>
 #include <rdma/fi_endpoint.h>
 #include <rdma/fi_errno.h>
-#include <rdma/fi_tagged.h>
 #include <rdma/fi_rma.h>
+#include <rdma/fi_tagged.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+
 #include "rdma/fi_atomic.h"
 #include "rmem.h"
 
-#ifdef USE_RMA_EVENT
+#ifndef NO_RMA_EVENT
 #define M_SYNC_RMA_EVENT 1
 #else
 #define M_SYNC_RMA_EVENT 0
 #endif
 
-
-#if (M_SYNC_RMA_EVENT)
-#define OFI_CQ_FORMAT    FI_CQ_FORMAT_CONTEXT
-typedef struct fi_cq_entry ofi_cq_entry;
+#ifndef NO_WRITE_DATA
+#define M_WRITE_DATA 1
 #else
-#define OFI_CQ_FORMAT    FI_CQ_FORMAT_DATA
+#define M_WRITE_DATA 0
+#endif
+
+static_assert(!(!M_WRITE_DATA && !M_SYNC_RMA_EVENT),
+              "no RMA events and no write data is not supported. Pls review compilation flags "
+              "`-DNO_RMA_EVENT` and `-DNO_WRITE_DATA`");
+
+#if (!M_SYNC_RMA_EVENT || M_WRITE_DATA)
+#define OFI_CQ_FORMAT FI_CQ_FORMAT_DATA
 typedef struct fi_cq_data_entry ofi_cq_entry;
+#else
+#define OFI_CQ_FORMAT FI_CQ_FORMAT_CONTEXT
+typedef struct fi_cq_entry ofi_cq_entry;
 #endif
 
 //--------------------------------------------------------------------------------------------------
@@ -77,23 +88,28 @@ static inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 
 //--------------------------------------------------------------------------------------------------
 // rma flags sent either as REMOTE_CQ_DATA or as 64 bit msg
-// 48 bits total: [ unsu | 1b post | 1b complete | ... | 32 bits # of operations]
-#define m_ofi_data_tot      48
-#define m_ofi_data_internal 16
-#define m_ofi_data_avail    (m_ofi_data_tot - m_ofi_data_intern)
+// all the providers are required to support 4bytes, so we use that value
+// 32 bits total: [ unsu | 1b post | 1b complete | ... | 16 bits # of operations]
+#define m_ofi_data_tot    32
+#define m_ofi_data_intern 16
+#define m_ofi_data_avail  (m_ofi_data_tot - m_ofi_data_intern)
 
 #define m_ofi_data_bit_post (m_ofi_data_tot - 1)
 #define m_ofi_data_bit_cmpl (m_ofi_data_tot - 2)
 #define m_ofi_data_bit_rcq  (m_ofi_data_tot - 3)
+#define m_ofi_data_bit_sig  (m_ofi_data_tot - 4)
 
 #define m_ofi_data_set_rcq     ((uint64_t)0x1 << m_ofi_data_bit_rcq)
+#define m_ofi_data_set_sig     ((uint64_t)0x1 << m_ofi_data_bit_sig)
 #define m_ofi_data_set_post    ((uint64_t)0x1 << m_ofi_data_bit_post)
 #define m_ofi_data_set_cmpl    ((uint64_t)0x1 << m_ofi_data_bit_cmpl)
 #define m_ofi_data_get_rcq(a)  ((a >> m_ofi_data_bit_rcq) & 0x1)
+#define m_ofi_data_get_sig(a)  ((a >> m_ofi_data_bit_sig) & 0x1)
 #define m_ofi_data_get_post(a) ((a >> m_ofi_data_bit_post) & 0x1)
 #define m_ofi_data_get_cmpl(a) ((a >> m_ofi_data_bit_cmpl) & 0x1)
-#define m_ofi_data_set_nops(a) (((uint64_t)a) & ((uint64_t)0xffffffff))
-#define m_ofi_data_get_nops(a) ((uint32_t)(a & 0xffffffff))
+#define m_ofi_data_mask_nops (((uint64_t)0x1 << m_ofi_data_avail) -1 )
+#define m_ofi_data_set_nops(a) (((uint64_t)a) & m_ofi_data_mask_nops)
+#define m_ofi_data_get_nops(a) ((uint32_t)(a & m_ofi_data_mask_nops))
 
 //--------------------------------------------------------------------------------------------------
 #define m_ofi_cq_kind_null (0x01)  // 0000 0001
@@ -205,10 +221,18 @@ typedef struct {
     uint64_t* base_list;  // list of base addresses
     uint64_t* key_list;  // list of remote keys
     struct fid_mr* mr;
+    // remote counters for the signal
+    struct fid_cntr* scntr;
 } ofi_rma_sig_t;
 
 typedef struct {
+#if (M_WRITE_DATA)
+    countr_t epoch[4];  // epoch[0] = # of post, epoch[1] = # of completed, epoch[2] = working cntr,
+                        // epoch[3] = signal
+#else
     countr_t epoch[3];  // epoch[0] = # of post, epoch[1] = # of completed, epoch[2] = working cntr
+    countr_t scntr;    // signal counter
+#endif
     countr_t* icntr;    // array of fi_write counter (for each rank)
     ofi_cqdata_t* cqdata;  // completion data for each rank
 } ofi_rma_sync_t;
@@ -235,11 +259,15 @@ typedef struct {
             ofi_cqdata_t cq;
         } msg;
         struct {
+#if (M_WRITE_DATA)
+            uint64_t data;
+#else
             uint64_t flags;
             // iovs
             struct fi_ioc iov;
             struct fi_rma_ioc riov;
-            struct fi_context ctx; // to replace by cqdata_t if RPUT_SIG is desired
+            struct fi_context ctx;  // to replace by cqdata_t if RPUT_SIG is desired
+#endif
         } sig;
         fi_addr_t addr;
         struct fid_ep* ep;
@@ -265,7 +293,9 @@ typedef struct {
         ofi_rma_trx_t* sync_trx;
         ofi_rma_trx_t* data_trx;
         // signaling
+#if (!M_WRITE_DATA)
         ofi_rma_sig_t signal;
+#endif
         // synchronization (PSCW)
         ofi_rma_sync_t sync;
     } ofi;
@@ -302,6 +332,9 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
+
+// signal
+int ofi_rmem_sig_wait(const uint32_t val, ofi_rmem_t* mem);
 
 // operation creation
 int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);

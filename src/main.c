@@ -318,6 +318,7 @@ int main(int argc, char** argv) {
                     PMI_Barrier();
                     m_rmem_prof(prof_psig, time[(it >= 0) ? it : 0]) {
                         ofi_rmem_post(1, &peer, &pmem, &comm);
+                        ofi_rmem_sig_wait(n_msg,&pmem);
                         ofi_rmem_wait(1, &peer, &pmem, &comm);
                     }
                     // check the results
@@ -378,6 +379,7 @@ int main(int argc, char** argv) {
         }
         ofi_p2p_free(&p2p_retry);
     }
+    free(retry_ptr);
     m_rmem_call(ofi_finalize(&comm));
     return EXIT_SUCCESS;
 }

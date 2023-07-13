@@ -65,7 +65,11 @@ int ofi_prov_score(char* provname) {
     return 0;
 }
 
-#define ofi_cap_mode     FI_MSG | FI_TAGGED | FI_RMA 
+#if (M_WRITE_DATA)
+#define ofi_cap_mode     FI_MSG | FI_TAGGED | FI_RMA
+#else
+#define ofi_cap_mode     FI_MSG | FI_TAGGED | FI_RMA | FI_FENCE
+#endif
 #define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND | FI_ATOMIC
 #if (M_SYNC_RMA_EVENT)
 #define ofi_cap_ops_rx \
@@ -336,6 +340,9 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     return m_success;
 }
 
+/**
+ * @brief bind the counter to the mr (if not NULL), and bind the MR to the EP (if not null)
+*/
 int ofi_util_mr_bind(struct fid_ep* ep, struct fid_mr* mr, struct fid_cntr* cntr,
                           ofi_comm_t* comm) {
     if (mr) {
@@ -344,7 +351,7 @@ int ofi_util_mr_bind(struct fid_ep* ep, struct fid_mr* mr, struct fid_cntr* cntr
             m_ofi_call(fi_mr_bind(mr, &cntr->fid, FI_REMOTE_WRITE));
         }
         // bind the mr to the ep
-        if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+        if (ep && comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
             uint64_t mr_trx_flags = 0;
             m_ofi_call(fi_mr_bind(mr, &ep->fid, mr_trx_flags));
         }

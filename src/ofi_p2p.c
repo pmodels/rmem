@@ -45,6 +45,7 @@ typedef enum {
 } p2p_opt_t;
 
 int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2p_opt_t op) {
+    //
     m_assert(ctx_id < comm->n_ctx, "ctx id = %d < the number of ctx = %d", ctx_id, comm->n_ctx);
     ofi_ctx_t* ctx = comm->ctx + ctx_id;
     // set the progress param
