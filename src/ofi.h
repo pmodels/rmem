@@ -45,18 +45,14 @@ typedef struct fi_cq_entry ofi_cq_entry;
 //--------------------------------------------------------------------------------------------------
 
 //--------------------------------------------------------------------------------------------------
-#ifndef NDEBUG
 #define m_ofi_call(func)                                                              \
     do {                                                                              \
-        int m_ofi_call_res = func;                                                    \
+        int m_ofi_call_res;                                                           \
+        do {                                                                          \
+            m_ofi_call_res = func;                                                    \
+        } while (m_ofi_call_res == -FI_EAGAIN);                                       \
         m_assert(m_ofi_call_res >= 0, "OFI ERROR: %s", fi_strerror(-m_ofi_call_res)); \
     } while (0)
-#else
-#define m_ofi_call(func) \
-    do {                 \
-        func;            \
-    } while (0)
-#endif
 
 //--------------------------------------------------------------------------------------------------
 // TAGGED SEND-RECV
