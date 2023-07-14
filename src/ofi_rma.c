@@ -590,12 +590,13 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     // count the number of completed calls and wait till they are all done
     // must complete all the sync call done in rmem_post (if any) + the signal calls
 #if (!M_WRITE_DATA)
+    m_verb("complete: waiting for %d syncs, %d calls and %d signals to complete", nrank,
+           ttl_data, m_countr_load(&mem->ofi.sync.scntr));
     uint64_t threshold = nrank + ttl_data + m_countr_exchange(&mem->ofi.sync.scntr, 0);
-    m_verb("complete: waiting for %d syncs, %d calls and %d signals to complete (total: %d)", nrank,
-           ttl_data, m_countr_load(&mem->ofi.sync.scntr), threshold);
 #else
     uint64_t threshold = nrank + ttl_data;
-    m_verb("complete: waiting for %d syncs, %d calls (total: %d)", nrank, ttl_data, threshold);
+    m_verb("complete: waiting for %d syncs, %d calls (total: %" PRIu64 ")", nrank, ttl_data,
+           threshold);
 #endif
     fi_cntr_wait(mem->ofi.ccntr, threshold, -1);
     return m_success;

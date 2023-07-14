@@ -66,18 +66,24 @@ int ofi_prov_score(char* provname) {
 }
 
 #if (M_WRITE_DATA)
-#define ofi_cap_mode     FI_MSG | FI_TAGGED | FI_RMA
+#define ofi_sig_cap 0x0
 #else
-#define ofi_cap_mode     FI_MSG | FI_TAGGED | FI_RMA | FI_FENCE
+#define ofi_sig_cap FI_FENCE | FI_ATOMIC
 #endif
-#define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND | FI_ATOMIC
 #if (M_SYNC_RMA_EVENT)
-#define ofi_cap_ops_rx \
-    FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_RMA_EVENT | FI_DIRECTED_RECV
+#define ofi_syn_cap FI_RMA_EVENT
 #else
-#define ofi_cap_ops_rx \
-    FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_REMOTE_CQ_DATA | FI_DIRECTED_RECV
+#define ofi_syn_cap 0x0
 #endif
+#define ofi_cap FI_MSG | FI_TAGGED | FI_RMA | FI_DIRECTED_RECV | ofi_sig_cap | ofi_syn_cap
+// #define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND | FI_ATOMIC
+// #if (M_SYNC_RMA_EVENT)
+// #define ofi_cap_ops_rx \
+//     FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_RMA_EVENT | FI_DIRECTED_RECV
+// #else
+// #define ofi_cap_ops_rx \
+//     FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_REMOTE_CQ_DATA | FI_DIRECTED_RECV
+// #endif
 
 int ofi_util_get_prov(struct fi_info** prov) {
     // get the list of available providers and select the best one
@@ -103,47 +109,67 @@ int ofi_util_get_prov(struct fi_info** prov) {
     fi_freeinfo(prov_list);  // no need of prov_list anymore
     
     // set the mode bits to 1, not doing this leads to provider selection failure
-    hints->mode = ~0;
-	hints->domain_attr->mode = ~0;
-	hints->domain_attr->mr_mode = ~(FI_MR_BASIC | FI_MR_SCALABLE);
+ //    hints->mode = ~0;
+	// hints->domain_attr->mode = ~0;
+	// hints->domain_attr->mr_mode = ~(FI_MR_BASIC | FI_MR_SCALABLE);
 
-    // hint and best_prov bothe evolve as we add capabilities. "hints" is used to test the
-    // capability, while best_prov stores them if they match a provider set the minimal requirements
-    m_ofi_fatal_info(hints, caps, FI_RMA);  // implies (REMOTE_)READ/WRITE
+    //----------------------------------------------------------------------------------------------
+    // basic requirement are the modes and the caps
+    // get_info is free to waive the mode bit set, but they are supported
+    hints->mode = 0x0;
+    hints->domain_attr->mode = 0x0;
+    hints->domain_attr->mr_mode = 0x0;
+    // we provide the context
+    hints->mode |= FI_CONTEXT;
+    // do not bind under the same cq/counter different capabilities endpoints
+    hints->mode |= FI_RESTRICTED_COMP;
+    hints->domain_attr->mode |= FI_RESTRICTED_COMP; 
+    // MR endpoint is supported
+    hints->domain_attr->mr_mode |= FI_MR_ENDPOINT;
+    // optional:
+    hints->domain_attr->mr_mode |= FI_MR_LOCAL;
+    hints->domain_attr->mr_mode |= FI_MR_PROV_KEY;
+    hints->domain_attr->mr_mode |= FI_MR_ALLOCATED;
+    hints->domain_attr->mr_mode |= FI_MR_VIRT_ADDR;
+
+    // try to get those modes with the minimum caps
+    m_ofi_fatal_info(hints, caps, ofi_cap);  // implies SEND/RECV
+
+    // improve the selection if required in case of specific usage
 #if (M_SYNC_RMA_EVENT)
+    // request support for MR_RMA_EVENT
+    hints->domain_attr->mr_mode |= FI_MR_RMA_EVENT;
     m_ofi_fatal_info(hints, caps, FI_RMA_EVENT);
 #endif
-    m_ofi_fatal_info(hints, caps, FI_ATOMIC);              // implies (REMOTE_)READ/WRITE
-    m_ofi_fatal_info(hints, caps, FI_MSG | FI_TAGGED | FI_DIRECTED_RECV);  // implies SEND/RECV
+#if (!M_WRITE_DATA)
+    m_ofi_fatal_info(hints, caps, FI_ATOMIC);  // implies (REMOTE_)READ/WRITE
+#endif
 
+    //----------------------------------------------------------------------------------------------
     // try to get more specific behavior
+    // Reliable Datagram
     m_ofi_test_info(hints, ep_attr->type, FI_EP_RDM);
+    // try to use shared context (reduces the memory)
     m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
     m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
+    // enable automatic ressource management
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
-    // m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
-    // m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
+    m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
+    // request manual progress (comment when using sockets on MacOs)
+    m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
+    m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
+    // no order required
     m_ofi_test_info(hints, tx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, tx_attr->comp_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->comp_order, FI_ORDER_NONE);
-    m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
 
-    // get_info is free to waive those requirements, but they are supported
-    m_ofi_test_info(hints, domain_attr->mr_mode, FI_MR_RMA_EVENT);
-    m_ofi_test_info(hints, domain_attr->mr_mode, FI_MR_LOCAL);
-    m_ofi_test_info(hints, domain_attr->mr_mode, FI_MR_PROV_KEY);
-    m_ofi_test_info(hints, domain_attr->mr_mode, FI_MR_ALLOCATED);
-
-    // check the mode arguments now
+    // check the mode arguments now, fail is some modes are required
     m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, hints, prov));
     m_assert(*prov, "The provider list is empty");
     m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_RX_CQ_DATA");
     m_assert(!((*prov)->mode & FI_ASYNC_IOV), "need to use FI_ASYNC_IOV");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_RAW), "need to use FI_MR_RAW");
-    // m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_LOCAL), "need to use FI_MR_LOCAL");
-    // m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_VIRT_ADDR), "need to use FI_MR_VIRT_ADDR");
-    m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_BASIC), "need to support FI_MR_BASIC");
 
     // improsing the modes must happen on (*prov), otherwise it's overwritten when done in hints
     m_verb("%s: is FI_MR_LOCAL required? %d", (*prov)->fabric_attr->prov_name,
@@ -207,13 +233,13 @@ int ofi_util_new_ep(const bool new_ctx, struct fi_info* prov, struct fid_domain*
             m_verb("creating new STX/SRX");
             // create the shared receive and transmit context
             struct fi_tx_attr tx_attr = {
-                .caps = ofi_cap_mode | ofi_cap_ops_tx,
+                .caps = ofi_cap,
                 .msg_order = FI_ORDER_NONE,
                 .comp_order = FI_ORDER_NONE,
             };
             m_ofi_call(fi_stx_context(dom, &tx_attr, stx, NULL));
             struct fi_rx_attr rx_attr = {
-                .caps = ofi_cap_mode | ofi_cap_ops_rx,
+                .caps = ofi_cap,
                 .msg_order = FI_ORDER_NONE,
                 .comp_order = FI_ORDER_NONE,
             };
