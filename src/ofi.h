@@ -203,13 +203,9 @@ typedef struct {
     struct fid_ep* srx;
     struct fid_cq* cq;       // completion queue for RECEIVE and REMOTE_DATA
     struct fid_av* av;       // address vector
-    struct fid_cntr* ccntr;  // Completed CouNTeR put and get
-#if (M_SYNC_RMA_EVENT)
-    struct fid_cntr* rcntr;  // Completed CouNTeR put and get
-#endif
 } ofi_rma_trx_t;
 
-
+#if (!M_WRITE_DATA)
 typedef struct {
     // signal counter - must be allocated to comply with FI_MR_ALLOCATE
     uint32_t* inc;  // increment value, always 1
@@ -219,11 +215,12 @@ typedef struct {
     struct fid_mr* mr_local;
     // structs for fi_atomics
     uint64_t* base_list;  // list of base addresses
-    uint64_t* key_list;  // list of remote keys
+    uint64_t* key_list;   // list of remote keys
     struct fid_mr* mr;
-    // remote counters for the signal
+    // remote counters for the signal, always available per the static assert above
     struct fid_cntr* scntr;
 } ofi_rma_sig_t;
+#endif
 
 typedef struct {
 #if (M_WRITE_DATA)
@@ -292,7 +289,12 @@ typedef struct {
         // transmit and receive contexts
         ofi_rma_trx_t* sync_trx;
         ofi_rma_trx_t* data_trx;
-        // signaling
+        // completion and remote counter global for all trx
+        struct fid_cntr* ccntr;
+#if (M_SYNC_RMA_EVENT)
+        struct fid_cntr* rcntr;  // Completed CouNTeR put and get
+#endif
+            // signaling
 #if (!M_WRITE_DATA)
         ofi_rma_sig_t signal;
 #endif
