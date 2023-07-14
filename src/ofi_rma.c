@@ -500,7 +500,7 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     for (int i = 0; i < nrank; ++i) {
         ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
         cqdata->sync.buf = m_ofi_data_set_post;
-        uint64_t tag = m_ofi_tag_set_sync;
+        uint64_t tag = m_ofi_tag_set_ps;
         m_ofi_call(fi_tsend(mem->ofi.sync_trx->ep, &cqdata->sync.buf, sizeof(uint64_t),
                             cqdata->sync.buf_desc, mem->ofi.sync_trx->addr[rank[i]], tag,
                             &cqdata->ctx));
@@ -516,7 +516,7 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     struct fi_msg_tagged msg = {
         .msg_iov = &iov,
         .iov_count = 1,
-        .tag = m_ofi_tag_set_sync,
+        .tag = m_ofi_tag_set_cw,
         .ignore = 0x0,
         .data = 0,
     };
@@ -544,7 +544,7 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
     struct fi_msg_tagged msg = {
         .msg_iov = &iov,
         .iov_count = 1,
-        .tag = m_ofi_tag_set_sync,
+        .tag = m_ofi_tag_set_ps,
         .ignore = 0x0,
         .data = 0,
     };
@@ -574,7 +574,7 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     // count the number of calls issued for each of the ranks and notify them
     int ttl_data = 0;
-    uint64_t tag = m_ofi_tag_set_sync;
+    uint64_t tag = m_ofi_tag_set_cw;
     for (int i = 0; i < nrank; ++i) {
         int issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
         ttl_data += issued_rank;

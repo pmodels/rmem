@@ -67,8 +67,10 @@ typedef struct fi_cq_entry ofi_cq_entry;
 #define m_ofi_tag_avail  (m_ofi_tag_tot - m_ofi_tag_intern - m_ofi_tag_ctx )
 
 // internal
-#define m_ofi_tag_bit_sync (m_ofi_tag_tot - 1)
-#define m_ofi_tag_set_sync ((uint64_t)0x1 << m_ofi_tag_bit_sync)
+#define m_ofi_tag_bit_ps (m_ofi_tag_tot - 1)
+#define m_ofi_tag_bit_cw (m_ofi_tag_tot - 2)
+#define m_ofi_tag_set_ps ((uint64_t)0x1 << m_ofi_tag_bit_ps)
+#define m_ofi_tag_set_cw ((uint64_t)0x1 << m_ofi_tag_bit_cw)
 // ctx
 #define m_ofi_tag_ctx_shift    (m_ofi_tag_avail - m_ofi_tag_intern)
 #define m_ofi_tag_ctx_bits     ((uint64_t)0x7f)  // mask to get the context
