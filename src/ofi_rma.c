@@ -496,7 +496,7 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     m_countr_store(mem->ofi.sync.epoch + 2, 0);
 
     // notify readiness to the rank list
-    fi_cntr_set(mem->ofi.ccntr, 0);
+    m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
     for (int i = 0; i < nrank; ++i) {
         ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
         cqdata->sync.buf = m_ofi_data_set_post;
@@ -506,7 +506,7 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
                             &cqdata->ctx));
     }
     // wait for completion of the inject calls
-    fi_cntr_wait(mem->ofi.ccntr, nrank, -1);
+    m_ofi_call(fi_cntr_wait(mem->ofi.ccntr, nrank, -1));
     //----------------------------------------------------------------------------------------------
     // prepost the recv buffers -> this can be done because we don't track completion of the recv
     // count using mem->ofi.ccntr
@@ -536,7 +536,7 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
 // wait for the processes in comm to notify their exposure
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     // reset the completion counter, we start counting now
-    fi_cntr_set(mem->ofi.ccntr, 0);
+    m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
     // open the handshake requests
     struct iovec iov = {
         .iov_len = sizeof(uint64_t),
@@ -602,6 +602,35 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     return m_success;
 }
 
+int ofi_rmem_wait_until(const int threshold, const int ttl, ofi_rmem_t* mem) {
+    // compare the number of calls done to the value in the epoch if everybody has finished
+    m_verb("wait untill: waiting for %d calls to complete", threshold);
+#if (M_SYNC_RMA_EVENT)
+    // the counter is linked to the MR so waiting on it will trigger progress
+    m_ofi_call(fi_cntr_wait(mem->ofi.rcntr, threshold, -1));
+    // CXI shenanigans: we have to remove the events already counted
+    // going negative on epoch is okay, countr_t is an atomic int. it prevents waiting for the event
+    // already happened. progress will only add to this
+    m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
+    m_countr_fetch_add(mem->ofi.sync.epoch + 2, -threshold);
+#else
+    // every put comes with data that will substract 1 to the epoch[2] value, so we wait for
+    // ttl-threshold to complete
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+    };
+    int i = 0;
+    while (m_countr_load(mem->ofi.sync.epoch + 2) > (ttl - threshold)) {
+        progress.cq = mem->ofi.data_trx[i].cq;
+        ofi_progress(&progress);
+        // update the counter
+        i = (i + 1) % mem->ofi.n_tx;
+    }
+#endif
+    return m_success;
+}
+
 int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     // compare the number of calls done to the value in the epoch if everybody has finished
     ofi_progress_t progress = {
@@ -621,12 +650,12 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         // update the counter
         i = (i + 1) % mem->ofi.n_tx;
     }
-    m_verb("wait: waiting for %d calls to complete", m_countr_load(mem->ofi.sync.epoch + 2));
+    m_verb("waitall: waiting for %d calls to complete", m_countr_load(mem->ofi.sync.epoch + 2));
 #if (M_SYNC_RMA_EVENT)
     uint64_t threshold = m_countr_load(mem->ofi.sync.epoch + 2);
     // the counter is linked to the MR so waiting on it will trigger progress
-    fi_cntr_wait(mem->ofi.rcntr, threshold, -1);
-    fi_cntr_set(mem->ofi.rcntr, 0);
+    m_ofi_call(fi_cntr_wait(mem->ofi.rcntr, threshold, -1));
+    m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
 #else
     // every put comes with data that will substract 1 to the epoch[2] value
     i = 0;

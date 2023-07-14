@@ -17,12 +17,12 @@
 #include "rmem_utils.h"
 
 //#define msg_size 1024
-#define n_msg 13
+#define n_msg 1
 #define max_size (1<<18)
-#define n_measure 150
+#define n_measure 50
 #define n_warmup 5
 #define retry_threshold 0.05
-#define retry_max 1
+#define retry_max 20
 
 int main(int argc, char** argv) {
     const int nth = 1;  // omp_get_max_threads();
@@ -180,7 +180,7 @@ int main(int argc, char** argv) {
                     .disp = i * msg_size * sizeof(int),
                     .peer = peer,
                 };
-                ofi_rma_put_signal_init(lat + i, &pmem, 0, &comm);
+                ofi_rma_put_init(lat + i, &pmem, 0, &comm);
             }
             *retry_ptr = 1;
             while (*retry_ptr) {
@@ -384,7 +384,7 @@ int main(int argc, char** argv) {
                     ofi_rmem_post(1, &peer, &pmem, &comm);
                     PMI_Barrier();
                     m_rmem_prof(prof_lat, time[(it >= 0) ? it : 0]) {
-                        ofi_rmem_sig_wait(n_msg, &pmem);
+                        ofi_rmem_wait_until(n_msg, n_msg, &pmem);
                     }
                     ofi_rmem_wait(1, &peer, &pmem, &comm);
                     // check the results
@@ -432,15 +432,18 @@ int main(int argc, char** argv) {
                 "\tP2P       = %f +-[%f]\n"
                 "\tPUT       = %f +-[%f] (ratio = %f)\n"
                 "\tPUT + SIG = %f +-[%f] (ratio = %f)\n"
-                "\tPUT + LAT = %f +-[%f] (ratio = %f)",
-                ttl_len * sizeof(int), n_msg, tavg_p2p / n_msg, ci_p2p / n_msg, tavg_put / n_msg,
-                ci_put / n_msg, tavg_put / tavg_p2p, tavg_psig / n_msg, ci_psig / n_msg,
+                "\tPUT LAT   = %f +-[%f] (ratio = %f)",
+                ttl_len * sizeof(int), n_msg,
+                tavg_p2p / n_msg, ci_p2p / n_msg,
+                tavg_put / n_msg, ci_put / n_msg, tavg_put / tavg_p2p,
+                tavg_psig / n_msg, ci_psig / n_msg,
                 tavg_psig / tavg_p2p, tavg_lat / n_msg, ci_lat / n_msg, tavg_lat / tavg_p2p);
             // write to csv
             FILE* file = fopen(fullname, "a");
             m_assert(file, "file must be open");
-            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f\n", ttl_len * sizeof(int), tavg_p2p/n_msg, tavg_put/n_msg,
-                    tavg_psig/n_msg, ci_p2p/n_msg, ci_put/n_msg, ci_psig/n_msg);
+            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f\n", ttl_len * sizeof(int),
+                    tavg_p2p/n_msg, tavg_put/n_msg, tavg_psig/n_msg, tavg_lat/n_msg,
+                    ci_p2p/n_msg, ci_put/n_msg, ci_psig/n_msg, ci_lat/n_msg);
             fclose(file);
             //--------------------------------------------------------------------------------------
         }

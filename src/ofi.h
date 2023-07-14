@@ -328,6 +328,10 @@ int ofi_rma_wait(ofi_rma_t* p2p);
 int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm);
 
+// useful to measure latency w/o the sync
+int ofi_rmem_wait_until(const int threshold,const int ttl, ofi_rmem_t* mem);
+
+// PSCW 101
 int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
