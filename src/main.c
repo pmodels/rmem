@@ -19,7 +19,7 @@
 //#define msg_size 1024
 #define n_msg 1
 #define max_size (1<<18)
-#define n_measure 15
+#define n_measure 150
 #define n_warmup 5
 #define retry_threshold 0.05
 #define retry_max 1

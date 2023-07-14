@@ -16,19 +16,23 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
     m_assert(*data > 0, "the value of data should be > 0 (and not %" PRIu64 ")", *data);
     m_assert(sizeof(int) == sizeof(uint32_t), "atomic int must be of size 32");
     uint32_t post = m_ofi_data_get_post(*data);
-    uint32_t cmpl = m_ofi_data_get_cmpl(*data);
-    uint32_t nops = m_ofi_data_get_nops(*data);
-    uint32_t rcqd = m_ofi_data_get_rcq(*data);
     // get the atomic_int array to increment, always the same one
     if (post > 0) {
         m_assert(post <= 1, "post must be <=1");
         m_countr_fetch_add(epoch + 0, post);
+        // if we get a post, we do not need to handle something else
+        return;
     }
+    uint32_t cmpl = m_ofi_data_get_cmpl(*data);
+    uint32_t nops = m_ofi_data_get_nops(*data);
     if (cmpl > 0) {
         m_assert(cmpl <= 1, "post must be <=1");
         m_countr_fetch_add(epoch + 2, nops);
         m_countr_fetch_add(epoch + 1, cmpl);
+        // if we get a complete, we do not need to handle something else
+        return;
     }
+    uint32_t rcqd = m_ofi_data_get_rcq(*data);
     if (rcqd > 0) {
         // if we receive a remote cq data then we remove -1 to the epoch[2]
         m_assert(rcqd <= 1, "post must be <=1");
@@ -41,6 +45,7 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
         m_countr_fetch_add(epoch + 3, 1);
     }
 #endif
+    return;
 }
 
 /**
