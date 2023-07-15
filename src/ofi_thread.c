@@ -37,7 +37,15 @@ void* ofi_tthread_main(void* arg) {
                 .data = 0x0,
                 .context = &msg_cq->ctx,
             };
+#if (!M_SYNC_RMA_EVENT)
+            msg.data |= m_ofi_data_set_rcq;
+#endif
+#if (M_WRITE_DATA)
+            m_ofi_rma_structgetptr(uint64_t, sig_data, sig.data, task);
+            msg.data |= *sig_data;
+#endif
             m_ofi_call(fi_writemsg(*ep, &msg, *msg_flags));
+#if (!M_WRITE_DATA)
             // signal if needed
             m_ofi_rma_structgetptr(uint64_t, sig_flags, sig.flags, task);
             if ((*sig_flags)) {
@@ -59,10 +67,10 @@ void* ofi_tthread_main(void* arg) {
                 };
                 m_ofi_call(fi_atomicmsg(*ep, &msg, *sig_flags));
             }
+#endif
             // if we had to get a cq entry and the inject, mark is as done
             if ((*msg_flags) & FI_INJECT && (*msg_flags) & FI_COMPLETION) {
-                m_ofi_rma_structgetptr(countr_t, completed, completed, task);
-                m_countr_fetch_add(completed, 1);
+                m_countr_fetch_add(&msg_cq->rqst.busy, -1);
             }
         }
         // test if we need to abort, ideally we don't do this

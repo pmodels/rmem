@@ -65,9 +65,25 @@ int ofi_prov_score(char* provname) {
     return 0;
 }
 
-#define ofi_cap_mode     FI_MSG | FI_TAGGED | FI_RMA
-#define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND
-#define ofi_cap_ops_rx   FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_RMA_EVENT | FI_DIRECTED_RECV
+#if (M_WRITE_DATA)
+#define ofi_sig_cap 0x0
+#else
+#define ofi_sig_cap FI_FENCE | FI_ATOMIC
+#endif
+#if (M_SYNC_RMA_EVENT)
+#define ofi_syn_cap FI_RMA_EVENT
+#else
+#define ofi_syn_cap 0x0
+#endif
+#define ofi_cap FI_MSG | FI_TAGGED | FI_RMA | FI_DIRECTED_RECV | ofi_sig_cap | ofi_syn_cap
+// #define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND | FI_ATOMIC
+// #if (M_SYNC_RMA_EVENT)
+// #define ofi_cap_ops_rx \
+//     FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_RMA_EVENT | FI_DIRECTED_RECV
+// #else
+// #define ofi_cap_ops_rx \
+//     FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_REMOTE_CQ_DATA | FI_DIRECTED_RECV
+// #endif
 
 int ofi_util_get_prov(struct fi_info** prov) {
     // get the list of available providers and select the best one
@@ -93,37 +109,77 @@ int ofi_util_get_prov(struct fi_info** prov) {
     fi_freeinfo(prov_list);  // no need of prov_list anymore
     
     // set the mode bits to 1, not doing this leads to provider selection failure
-    hints->mode = ~0;
-	hints->domain_attr->mode = ~0;
-	hints->domain_attr->mr_mode = ~(FI_MR_BASIC | FI_MR_SCALABLE);
+ //    hints->mode = ~0;
+	// hints->domain_attr->mode = ~0;
+	// hints->domain_attr->mr_mode = ~(FI_MR_BASIC | FI_MR_SCALABLE);
 
-    // hint and best_prov bothe evolve as we add capabilities. "hints" is used to test the
-    // capability, while best_prov stores them if they match a provider set the minimal requirements
-    m_ofi_fatal_info(hints, domain_attr->mr_mode, FI_MR_PROV_KEY);
-    m_ofi_fatal_info(hints, caps, FI_RMA | FI_RMA_EVENT);  // implies (REMOTE_)READ/WRITE
-    m_ofi_fatal_info(hints, caps, FI_ATOMIC);              // implies (REMOTE_)READ/WRITE
-    m_ofi_fatal_info(hints, caps, FI_MSG | FI_TAGGED | FI_DIRECTED_RECV);  // implies SEND/RECV
+    //----------------------------------------------------------------------------------------------
+    // basic requirement are the modes and the caps
+    // get_info is free to waive the mode bit set, but they are supported
+    hints->mode = 0x0;
+    hints->domain_attr->mode = 0x0;
+    hints->domain_attr->mr_mode = 0x0;
+    // we provide the context
+    hints->mode |= FI_CONTEXT;
+    // do not bind under the same cq/counter different capabilities endpoints
+    hints->mode |= FI_RESTRICTED_COMP;
+    hints->domain_attr->mode |= FI_RESTRICTED_COMP; 
+    // MR endpoint is supported
+    hints->domain_attr->mr_mode |= FI_MR_ENDPOINT;
+    // optional:
+    hints->domain_attr->mr_mode |= FI_MR_LOCAL;
+    hints->domain_attr->mr_mode |= FI_MR_PROV_KEY;
+    hints->domain_attr->mr_mode |= FI_MR_ALLOCATED;
+    hints->domain_attr->mr_mode |= FI_MR_VIRT_ADDR;
 
+    // try to get those modes with the minimum caps
+    m_ofi_fatal_info(hints, caps, ofi_cap);  // implies SEND/RECV
+
+    // improve the selection if required in case of specific usage
+#if (M_SYNC_RMA_EVENT)
+    // request support for MR_RMA_EVENT
+    hints->domain_attr->mr_mode |= FI_MR_RMA_EVENT;
+    m_ofi_fatal_info(hints, caps, FI_RMA_EVENT);
+#endif
+#if (!M_WRITE_DATA)
+    m_ofi_fatal_info(hints, caps, FI_ATOMIC);  // implies (REMOTE_)READ/WRITE
+#endif
+
+    //----------------------------------------------------------------------------------------------
     // try to get more specific behavior
+    // Reliable Datagram
     m_ofi_test_info(hints, ep_attr->type, FI_EP_RDM);
+    // try to use shared context (reduces the memory)
     m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
     m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
+    // enable automatic ressource management
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
+    m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
+    // request manual progress (comment when using sockets on MacOs)
+    m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
+    m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
+    // no order required
     m_ofi_test_info(hints, tx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, tx_attr->comp_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->comp_order, FI_ORDER_NONE);
 
-    // check the mode arguments now
+    // check the mode arguments now, fail is some modes are required
     m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, hints, prov));
     m_assert(*prov, "The provider list is empty");
-    m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_MR_RAW");
+    m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_RX_CQ_DATA");
     m_assert(!((*prov)->mode & FI_ASYNC_IOV), "need to use FI_ASYNC_IOV");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_RAW), "need to use FI_MR_RAW");
-    m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_LOCAL), "need to use FI_MR_LOCAL");
-    //m_assert((*prov)->tx_attr->inject_size >= OFI_INJECT_THRESHOLD,
-    //         "the inject size = %ld must be >= threshold = %d", (*prov)->tx_attr->inject_size,
-    //         OFI_INJECT_THRESHOLD);
+
+    // improsing the modes must happen on (*prov), otherwise it's overwritten when done in hints
+    m_verb("%s: is FI_MR_LOCAL required? %d", (*prov)->fabric_attr->prov_name,
+          ((*prov)->domain_attr->mr_mode & FI_MR_LOCAL) > 0);
+    m_verb("%s: is FI_MR_PROV_KEY required? %d", (*prov)->fabric_attr->prov_name,
+          ((*prov)->domain_attr->mr_mode & FI_MR_PROV_KEY) > 0);
+    m_verb("%s: is FI_MR_ALLOCATED required? %d", (*prov)->fabric_attr->prov_name,
+          ((*prov)->domain_attr->mr_mode & FI_MR_ALLOCATED) > 0);
+    m_verb("%s: is FI_MR_VIRT_ADDR required? %d", (*prov)->fabric_attr->prov_name,
+          ((*prov)->domain_attr->mr_mode & FI_MR_VIRT_ADDR) > 0);
     m_verb("found compatible provider: %s", (*prov)->fabric_attr->prov_name);
 
     // free the hints
@@ -177,13 +233,13 @@ int ofi_util_new_ep(const bool new_ctx, struct fi_info* prov, struct fid_domain*
             m_verb("creating new STX/SRX");
             // create the shared receive and transmit context
             struct fi_tx_attr tx_attr = {
-                .caps = ofi_cap_mode | ofi_cap_ops_tx,
+                .caps = ofi_cap,
                 .msg_order = FI_ORDER_NONE,
                 .comp_order = FI_ORDER_NONE,
             };
             m_ofi_call(fi_stx_context(dom, &tx_attr, stx, NULL));
             struct fi_rx_attr rx_attr = {
-                .caps = ofi_cap_mode | ofi_cap_ops_rx,
+                .caps = ofi_cap,
                 .msg_order = FI_ORDER_NONE,
                 .comp_order = FI_ORDER_NONE,
             };
@@ -246,6 +302,111 @@ int ofi_util_av(const int n_addr, struct fid_ep* ep, struct fid_av* av, fi_addr_
     free(tmp);
     free(ofi_local_addr);
 
+    return m_success;
+}
+
+int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
+                         struct fid_mr** mr, void** desc, uint64_t** base_list) {
+    m_assert(mr, "mr cannot be NULL");
+    //----------------------------------------------------------------------------------------------
+    bool useless = false;
+    // don't register if the buffer is NULL or the count is 0
+    useless |= (!buf || count == 0);
+    // don't register if mr_mode is not MR_LOCAL
+    useless |= access & (FI_READ | FI_WRITE | FI_SEND | FI_RECV) &&
+               !(comm->prov->domain_attr->mr_mode & FI_MR_LOCAL);
+    // if it's useless, return
+    if (useless) {
+        m_verb("memory regitration is useless, skip it");
+        *mr = NULL;
+        if (desc) {
+            *desc = NULL;
+        }
+    } else {
+        // actually register the memory
+        uint64_t flags = 0x0;
+        if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
+            flags |= FI_RMA_EVENT;
+        }
+        m_verb("registering memory: key = %llu, flags & FI_RMA_EVENT? %d", comm->unique_mr_key,
+               (flags & FI_RMA_EVENT) > 0);
+        m_ofi_call(
+            fi_mr_reg(comm->domain, buf, count, access, 0, comm->unique_mr_key++, flags, mr, NULL));
+
+        // get the description if needed
+        if (access & (FI_READ | FI_WRITE | FI_SEND | FI_RECV)) {
+            m_assert(desc, "desc should not be NULL");
+            if (comm->prov->domain_attr->mr_mode & FI_MR_LOCAL) {
+                *desc = fi_mr_desc(*mr);
+            } else {
+                *desc = NULL;
+            }
+        } else {
+            m_assert(!desc, "desc should be NULL");
+        }
+    }
+
+    //----------------------------------------------------------------------------------------------
+    // get the base list, is needed even if we register NULL
+    if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
+        m_assert(base_list, "base_list should NOT be null");
+        void* list = calloc(ofi_get_size(comm), sizeof(uint64_t));
+        if (comm->prov->domain_attr->mr_mode & FI_MR_VIRT_ADDR) {
+            m_verb("fill the base_list");
+            m_assert(base_list, "base_list cannot be NULL");
+            uint64_t usr_base = (uint64_t)buf;
+            pmi_allgather(sizeof(usr_base), &usr_base, &list);
+        }
+        *base_list = list;
+        m_verb("assign the base_list");
+    } else {
+        m_verb("NO base_list");
+        m_assert(!base_list, "base list should be NULL");
+    }
+    return m_success;
+}
+
+/**
+ * @brief bind the counter to the mr (if not NULL), and bind the MR to the EP (if not null)
+*/
+int ofi_util_mr_bind(struct fid_ep* ep, struct fid_mr* mr, struct fid_cntr* cntr,
+                          ofi_comm_t* comm) {
+    if (mr) {
+        // bind the counter to the mr
+        if (cntr) {
+            m_ofi_call(fi_mr_bind(mr, &cntr->fid, FI_REMOTE_WRITE));
+        }
+        // bind the mr to the ep
+        if (ep && comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+            uint64_t mr_trx_flags = 0;
+            m_ofi_call(fi_mr_bind(mr, &ep->fid, mr_trx_flags));
+        }
+    }
+    return m_success;
+}
+
+int ofi_util_mr_enable(struct fid_mr* mr, ofi_comm_t* comm, uint64_t** key_list) {
+    uint64_t key = FI_KEY_NOTAVAIL;
+    if (mr && (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT ||
+        comm->prov->domain_attr->mr_mode & FI_MR_RMA_EVENT)) {
+        m_ofi_call(fi_mr_enable(mr));
+    }
+    if (key_list) {
+        if (mr) {
+            key = fi_mr_key(mr);
+            m_assert(key != FI_KEY_NOTAVAIL, "the key registration failed");
+        }
+        void* list = calloc(ofi_get_size(comm), sizeof(uint64_t));
+        pmi_allgather(sizeof(key), &key, &list);
+        *key_list = (uint64_t*)list;
+    }
+    return m_success;
+}
+
+int ofi_util_mr_close(struct fid_mr* mr){
+    if(mr){
+        m_ofi_call(fi_close(&mr->fid));
+    }
     return m_success;
 }
 

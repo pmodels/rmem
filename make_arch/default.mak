@@ -3,7 +3,7 @@ HOSTNAME := $(shell hostname)
 
 #---------------------------------------------------------------------------------------------------
 ifneq (,$(findstring lucia,$(HOSTNAME)))
-#use cuda unless specified
+#use cuda unless specified otherwise
 USE_CUDA ?=1
 # compiler and paths
 CC=gcc
@@ -12,10 +12,18 @@ NVCC=nvcc
 PMI_DIR=${HOME}/lib-OFI-1.18.0-CUDA-11.7.0-dbg
 OFI_DIR=${HOME}/lib-OFI-1.18.0-CUDA-11.7.0-dbg
 #---------------------------------------------------------------------------------------------------
-else
-# compiler and paths
-CC =clang
+# LUMI
+else ifneq (,$(or $(findstring uan,$(HOSTNAME)),$(findstring nid,$(HOSTNAME))))
 USE_CUDA ?=0
-PMI_DIR =/Users/tgillis/dbs_lib/lib_OFI-1.18.0-dbg
-OFI_DIR =/Users/tgillis/dbs_lib/lib_OFI-1.18.0-dbg
+CC=gcc
+CXX=g++
+PMI_DIR=${HOME}/lib-PMI-4.1.1
+OFI_DIR=/opt/cray/libfabric/1.15.2.0
+OFI_LIB=/opt/cray/libfabric/1.15.2.0/lib64
+#---------------------------------------------------------------------------------------------------
+else
+USE_CUDA ?=0
+CC=clang
+PMI_DIR=/Users/tgillis/dbs_lib/lib_OFI-1.18.1-dbg
+OFI_DIR=/Users/tgillis/dbs_lib/lib_OFI-1.18.1-dbg
 endif

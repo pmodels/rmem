@@ -13,7 +13,7 @@ ARCH_FILE ?= make_arch/default.mak
 # FROM HERE, DO NOT TOUCH
 include $(ARCH_FILE)
 # Do not show GNU makefile command and info 
-#.SILENT:
+.SILENT:
 
 #---------------------------------------------------------------------------------------------------
 CC ?= gcc
@@ -90,7 +90,8 @@ endif
 
 ################################################################################
 # mandatory flags
-CCFLAGS =
+CCFLAGS ?=
+CCFLAGS += -Wno-deprecated-declarations
 ifeq ($(USE_CUDA),1)
 CCFLAGS += -DHAVE_CUDA
 endif
@@ -124,20 +125,22 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cu
 
 #---------------------------------------------------------------------------------------------------
 # link stage
+# CUDA
 ifeq ($(USE_CUDA),1)
 # we use cuda to link
 LD := $(NVCC) $(GENCODE)
 REAL_LD_FLAGS := -Xlinker $(subst $(space),$(comma),$(strip $(LDFLAGS) $(LIB)))
+# pass the opts to the compiler first
 ifneq (,$(OPTS))
-# the options must be given as a compiler flag (-fsanitize etc)
 REAL_LD_FLAGS += -Xcompiler $(subst $(space),$(comma),$(strip $(OPTS)))
 endif
-
+# no CUDA
 else
 # use normal GCC to link
 LD := $(CC)
 REAL_LD_FLAGS:= $(strip $(OPTS) $(LDFLAGS) $(LIB))
 endif
+
 # link recipe
 $(TARGET):$(OBJ)
 	@echo "$(LD) $@"
@@ -146,13 +149,15 @@ $(TARGET):$(OBJ)
 ################################################################################
 .PHONY: debug
 debug:
-	@OPTS="-O0 -g -fsanitize=address -fsanitize=undefined" $(MAKE) $(TARGET)
+	@OPTS="${OPTS} -O0 -g -fsanitize=address -fsanitize=undefined" $(MAKE) $(TARGET)
+.PHONY: verbose
+verbose:
+	@OPTS="${OPTS} -DVERBOSE" $(MAKE) debug
 .PHONY: fast
 fast:
-	@OPTS="-O3 -DNEBUG" $(MAKE) $(TARGET)
+	@OPTS="${OPTS} -O3 -DNEBUG -flto" $(MAKE) $(TARGET)
 ################################################################################
 clean:
-	@rm -f $(TARGET)_dlink.o
 	@rm -f $(OBJ_DIR)/*.o
 	@rm -f $(TARGET)
 

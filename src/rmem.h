@@ -46,6 +46,4 @@ void rmem_qmpsc_enq(rmem_qmpsc_t* q, rmem_qnode_t* elem);
 void rmem_qmpsc_deq(rmem_qmpsc_t* q, rmem_qnode_t** elem);
 void rmem_qmpsc_deq_ifready(rmem_qmpsc_t* q, rmem_qnode_t** elem);
 
-
-
 #endif

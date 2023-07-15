@@ -11,57 +11,91 @@
 
 #define m_ofi_cq_offset(a) (offsetof(ofi_cqdata_t, a) - offsetof(ofi_cqdata_t, ctx))
 
-static void ofi_cq_update_data(uint64_t* data, countr_t* epoch) {
+static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
     m_assert(*data > 0, "the value of data should be > 0 (and not %" PRIu64 ")", *data);
     m_assert(sizeof(int) == sizeof(uint32_t), "atomic int must be of size 32");
     uint32_t post = m_ofi_data_get_post(*data);
-    uint32_t cmpl = m_ofi_data_get_cmpl(*data);
-    uint32_t nops = m_ofi_data_get_nops(*data);
-
     // get the atomic_int array to increment, always the same one
     if (post > 0) {
         m_assert(post <= 1, "post must be <=1");
         m_countr_fetch_add(epoch + 0, post);
+        // if we get a post, we do not need to handle something else
+        return;
     }
+    uint32_t cmpl = m_ofi_data_get_cmpl(*data);
+    uint32_t nops = m_ofi_data_get_nops(*data);
     if (cmpl > 0) {
         m_assert(cmpl <= 1, "post must be <=1");
         m_countr_fetch_add(epoch + 2, nops);
         m_countr_fetch_add(epoch + 1, cmpl);
+        // if we get a complete, we do not need to handle something else
+        return;
     }
+    uint32_t rcqd = m_ofi_data_get_rcq(*data);
+    if (rcqd > 0) {
+        // if we receive a remote cq data then we remove -1 to the epoch[2]
+        m_assert(rcqd <= 1, "post must be <=1");
+        m_countr_fetch_add(epoch + 2, -1);
+    }
+#if (M_WRITE_DATA)
+    uint32_t sig = m_ofi_data_get_sig(*data);
+    if (sig > 0) {
+        m_assert(sig <= 1, "post must be <=1");
+        m_countr_fetch_add(epoch + 3, 1);
+    }
+#endif
+    return;
 }
 
-int ofi_progress(struct fid_cq* cq) {
+/**
+ * @brief progress the endpoint associated to the CQ and read the entries if any 
+ *
+ * if the context provided is NULL and !M_SYNC_RMA_EVENT, use the null_ctx pointer
+*/
+int ofi_progress(ofi_progress_t* progress) {
+    struct fid_cq* cq = progress->cq;
     ofi_cq_entry event[m_ofi_cq_entries];
     int ret = fi_cq_read(cq, event, m_ofi_cq_entries);
     if (ret > 0) {
         //------------------------------------------------------------------------------------------
         // entries in the buffer
         for (int i = 0; i < ret; ++i) {
+            m_verb("processing #%d/%d",i,ret);
             // get the context
             uint8_t* op_ctx = (uint8_t*)event[i].op_context;
+#if (!M_SYNC_RMA_EVENT || M_WRITE_DATA)
+            // is it a remote data?
+            if (!op_ctx) {
+                m_verb("data entry completed: using the fallback");
+                op_ctx = progress->fallback_ctx;
+                countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.cntr));
+                uint64_t data = event[i].data;
+                ofi_cq_update_sync_tag(&data, *epoch);
+                continue;
+            }
+#endif
             // if the context is null, the cq is used for remote data
-            // uint64_t data = event[i].data;
-            // if (!op_ctx) {
-            //     m_verb("completion data received");
-            //     ofi_cq_update_data(&data, cq->sync.cntr);
-            // } else {
             m_assert(op_ctx, "the context cannot be null here");
             // recover the kind
             uint8_t kind = *((uint8_t*)op_ctx + m_ofi_cq_offset(kind));
             if (kind & m_ofi_cq_kind_rqst) {
-                atomic_int** flag = (atomic_int**)(op_ctx + m_ofi_cq_offset(rqst.flag));
-                if (*flag) {
-                    atomic_fetch_add(*flag, 1);
-                    m_verb("increasing flag value by 1");
-                }
+                m_verb("rqst entry completed");
+                atomic_int* cntr = (atomic_int*)(op_ctx + m_ofi_cq_offset(rqst.busy));
+                atomic_fetch_add(cntr, -1);
+                m_verb("decreasing flag value by -1");
+                continue;
             } else if (kind & m_ofi_cq_kind_sync) {
+                m_verb("sync entry completed");
                 countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.cntr));
                 uint64_t* data = (uint64_t*)(op_ctx + m_ofi_cq_offset(sync.buf));
-                ofi_cq_update_data(data, *epoch);
+                ofi_cq_update_sync_tag(data, *epoch);
+                continue;
+            } else if (kind & m_ofi_cq_kind_null) {
+                m_verb("null request completed");
+                continue;
             } else {
                 m_assert(0, "unknown kind: %d", kind);
             }
-            // }
         }
     } else if (ret == (-FI_EAGAIN)) {
         //------------------------------------------------------------------------------------------
@@ -95,20 +129,21 @@ int ofi_progress(struct fid_cq* cq) {
     return m_success;
 }
 
-int ofi_wait(ofi_cqdata_t* cq) {
-    m_assert(cq->kind == m_ofi_cq_kind_rqst, "wrong kind of request");
+int ofi_wait(countr_t* busy, ofi_progress_t* progress) {
     // while the request is not completed, progress the CQ
-    while (!m_countr_load(cq->rqst.flag)) {
-        m_rmem_call(ofi_progress(cq->cq));
+    while (m_countr_load(busy)) {
+        m_rmem_call(ofi_progress(progress));
     }
     return m_success;
 }
 int ofi_p2p_wait(ofi_p2p_t* p2p) {
-    m_rmem_call(ofi_wait(&p2p->ofi.cq));
+    m_assert(p2p->ofi.cq.kind == m_ofi_cq_kind_rqst, "wrong kind of request");
+    m_rmem_call(ofi_wait(&p2p->ofi.cq.rqst.busy, &p2p->ofi.progress));
     return m_success;
 }
 int ofi_rma_wait(ofi_rma_t* rma) {
-    m_rmem_call(ofi_wait(&rma->ofi.msg.cq));
+    m_assert(rma->ofi.msg.cq.kind == m_ofi_cq_kind_rqst, "wrong kind of request");
+    m_rmem_call(ofi_wait(&rma->ofi.msg.cq.rqst.busy, &rma->ofi.progress));
     return m_success;
 }
 
