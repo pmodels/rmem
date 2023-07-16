@@ -152,10 +152,14 @@ int ofi_util_get_prov(struct fi_info** prov) {
     // try to use shared context (reduces the memory)
     m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
     m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
+    // thread safe is the most expensive, yet secure one
+    m_ofi_test_info(hints, domain_attr->threading, FI_THREAD_SAFE);
+    // TODO: switch to thread_domain
+    // m_ofi_test_info(hints, domain_attr->threading, FI_THREAD_DOMAIN);
     // enable automatic ressource management
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
     m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
-    // request manual progress (comment when using sockets on MacOs)
+    // request manual progress (comment when using RMA_EVENT sockets on MacOs)
     m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
     m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
     // no order required
