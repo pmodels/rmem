@@ -45,7 +45,7 @@ static inline double t_nu_interp(const int nu) {
     //--------------------------------------------------------------------------
 }
 
-void rmem_get_ci(const int n_data, double* data, double* avg, double* ci) {
+static inline void rmem_get_ci(const int n_data, double* data, double* avg, double* ci) {
     const double t_nu_val = t_nu_interp(n_data);
     *avg = 0.0;
     for (int i = 0; i < n_data; ++i) {

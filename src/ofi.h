@@ -305,6 +305,8 @@ typedef struct {
 int ofi_init(ofi_comm_t* ofi);
 int ofi_finalize(ofi_comm_t* ofi);
 
+static inline char* ofi_name(ofi_comm_t* ofi) { return ofi->prov->fabric_attr->prov_name; }
+
 // utility function
 static inline int ofi_get_rank(ofi_comm_t* ofi) { return ofi->rank; }
 static inline int ofi_get_size(ofi_comm_t* ofi) { return ofi->size; }
