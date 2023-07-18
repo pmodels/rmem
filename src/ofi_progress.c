@@ -15,8 +15,8 @@
 static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
     m_assert(*data > 0, "the value of data should be > 0 (and not %" PRIu64 ")", *data);
     m_assert(sizeof(int) == sizeof(uint32_t), "atomic int must be of size 32");
-    uint32_t post = m_ofi_data_get_post(*data);
     // get the atomic_int array to increment, always the same one
+    uint32_t post = m_ofi_data_get_post(*data);
     if (post > 0) {
         m_assert(post <= 1, "post must be <=1");
         m_countr_fetch_add(epoch + 0, post);

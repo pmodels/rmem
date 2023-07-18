@@ -76,9 +76,11 @@ void rma_post(run_param_t* param, void* data);
 //----------------
 // send
 double rma_run_send(run_param_t* param, void* data);
+double rma_fast_run_send(run_param_t* param, void* data);
 double lat_run_send(run_param_t* param, void* data);
 // recv
-double put_run_recv(run_param_t* param, void* data);
+double rma_run_recv(run_param_t* param, void* data);
+double rma_fast_run_recv(run_param_t* param, void* data);
 double sig_run_recv(run_param_t* param, void* data);
 double lat_run_recv(run_param_t* param, void* data);
 
