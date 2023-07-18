@@ -26,10 +26,10 @@ static inline double t_nu_interp(const int nu) {
         return 0.0;
     } else if (nu <= 5) {
         // we have an exact entry
-        return t_student_nu[nu];
+        return t_student_t[nu];
     } else if (nu >= t_student_nu[m_rmem_nu_len-1]) {
         // we are too big, it's like a normal distribution
-        return t_student_nu[m_rmem_nu_len-1];
+        return t_student_t[m_rmem_nu_len-1];
     } else {
         int i = 5;
         while (t_student_nu[i] < nu) {
