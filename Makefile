@@ -28,7 +28,7 @@ BUILDDIR := ./build
 SRC_DIR := ./src
 OBJ_DIR := ./build
 # git commit
-# GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
 
 ## add the headers to the vpaths
 INC := -I$(SRC_DIR)
@@ -92,12 +92,16 @@ endif
 # mandatory flags
 CCFLAGS ?=
 CCFLAGS += -Wno-deprecated-declarations
+ifneq (,$(GIT_COMMIT))
+CCFLAGS += -DGIT_COMMIT=\"$(GIT_COMMIT)\"   
+endif
+
+GENCODE ?=
 ifeq ($(USE_CUDA),1)
+GENCODE += -gencode=arch=compute_80,code=sm_80
 CCFLAGS += -DHAVE_CUDA
 endif
 
-#-fPIC -DGIT_COMMIT=\"$(GIT_COMMIT)\"   
-GENCODE = -gencode=arch=compute_80,code=sm_80
 
 # Makefile shenanigans
 comma:= ,
@@ -155,7 +159,7 @@ verbose:
 	@OPTS="${OPTS} -DVERBOSE" $(MAKE) debug
 .PHONY: fast
 fast:
-	@OPTS="${OPTS} -O3 -DNEBUG -flto" $(MAKE) $(TARGET)
+	@OPTS="${OPTS} -O3 -DNEBUG" $(MAKE) $(TARGET)
 ################################################################################
 clean:
 	@rm -f $(OBJ_DIR)/*.o

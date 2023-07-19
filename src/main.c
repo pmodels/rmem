@@ -12,452 +12,261 @@
 #include <sys/stat.h>
 
 #include "ofi.h"
-#include "pmi.h"
-#include "rmem_profile.h"
+#include "rmem_run.h"
+#include "rmem_utils.h"
 
-//#define msg_size 1024
-#define n_msg 13
-#define max_size (1<<18)
-#define n_measure 5
-#define n_warmup 5
-#define retry_threshold 0.05
-#define retry_max 20
+void print_info(char* foldr_name, char* prov_name) {
+    char fname[128];
+    snprintf(fname, 128, "%s/rmem.info", foldr_name);
+    FILE* file = fopen(fname, "w+");
+    m_assert(file, "cannot open %s", fname);
+
+    fprintf(file, "----------------------------------------------------------------\n");
+#ifdef GIT_COMMIT
+    fprintf(file, "commit: %s", GIT_COMMIT);
+#else
+    fprintf(file, "commit: unknown");
+#endif
+    fprintf(file, "provider: %s\n", prov_name);
+#if (M_WRITE_DATA)
+    fprintf(file, "using fi_writedata for signal\n");
+#else
+    fprintf(file, "using FI_FENCE for signal\n");
+#endif
+#if (M_SYNC_RMA_EVENT)
+    fprintf(file, "using rma event for sync\n");
+#else
+    fprintf(file, "using fi_writedata for sync\n");
+#endif
+    fprintf(file, "----------------------------------------------------------------\n");
+
+    fclose(file);
+}
 
 int main(int argc, char** argv) {
-    const int nth = 1;  // omp_get_max_threads();
+    //----------------------------------------------------------------------------------------------
     // create a communicator with as many context as threads
+    const int nth = 1;  // omp_get_max_threads();
     ofi_comm_t comm;
     comm.n_ctx = nth;
     m_rmem_call(ofi_init(&comm));
-    int rank = ofi_get_rank(&comm);
 
-    //----------------------------------------------------------------------------------------------
-    // test and create the dir if needed
-    char fullname[128];
-    if (!(rank % 2 == 0)) {
-        char foldr_name[64] = "data";
-        sprintf(fullname, "%s/rmem_%d.txt", foldr_name, n_msg);
-        struct stat st = {0};
-        if (stat(foldr_name, &st) == -1) {
-            mkdir(foldr_name, 0770);
-        }
-        FILE* file = fopen(fullname, "w+");
-        m_assert(file, "cannot open %s", fullname);
-        fclose(file);
-    }
-
-    //----------------------------------------------------------------------------------------------
-    // create the send/recv for retry, must be allocated to comply with FI_MR_ALLOCATED
-    int* retry_ptr = malloc(sizeof(int));
-    ofi_p2p_t p2p_retry = {
-        .buf = retry_ptr,
-        .count = sizeof(int),
-        .tag = n_msg + 1,
+    // run parameter
+    run_param_t param = {
+        .msg_size = 1 << 22,
+        .n_msg = 2,
+        .comm = &comm,
     };
-    // no peer is needed to create the request
-    ofi_p2p_create(&p2p_retry, &comm);
 
     //----------------------------------------------------------------------------------------------
-    for (size_t msg_size = 1; msg_size < max_size; msg_size *= 2) {
-        PMI_Barrier();
-        const size_t ttl_len = n_msg * msg_size;
-        if (rank % 2 == 0) {
-            //======================================================================================
-            // SENDER
-            //======================================================================================
-            // get peer and retry comm
-            const int peer = rank + 1;
-            p2p_retry.peer = peer;
-
-            // send buffer
-            ofi_rmem_t pmem = {
-                .buf = NULL,
-                .count = 0,
-            };
-            ofi_rmem_init(&pmem, &comm);
-            int* src = calloc(ttl_len, sizeof(int));
-            for (int i = 0; i < ttl_len; ++i) {
-                src[i] = i + 1;
-            }
-            //--------------------------------------------------------------------------------------
-            // POINT TO POINT
-            ofi_p2p_t* send = calloc(n_msg, sizeof(ofi_rma_t));
-            for (int i = 0; i < n_msg; ++i) {
-                send[i] = (ofi_p2p_t){
-                    .buf = src + i * msg_size,
-                    .count = msg_size * sizeof(int),
-                    .peer = peer,
-                    .tag = i,
-                };
-                ofi_p2p_create(send + i, &comm);
-            }
-            *retry_ptr = 1;
-            while (*retry_ptr) {
-                for (int it = -n_warmup; it < n_measure; ++it) {
-                    PMI_Barrier();
-                    // start exposure
-                    for (int j = 0; j < n_msg; ++j) {
-                        ofi_send_enqueue(send + j, 0, &comm);
-                    }
-                    for (int j = 0; j < n_msg; ++j) {
-                        ofi_p2p_wait(send + j);
-                    }
-                }
-                ofi_recv_enqueue(&p2p_retry,0,&comm);
-                ofi_p2p_wait(&p2p_retry);
-            }
-            for (int i = 0; i < n_msg; ++i) {
-                ofi_p2p_free(send + i);
-            }
-            free(send);
-
-            //--------------------------------------------------------------------------------------
-            // PUT
-            ofi_rma_t* put = calloc(n_msg, sizeof(ofi_rma_t));
-            for (int i = 0; i < n_msg; ++i) {
-                put[i] = (ofi_rma_t){
-                    .buf = src + i * msg_size,
-                    .count = msg_size * sizeof(int),
-                    .disp = i * msg_size * sizeof(int),
-                    .peer = peer,
-                };
-                ofi_rma_put_init(put + i, &pmem, 0, &comm);
-            }
-            *retry_ptr = 1;
-            while (*retry_ptr) {
-                for (int it = -n_warmup; it < n_measure; ++it) {
-                    for (int j = 0; j < n_msg; ++j) {
-                        ofi_rma_enqueue(&pmem, put + j);
-                    }
-                    PMI_Barrier();  // start exposure
-                    ofi_rmem_start(1, &peer, &pmem, &comm);
-                    for (int j = 0; j < n_msg; ++j) {
-                        ofi_rma_start(put+j);
-                    }
-                    ofi_rmem_complete(1, &peer, &pmem, &comm);
-                }
-                ofi_recv_enqueue(&p2p_retry, 0, &comm);
-                ofi_p2p_wait(&p2p_retry);
-            }
-            for (int i = 0; i < n_msg; ++i) {
-                ofi_rma_free(put + i);
-            }
-            free(put);
-            //--------------------------------------------------------------------------------------
-            // PUT + SIGNAL
-            ofi_rma_t* psig = calloc(n_msg, sizeof(ofi_rma_t));
-            for (int i = 0; i < n_msg; ++i) {
-                psig[i] = (ofi_rma_t){
-                    .buf = src + i * msg_size,
-                    .count = msg_size * sizeof(int),
-                    .disp = i * msg_size * sizeof(int),
-                    .peer = peer,
-                };
-                ofi_rma_put_signal_init(psig + i, &pmem, 0, &comm);
-            }
-            *retry_ptr = 1;
-            while (*retry_ptr) {
-                for (int it = -n_warmup; it < n_measure; ++it) {
-                    for (int j = 0; j < n_msg; ++j) {
-                        ofi_rma_enqueue(&pmem, psig + j);
-                    }
-                    PMI_Barrier();  // start exposure
-                    ofi_rmem_start(1, &peer, &pmem, &comm);
-                    for (int j = 0; j < n_msg; ++j) {
-                        ofi_rma_start(psig + j);
-                    }
-                    ofi_rmem_complete(1, &peer, &pmem, &comm);
-                }
-                ofi_recv_enqueue(&p2p_retry, 0, &comm);
-                ofi_p2p_wait(&p2p_retry);
-            }
-            for (int i = 0; i < n_msg; ++i) {
-                ofi_rma_free(psig + i);
-            }
-            free(psig);
-            //--------------------------------------------------------------------------------------
-            // PUT - LATENCY
-            ofi_rma_t* lat = calloc(n_msg, sizeof(ofi_rma_t));
-            for (int i = 0; i < n_msg; ++i) {
-                lat[i] = (ofi_rma_t){
-                    .buf = src + i * msg_size,
-                    .count = msg_size * sizeof(int),
-                    .disp = i * msg_size * sizeof(int),
-                    .peer = peer,
-                };
-                ofi_rma_put_init(lat + i, &pmem, 0, &comm);
-            }
-            *retry_ptr = 1;
-            while (*retry_ptr) {
-                for (int it = -n_warmup; it < n_measure; ++it) {
-                    for (int j = 0; j < n_msg; ++j) {
-                        ofi_rma_enqueue(&pmem, lat + j);
-                    }
-                    ofi_rmem_start(1, &peer, &pmem, &comm);
-                    PMI_Barrier();  // start exposure
-                    for (int j = 0; j < n_msg; ++j) {
-                        ofi_rma_start(lat + j);
-                    }
-                    ofi_rmem_complete(1, &peer, &pmem, &comm);
-                }
-                ofi_recv_enqueue(&p2p_retry, 0, &comm);
-                ofi_p2p_wait(&p2p_retry);
-            }
-            for (int i = 0; i < n_msg; ++i) {
-                ofi_rma_free(lat + i);
-            }
-            free(lat);
-            //--------------------------------------------------------------------------------------
-            // RPUT
-            // rmem_rma_t rput = {
-            //     .buf = src,
-            //     .count = msg_size * sizeof(int),
-            //     .peer = peer,
-            // };
-            // rmem_prof_t time_rput = {.name = "rput"};
-            // ofi_rma_init(&rput, &pmem, &comm);
-            // m_log("done with RMa init");
-            //
-            // for (int i = 0; i < 10; ++i) {
-            //     m_log("iteration %d",i);
-            //     ofi_rmem_start(1, &peer, &pmem, &comm);
-            //     ofi_rput_enqueue(&rput, &pmem, 0, &comm);
-            //     m_rmem_prof(time_rput) {
-            //         ofi_rma_start(&rput);
-            //         ofi_rma_wait(&rput);
-            //     }
-            //     ofi_rmem_complete(1, &peer,&pmem,&comm);
-            // }
-            // ofi_rma_free(&rput);
-            //--------------------------------------------------------------------------------------
-            ofi_rmem_free(&pmem, &comm);
-            free(src);
-        } else {
-            //======================================================================================
-            // RECIEVER
-            //======================================================================================
-            const int peer = rank - 1;
-            p2p_retry.peer = peer;
-
-            // allocate the receive buffer
-            int* pmem_buf = calloc(ttl_len, sizeof(int));
-            ofi_rmem_t pmem = {
-                .buf = pmem_buf,
-                .count = ttl_len * sizeof(int),
-            };
-            ofi_rmem_init(&pmem, &comm);
-
-            //--------------------------------------------------------------------------------------
-            // POINT-TO-POINT
-            ofi_p2p_t* recv = calloc(n_msg, sizeof(ofi_rma_t));
-            for (int i = 0; i < n_msg; ++i) {
-                recv[i] = (ofi_p2p_t){
-                    .buf = pmem_buf + i * msg_size,
-                    .count = msg_size * sizeof(int),
-                    .peer = peer,
-                    .tag = i,
-                };
-                ofi_p2p_create(recv + i, &comm);
-            }
-
-            // profile stuff
-            rmem_prof_t prof_recv = {.name = "recv"};
-            double tavg_p2p;
-            double ci_p2p;
-
-            // let's go
-            *retry_ptr = 1;
-            while (*retry_ptr) {
-                double time[n_measure];
-                for (int it = -n_warmup; it < n_measure; ++it) {
-                    PMI_Barrier();
-                    m_rmem_prof(prof_recv, time[(it >= 0) ? it : 0]) {
-                        for (int j = 0; j < n_msg; ++j) {
-                            ofi_recv_enqueue(recv + j, 0, &comm);
-                        }
-                        for (int j = 0; j < n_msg; ++j) {
-                            ofi_p2p_wait(recv + j);
-                        }
-                    }
-                    // check the result
-                    for (int i = 0; i < ttl_len; ++i) {
-                        int res = i + 1;
-                        if (pmem_buf[i] != res) {
-                            m_log("pmem[%d] = %d != %d", i, pmem_buf[i], res);
-                        }
-                        pmem_buf[i] = 0.0;
-                    }
-                }
-                // get the CI + the retry
-                rmem_get_ci(n_measure, time, &tavg_p2p, &ci_p2p);
-                m_verb("SEND: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d", tavg_p2p, ci_p2p,
-                       ci_p2p / tavg_p2p, retry_threshold, *retry_ptr, retry_max);
-                if (*retry_ptr > retry_max || (ci_p2p / tavg_p2p) < retry_threshold) {
-                    *retry_ptr = 0;
-                } else {
-                    (*retry_ptr)++;
-                }
-                // send the information to the sender side
-                ofi_send_enqueue(&p2p_retry, 0, &comm);
-                ofi_p2p_wait(&p2p_retry);
-            }
-            for (int i = 0; i < n_msg; ++i) {
-                ofi_p2p_free(recv + i);
-            }
-            free(recv);
-
-            //--------------------------------------------------------------------------------------
-            // PUT
-            double tavg_put;
-            double ci_put;
-            rmem_prof_t prof_put = {.name = "put"};
-            *retry_ptr = 1;
-            while (*retry_ptr) {
-                double time[n_measure];
-                for (int it = -n_warmup; it < n_measure; ++it) {
-                    PMI_Barrier();
-                    m_rmem_prof(prof_put, time[(it >= 0) ? it : 0]) {
-                        ofi_rmem_post(1, &peer, &pmem, &comm);
-                        ofi_rmem_wait(1, &peer, &pmem, &comm);
-                    }
-                    // check the results
-                    for (int i = 0; i < ttl_len; ++i) {
-                        int res = i + 1;
-                        m_assert(pmem_buf[i] == res,"pmem[%d] = %d != %d", i, pmem_buf[i], res);
-                        if (pmem_buf[i] != res) {
-                            m_log("pmem[%d] = %d != %d", i, pmem_buf[i], res);
-                        }
-                        pmem_buf[i] = 0.0;
-                    }
-                }
-                // get the CI + the retry
-                rmem_get_ci(n_measure, time, &tavg_put, &ci_put);
-                if (*retry_ptr > retry_max || (ci_put / tavg_put) < retry_threshold) {
-                    *retry_ptr = 0;
-                } else {
-                    (*retry_ptr)++;
-                }
-                m_verb("PUT: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d", tavg_put, ci_put,
-                       ci_put / tavg_put, retry_threshold, *retry_ptr, retry_max);
-                // send the information to the sender side
-                ofi_send_enqueue(&p2p_retry, 0, &comm);
-                ofi_p2p_wait(&p2p_retry);
-            }
-            //--------------------------------------------------------------------------------------
-            // PUT + SIGNAL
-            double tavg_psig;
-            double ci_psig;
-            rmem_prof_t prof_psig = {.name = "put-signal"};
-            *retry_ptr = 1;
-            while (*retry_ptr) {
-                double time[n_measure];
-                for (int it = -n_warmup; it < n_measure; ++it) {
-                    PMI_Barrier();
-                    m_rmem_prof(prof_psig, time[(it >= 0) ? it : 0]) {
-                        ofi_rmem_post(1, &peer, &pmem, &comm);
-                        ofi_rmem_sig_wait(n_msg,&pmem);
-                        ofi_rmem_wait(1, &peer, &pmem, &comm);
-                    }
-                    // check the results
-                    for (int i = 0; i < ttl_len; ++i) {
-                        int res = i + 1;
-                        if (pmem_buf[i] != res) {
-                            m_log("pmem[%d] = %d != %d", i, pmem_buf[i], res);
-                        }
-                        pmem_buf[i] = 0.0;
-                    }
-                }
-                // get the CI + the retry
-                rmem_get_ci(n_measure, time, &tavg_psig, &ci_psig);
-                if (*retry_ptr > retry_max || (ci_psig / tavg_psig) < retry_threshold) {
-                    *retry_ptr = 0;
-                } else {
-                    (*retry_ptr)++;
-                }
-                m_verb("PUT+SIG: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d", tavg_psig, ci_psig,
-                       ci_psig / tavg_psig, retry_threshold, *retry_ptr, retry_max);
-                // send the information to the sender side
-                ofi_send_enqueue(&p2p_retry, 0, &comm);
-                ofi_p2p_wait(&p2p_retry);
-            }
-            //--------------------------------------------------------------------------------------
-            // PUT LATENCY
-            double tavg_lat;
-            double ci_lat;
-            rmem_prof_t prof_lat = {.name = "put-lat"};
-            *retry_ptr = 1;
-            while (*retry_ptr) {
-                double time[n_measure];
-                for (int it = -n_warmup; it < n_measure; ++it) {
-                    ofi_rmem_post(1, &peer, &pmem, &comm);
-                    PMI_Barrier();
-                    m_rmem_prof(prof_lat, time[(it >= 0) ? it : 0]) {
-                        ofi_rmem_wait_until(n_msg, n_msg, &pmem);
-                    }
-                    ofi_rmem_wait(1, &peer, &pmem, &comm);
-                    // check the results
-                    for (int i = 0; i < ttl_len; ++i) {
-                        int res = i + 1;
-                        if (pmem_buf[i] != res) {
-                            m_log("pmem[%d] = %d != %d", i, pmem_buf[i], res);
-                        }
-                        pmem_buf[i] = 0.0;
-                    }
-                }
-                // get the CI + the retry
-                rmem_get_ci(n_measure, time, &tavg_lat, &ci_lat);
-                if (*retry_ptr > retry_max || (ci_lat / tavg_lat) < retry_threshold) {
-                    *retry_ptr = 0;
-                } else {
-                    (*retry_ptr)++;
-                }
-                m_verb("PUT LAT: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d", tavg_lat, ci_lat,
-                       ci_lat / tavg_lat, retry_threshold, *retry_ptr, retry_max);
-                // send the information to the sender side
-                ofi_send_enqueue(&p2p_retry, 0, &comm);
-                ofi_p2p_wait(&p2p_retry);
-            }
-            //--------------------------------------------------------------------------------------
-            // RPUT
-            // rmem_prof_t time_rput = {.name = "rput"};
-            // for (int i = 0; i < 10; ++i) {
-            //     m_rmem_prof(time_rput) {
-            //         ofi_rmem_post(1, &peer, &pmem, &comm);
-            //         ofi_rmem_wait(1, &peer, &pmem, &comm);
-            //     }
-            //     for (int i = 0; i < msg_size; ++i) {
-            //         int res = i + 1;
-            //         m_assert(pmem_buf[i] == res,"pmem[%d] = %f != %f",i,pmem_buf[i],res);
-            //     }
-            // }
-            //--------------------------------------------------------------------------------------
-            ofi_rmem_free(&pmem, &comm);
-            free(pmem_buf);
-            //--------------------------------------------------------------------------------------
-            // display the results
-            m_log(
-                "time/msg (%ld B - %d msgs):\n"
-                "\tP2P       = %f +-[%f]\n"
-                "\tPUT       = %f +-[%f] (ratio = %f)\n"
-                "\tPUT + SIG = %f +-[%f] (ratio = %f)\n"
-                "\tPUT LAT   = %f +-[%f] (ratio = %f)",
-                ttl_len * sizeof(int), n_msg,
-                tavg_p2p / n_msg, ci_p2p / n_msg,
-                tavg_put / n_msg, ci_put / n_msg, tavg_put / tavg_p2p,
-                tavg_psig / n_msg, ci_psig / n_msg,
-                tavg_psig / tavg_p2p, tavg_lat / n_msg, ci_lat / n_msg, tavg_lat / tavg_p2p);
-            // write to csv
-            FILE* file = fopen(fullname, "a");
-            m_assert(file, "file must be open");
-            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f\n", ttl_len * sizeof(int),
-                    tavg_p2p/n_msg, tavg_put/n_msg, tavg_psig/n_msg, tavg_lat/n_msg,
-                    ci_p2p/n_msg, ci_put/n_msg, ci_psig/n_msg, ci_lat/n_msg);
-            fclose(file);
-            //--------------------------------------------------------------------------------------
-        }
-        ofi_p2p_free(&p2p_retry);
+    // P2P
+    run_time_t p2p_time;
+    {
+        run_p2p_data_t p2p_data;
+        run_t p2p_send = {
+            .data = &p2p_data,
+            .pre = &p2p_pre,
+            .run = &p2p_run_send,
+            .post = &p2p_post,
+        };
+        run_t p2p_recv = {
+            .data = &p2p_data,
+            .pre = &p2p_pre,
+            .run = &p2p_run_recv,
+            .post = &p2p_post,
+        };
+        run_test(&p2p_send, &p2p_recv, param, &p2p_time);
     }
-    free(retry_ptr);
+    //----------------------------------------------------------------------------------------------
+    // PUT
+    run_time_t put_time;
+    {
+        run_rma_data_t put_data;
+        run_t put_send = {
+            .data = &put_data,
+            .pre = &put_pre_send,
+            .run = &rma_run_send,
+            .post = &rma_post,
+        };
+        run_t put_recv = {
+            .data = &put_data,
+            .pre = &rma_pre_recv,
+            .run = &rma_run_recv,
+            .post = &rma_post,
+        };
+        run_test(&put_send, &put_recv, param, &put_time);
+    }
+    //----------------------------------------------------------------------------------------------
+    // PUT + SIGNAL
+    run_time_t psig_time;
+    {
+        run_rma_data_t psig_data;
+        run_t psig_send = {
+            .data = &psig_data,
+            .pre = &sig_pre_send,
+            .run = &rma_run_send,
+            .post = &rma_post,
+        };
+        run_t psig_recv = {
+            .data = &psig_data,
+            .pre = &rma_pre_recv,
+            .run = &sig_run_recv,
+            .post = &rma_post,
+        };
+        run_test(&psig_send, &psig_recv, param, &psig_time);
+    }
+    //----------------------------------------------------------------------------------------------
+    // PUT FAST
+    run_time_t pfast_time;
+    {
+        run_rma_data_t pfast_data;
+        run_t plat_send = {
+            .data = &pfast_data,
+            .pre = &put_pre_send,
+            .run = &rma_fast_run_send,
+            .post = &rma_post,
+        };
+        run_t plat_recv = {
+            .data = &pfast_data,
+            .pre = &rma_pre_recv,
+            .run = &rma_fast_run_recv,
+            .post = &rma_post,
+        };
+        run_test(&plat_send, &plat_recv, param, &pfast_time);
+    }
+    //----------------------------------------------------------------------------------------------
+    // PUT LATENCY
+    run_time_t plat_time;
+    {
+        run_rma_data_t plat_data;
+        run_t plat_send = {
+            .data = &plat_data,
+            .pre = &put_pre_send,
+            .run = &lat_run_send,
+            .post = &rma_post,
+        };
+        run_t plat_recv = {
+            .data = &plat_data,
+            .pre = &rma_pre_recv,
+            .run = &lat_run_recv,
+            .post = &rma_post,
+        };
+        run_test(&plat_send, &plat_recv, param, &plat_time);
+    }
+
+    //----------------------------------------------------------------------------------------------
+    if (!is_sender(comm.rank)) {
+        // get a unique folder for the results
+        char fullname[128];
+        char foldr_name[64];
+        struct stat st = {0};
+        int fid_cntr = 0;
+        do {
+            sprintf(foldr_name, "data_%d", fid_cntr++);
+        } while (!stat(foldr_name, &st));
+        mkdir(foldr_name, 0770);
+        m_verb("found folder: %s",foldr_name);
+
+        // get some 101 info
+        print_info(foldr_name, ofi_name(&comm));
+
+        //------------------------------------------------------------------------------------------
+        // save the results per msg size
+        const int n_size = log10(param.msg_size) / log10(2.0) + 1;
+        const int n_msg = log10(param.n_msg) / log10(2.0) + 1;
+        for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
+            const int idx_msg = log10(imsg) / log10(2.0);
+            char fullname[128];
+            snprintf(fullname, 128, "%s/msg%d_%s.txt", foldr_name, imsg, ofi_name(&comm));
+            // get a unique FID for the results
+            FILE* file = fopen(fullname, "w+");
+            m_assert(file, "cannot open %s", fullname);
+
+            m_log("--------------- %d MSGs ---------------",imsg);
+            // for each message size
+            for (size_t msg_size = 1; msg_size <= param.msg_size; msg_size *= 2) {
+                if (imsg * msg_size * sizeof(int) > m_max_size) {
+                    break;
+                }
+                const int idx_size = log10(msg_size) / log10(2.0);
+                // get the idx
+                int idx = idx_msg * n_size + idx_size;
+                // load the results
+                const double ti_p2p = p2p_time.avg[idx] / imsg;
+                const double ci_p2p = p2p_time.ci[idx] / imsg;
+                const double ti_put = put_time.avg[idx] / imsg;
+                const double ci_put = put_time.ci[idx] / imsg;
+                const double ti_psig = psig_time.avg[idx] / imsg;
+                const double ci_psig = psig_time.ci[idx] / imsg;
+                const double ti_plat = plat_time.avg[idx] / imsg;
+                const double ci_plat = plat_time.ci[idx] / imsg;
+                const double ti_fast = pfast_time.avg[idx] / imsg;
+                const double ci_fast = pfast_time.ci[idx] / imsg;
+                m_log(
+                    "time/msg (%ld B/msg - %d msgs):\n"
+                    "\tP2P       = %f +-[%f]\n"
+                    "\tPUT       = %f +-[%f] (ratio = %f)\n"
+                    "\tPUT FAST  = %f +-[%f] (ratio = %f)\n"
+                    "\tPUT + SIG = %f +-[%f] (ratio = %f)\n"
+                    "\tPUT LAT   = %f +-[%f] (ratio = %f)\n",
+                    msg_size * sizeof(int), imsg, ti_p2p, ci_p2p, ti_put, ci_put, ti_put / ti_p2p,
+                    ti_fast, ci_fast, ti_fast / ti_p2p, ti_psig, ci_psig, ti_psig / ti_p2p, ti_plat,
+                    ci_plat, ti_plat / ti_p2p);
+                // write to csv
+                fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int), ti_p2p,
+                        ti_put, ti_fast, ti_psig, ti_plat, ci_p2p, ci_put, ci_fast, ci_psig,
+                        ci_plat);
+                // bump the index
+                idx++;
+            }
+            fclose(file);
+        }
+        //------------------------------------------------------------------------------------------
+        // save the results per number of msgs
+        for (size_t msg_size = 1; msg_size <= param.msg_size; msg_size *= 2) {
+            const int idx_size = log10(msg_size) / log10(2.0);
+            char fullname[128];
+            snprintf(fullname, 128, "%s/size%ld_%s.txt", foldr_name, msg_size, ofi_name(&comm));
+            // get a unique FID for the results
+            FILE* file = fopen(fullname, "w+");
+            m_assert(file, "cannot open %s", fullname);
+
+            // for each message size
+            for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
+                if (imsg * msg_size * sizeof(int) > m_max_size) {
+                    break;
+                }
+                const int idx_msg = log10(imsg) / log10(2.0);
+                // get the idx
+                int idx = idx_msg * n_size + idx_size;
+                // load the results
+                const double ti_p2p = p2p_time.avg[idx] / imsg;
+                const double ci_p2p = p2p_time.ci[idx] / imsg;
+                const double ti_put = put_time.avg[idx] / imsg;
+                const double ci_put = put_time.ci[idx] / imsg;
+                const double ti_psig = psig_time.avg[idx] / imsg;
+                const double ci_psig = psig_time.ci[idx] / imsg;
+                const double ti_plat = plat_time.avg[idx] / imsg;
+                const double ci_plat = plat_time.ci[idx] / imsg;
+                const double ti_fast = pfast_time.avg[idx] / imsg;
+                const double ci_fast = pfast_time.ci[idx] / imsg;
+                // write to csv
+                fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put, ti_fast,
+                        ti_psig, ti_plat, ci_p2p, ci_put, ci_fast, ci_psig, ci_plat);
+                // bump the index
+                idx++;
+            }
+            fclose(file);
+        }
+    }
+    free(p2p_time.avg);
+    free(p2p_time.ci);
+    free(put_time.avg);
+    free(put_time.ci);
+    free(psig_time.avg);
+    free(psig_time.ci);
+    free(plat_time.avg);
+    free(plat_time.ci);
     m_rmem_call(ofi_finalize(&comm));
     return EXIT_SUCCESS;
 }

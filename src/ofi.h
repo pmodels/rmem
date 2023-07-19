@@ -336,6 +336,8 @@ typedef struct {
 int ofi_init(ofi_comm_t* ofi);
 int ofi_finalize(ofi_comm_t* ofi);
 
+static inline char* ofi_name(ofi_comm_t* ofi) { return ofi->prov->fabric_attr->prov_name; }
+
 // utility function
 static inline int ofi_get_rank(ofi_comm_t* ofi) { return ofi->rank; }
 static inline int ofi_get_size(ofi_comm_t* ofi) { return ofi->size; }
@@ -363,8 +365,9 @@ void* ofi_tthread_main(void* arg);
 int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm);
 
-// useful to measure latency w/o the sync
-int ofi_rmem_wait_until(const int threshold,const int ttl, ofi_rmem_t* mem);
+// fast completion: useful to measure latency w/o the sync
+int ofi_rmem_complete_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm);
+int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm);
 
 // PSCW 101
 int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);

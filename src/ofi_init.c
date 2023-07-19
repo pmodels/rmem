@@ -63,8 +63,6 @@ int ofi_ctx_free(struct fi_info* prov, ofi_ctx_t** ctx){
 
 // main functions
 int ofi_init(ofi_comm_t* ofi) {
-    m_log("USING WRITE_DATA? %d", M_WRITE_DATA);
-    m_log("USING RMA_EVENT for sync? %d", M_SYNC_RMA_EVENT);
     // get the provider list
     m_rmem_call(ofi_util_get_prov(&ofi->prov));
     // struct fi_info* prov_list;

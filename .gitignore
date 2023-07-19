@@ -9,3 +9,5 @@ perf.*
 out.*
 slurm-*
 run/slurm-*
+data
+data_*
