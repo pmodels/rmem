@@ -323,26 +323,20 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
         .len = rma->count,
         .key = mem->ofi.key_list[rma->peer],
     };
-    // cq
-    // rma->ofi.msg.cq.cq = mem->ofi.data_trx[ctx_id].cq;
-    // rma->ofi.msg.cq.fallback_ctx = &mem->ofi.sync.cqdata->ctx;
+    // cq and progress
+    // any of the cqdata entry can be used to fallback, the first one always exists
+    rma->ofi.progress.cq = mem->ofi.data_trx[ctx_id].cq;
+    rma->ofi.progress.fallback_ctx = &mem->ofi.sync.cqdata[0].ctx;
     switch (op) {
         case (RMA_OPT_PUT): {
             rma->ofi.msg.cq.kind = m_ofi_cq_kind_null;
-            rma->ofi.progress.cq = NULL;
-            rma->ofi.progress.fallback_ctx = NULL;
         } break;
         case (RMA_OPT_RPUT): {
             rma->ofi.msg.cq.kind = m_ofi_cq_kind_rqst;
             m_countr_store(&rma->ofi.msg.cq.rqst.busy, 1);
-            rma->ofi.progress.cq = mem->ofi.data_trx[ctx_id].cq;
-            // any of the cqdata entry can be used to fallback, the first one always exists
-            rma->ofi.progress.fallback_ctx = &mem->ofi.sync.cqdata[0].ctx;
         } break;
         case (RMA_OPT_PUT_SIG): {
             rma->ofi.msg.cq.kind = m_ofi_cq_kind_null;
-            rma->ofi.progress.cq = NULL;
-            rma->ofi.progress.fallback_ctx = NULL;
         } break;
     }
     // flag
@@ -432,7 +426,7 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
 #if (M_WRITE_DATA)
     msg.data |= rma->ofi.sig.data;
 #endif
-    m_ofi_call(fi_writemsg(rma->ofi.ep, &msg, flags));
+    m_ofi_call_again(fi_writemsg(rma->ofi.ep, &msg, flags),&rma->ofi.progress);
     //----------------------------------------------------------------------------------------------
 #if (!M_WRITE_DATA)
     if (rma->ofi.sig.flags) {
@@ -448,7 +442,8 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
             .data = 0x0,  // atomics does NOT support FI_REMOTE_CQ_DATA
             .context = &rma->ofi.sig.ctx,
         };
-        m_ofi_call(fi_atomicmsg(rma->ofi.ep, &sigmsg, rma->ofi.sig.flags));
+        m_ofi_call_again(fi_atomicmsg(rma->ofi.ep, &sigmsg, rma->ofi.sig.flags),
+                         &rma->ofi.progress);
     }
 #endif
     //----------------------------------------------------------------------------------------------
@@ -497,13 +492,18 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
 
     // notify readiness to the rank list
     m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+    };
     for (int i = 0; i < nrank; ++i) {
         ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
         cqdata->sync.buf = m_ofi_data_set_post;
         uint64_t tag = m_ofi_tag_set_ps;
-        m_ofi_call(fi_tsend(mem->ofi.sync_trx->ep, &cqdata->sync.buf, sizeof(uint64_t),
-                            cqdata->sync.buf_desc, mem->ofi.sync_trx->addr[rank[i]], tag,
-                            &cqdata->ctx));
+        m_ofi_call_again(
+            fi_tsend(mem->ofi.sync_trx->ep, &cqdata->sync.buf, sizeof(uint64_t),
+                     cqdata->sync.buf_desc, mem->ofi.sync_trx->addr[rank[i]], tag, &cqdata->ctx),
+            &progress);
     }
     //----------------------------------------------------------------------------------------------
     // wait for completion of the send calls, the recv cannot complete until the send did
@@ -527,6 +527,10 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
         .ignore = 0x0,
         .data = 0,
     };
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+    };
     for (int i = 0; i < nrank; ++i) {
         ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata+i;
         iov.iov_base = &cqdata->sync.buf;
@@ -534,13 +538,9 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
         msg.context = &cqdata->ctx;
         msg.addr = mem->ofi.sync_trx->addr[rank[i]];
         uint64_t flags = FI_COMPLETION;
-        m_ofi_call(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags));
+        m_ofi_call_again(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags),&progress);
     }
     // wait for completion, recv are NOT tracked by ccntr
-    ofi_progress_t progress = {
-        .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
-    };
     while (m_countr_load(mem->ofi.sync.epoch + 0) < nrank) {
         ofi_progress(&progress);
     }
@@ -554,6 +554,10 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     // count the number of calls issued for each of the ranks and notify them
     int ttl_data = 0;
     uint64_t tag = m_ofi_tag_set_cw;
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+    };
     for (int i = 0; i < nrank; ++i) {
         int issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
         ttl_data += issued_rank;
@@ -561,8 +565,9 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         ofi_rma_trx_t* trx = mem->ofi.sync_trx;
         ofi_cqdata_t* cqd = mem->ofi.sync.cqdata + i;
         cqd->sync.buf = m_ofi_data_set_cmpl | m_ofi_data_set_nops(issued_rank);
-        m_ofi_call(fi_tsend(trx->ep, &cqd->sync.buf, sizeof(uint64_t), cqd->sync.buf_desc,
-                            trx->addr[rank[i]], tag, &cqd->ctx));
+        m_ofi_call_again(fi_tsend(trx->ep, &cqd->sync.buf, sizeof(uint64_t), cqd->sync.buf_desc,
+                                  trx->addr[rank[i]], tag, &cqd->ctx),
+                         &progress);
     }
     // wait for completion of the send calls, otherwise they will be delayed
     //----------------------------------------------------------------------------------------------
@@ -594,6 +599,10 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         .ignore = 0x0,
         .data = 0,
     };
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+    };
     uint64_t flags = FI_COMPLETION;
     for (int i = 0; i < nrank; ++i) {
         ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
@@ -601,13 +610,9 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         msg.desc = &cqdata->sync.buf_desc;
         msg.context = &cqdata->ctx;
         msg.addr = mem->ofi.sync_trx->addr[rank[i]];
-        m_ofi_call(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags));
+        m_ofi_call_again(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags),&progress);
     }
     // compare the number of calls done to the value in the epoch if everybody has finished
-    ofi_progress_t progress = {
-        .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
-    };
     int i = 0;
     while (m_countr_load(mem->ofi.sync.epoch + 1) < nrank) {
         // every try progress the sync, we really need it

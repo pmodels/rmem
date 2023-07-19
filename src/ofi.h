@@ -45,14 +45,45 @@ typedef struct fi_cq_entry ofi_cq_entry;
 //--------------------------------------------------------------------------------------------------
 
 //--------------------------------------------------------------------------------------------------
+#define m_ofi_call_again(func, progress)                                                  \
+    do {                                                                                  \
+        int m_ofi_call_res = func;                                                        \
+        if (m_ofi_call_res == -FI_EAGAIN) {                                               \
+            /* if the error code is FI_EAGAIN, try to progress and do it again*/          \
+            ofi_progress(progress);                                                       \
+        } else {                                                                          \
+            /* if it's a success, leave*/                                                 \
+            m_assert(m_ofi_call_res >= 0, "OFI ERROR: %s", fi_strerror(-m_ofi_call_res)); \
+            break;                                                                        \
+        }                                                                                 \
+    } while (1)
+
+#ifndef NDEBUG
 #define m_ofi_call(func)                                                              \
     do {                                                                              \
-        int m_ofi_call_res;                                                           \
-        do {                                                                          \
-            m_ofi_call_res = func;                                                    \
-        } while (m_ofi_call_res == -FI_EAGAIN);                                       \
+        int m_ofi_call_res = func;                                                    \
         m_assert(m_ofi_call_res >= 0, "OFI ERROR: %s", fi_strerror(-m_ofi_call_res)); \
     } while (0)
+#else
+#define m_ofi_call(func) \
+    do {                 \
+        func;            \
+    } while (0)
+#endif
+
+
+#ifndef NDEBUG
+#define m_pthread_call(func)                                                        \
+    do {                                                                            \
+        int m_pthread_call_res = func;                                              \
+        m_assert(m_pthread_call_res == 0, "PTHREAD ERROR: %d", m_pthread_call_res); \
+    } while (0)
+#else
+#define m_pthread_call(func) \
+    do {                     \
+        func;                \
+    } while (0)
+#endif
 
 //--------------------------------------------------------------------------------------------------
 // TAGGED SEND-RECV
