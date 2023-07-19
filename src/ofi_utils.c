@@ -127,10 +127,15 @@ int ofi_util_get_prov(struct fi_info** prov) {
     // MR endpoint is supported
     hints->domain_attr->mr_mode |= FI_MR_ENDPOINT;
     // optional:
-    hints->domain_attr->mr_mode |= FI_MR_LOCAL;
+    //hints->domain_attr->mr_mode |= FI_MR_LOCAL;
     hints->domain_attr->mr_mode |= FI_MR_PROV_KEY;
     hints->domain_attr->mr_mode |= FI_MR_ALLOCATED;
     hints->domain_attr->mr_mode |= FI_MR_VIRT_ADDR;
+
+    // enable GPU memory if needed
+#if (M_HAVE_CUDA)
+    hints->domain_attr->mr_mode |= FI_MR_HMEM;
+#endif
 
     // try to get those modes with the minimum caps
     m_ofi_fatal_info(hints, caps, ofi_cap);  // implies SEND/RECV
@@ -327,20 +332,69 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
             *desc = NULL;
         }
     } else {
+        //------------------------------------------------------------------------------------------
         // actually register the memory
         uint64_t flags = 0x0;
         if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
             flags |= FI_RMA_EVENT;
         }
+        // get attr structs
+#if (M_HAVE_CUDA)
+        int device;
+        enum fi_hmem_iface iface;
+        struct cudaPointerAttributes cu_attr;
+        m_cuda_call(cudaPointerGetAttributes(&cu_attr, buf));
+        switch (cu_attr.type) {
+            case (cudaMemoryTypeUnregistered):
+                device = 0;
+                iface = FI_HMEM_SYSTEM;
+                break;
+            case (cudaMemoryTypeHost):
+                device = cu_attr.device;
+                iface = FI_HMEM_CUDA;
+                break;
+            case (cudaMemoryTypeDevice):
+                device = cu_attr.device;
+                iface = FI_HMEM_CUDA;
+                break;
+            case (cudaMemoryTypeManaged):
+                device = cu_attr.device;
+                iface = FI_HMEM_CUDA;
+                break;
+            default:
+                m_assert(0,"unrecognized memory %d",cu_attr.type);
+                break;
+        };
+#else
+        int device = 0;
+        enum fi_hmem_iface iface = FI_HMEM_SYSTEM;
+#endif
+        // register
+        struct iovec iov = {
+            .iov_base = buf,
+            .iov_len = count,
+        };
+        struct fi_mr_attr attr = {
+            .mr_iov = &iov,
+            .iov_count = 1,
+            .access = access,
+            .offset = 0,
+            .requested_key = comm->unique_mr_key++,
+            .context = NULL,
+            .iface = iface,
+            .device = device,
+        };
         m_verb("registering memory: key = %llu, flags & FI_RMA_EVENT? %d", comm->unique_mr_key,
                (flags & FI_RMA_EVENT) > 0);
-        m_ofi_call(
-            fi_mr_reg(comm->domain, buf, count, access, 0, comm->unique_mr_key++, flags, mr, NULL));
+        m_ofi_call(fi_mr_regattr(comm->domain, &attr, flags, mr));
 
-        // get the description if needed
+        //------------------------------------------------------------------------------------------
+        // get the description
         if (access & (FI_READ | FI_WRITE | FI_SEND | FI_RECV)) {
             m_assert(desc, "desc should not be NULL");
-            if (comm->prov->domain_attr->mr_mode & FI_MR_LOCAL) {
+            // needed if MR_LOCAL or if HMEM and it's GPU memory
+            if ((comm->prov->domain_attr->mr_mode & FI_MR_LOCAL) ||
+                (comm->prov->domain_attr->mr_mode & FI_MR_HMEM && iface != FI_HMEM_SYSTEM)) {
                 *desc = fi_mr_desc(*mr);
             } else {
                 *desc = NULL;
