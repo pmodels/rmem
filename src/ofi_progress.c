@@ -81,8 +81,8 @@ int ofi_progress(ofi_progress_t* progress) {
             uint8_t kind = *((uint8_t*)op_ctx + m_ofi_cq_offset(kind));
             if (kind & m_ofi_cq_kind_rqst) {
                 m_verb("rqst entry completed");
-                atomic_int* cntr = (atomic_int*)(op_ctx + m_ofi_cq_offset(rqst.busy));
-                atomic_fetch_add(cntr, -1);
+                countr_t* cntr = (countr_t*)(op_ctx + m_ofi_cq_offset(rqst.busy));
+                m_countr_fetch_add(cntr,-1);
                 m_verb("decreasing flag value by -1");
                 continue;
             } else if (kind & m_ofi_cq_kind_sync) {

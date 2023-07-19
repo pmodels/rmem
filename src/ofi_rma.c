@@ -32,7 +32,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 #endif
 
     // allocate the counters tracking the number of issued calls
-    mem->ofi.sync.icntr = calloc(comm->size, sizeof(atomic_int));
+    mem->ofi.sync.icntr = calloc(comm->size, sizeof(countr_t));
     for (int i = 0; i < comm->size; ++i) {
         m_countr_init(mem->ofi.sync.icntr + i);
     }
