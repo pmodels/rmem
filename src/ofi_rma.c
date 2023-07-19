@@ -197,6 +197,11 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 #endif
 #endif
         }
+        //------------------------------------------------------------------------------------------
+        // cuda specific
+#if (M_HAVE_CUDA)
+        m_cuda_call(cudaStreamCreate(&trx[i].stream));
+#endif
         m_verb("done with EP # %d", i);
     }
 
@@ -290,6 +295,9 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
             m_ofi_call(fi_close(&trx->av->fid));
             free(trx->addr);
         }
+#if (M_HAVE_CUDA)
+        m_cuda_call(cudaStreamDestroy(trx->stream));
+#endif
     }
     m_ofi_call(fi_close(&mem->ofi.ccntr->fid));
 #if (M_SYNC_RMA_EVENT)
@@ -426,6 +434,11 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     m_cuda_call(cudaHostGetDevicePointer((void**)&d_ready_ptr, (void*)h_ready_ptr, 0));
     m_cuda_call(cudaMemcpy((void*)&rma->ofi.drma->ready, (void*)&d_ready_ptr, sizeof(int*),
                            cudaMemcpyHostToDevice));
+
+    // store the stream
+    rma->ofi.stream = &mem->ofi.data_trx[ctx_id].stream;
+#else
+    rma->ofi.stream = NULL;
 #endif
     //----------------------------------------------------------------------------------------------
     m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
@@ -458,7 +471,7 @@ int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma) {
 }
 int ofi_rma_start(ofi_rma_t* rma) {
 #if (M_HAVE_CUDA)
-    ofi_rma_start_device(rma->ofi.drma);
+    ofi_rma_start_device(rma->ofi.stream,rma->ofi.drma);
 #else
     rma->ofi.qnode.ready++;
 #endif
@@ -468,7 +481,6 @@ int ofi_rma_start(ofi_rma_t* rma) {
 int ofi_rma_free(ofi_rma_t* rma) {
     m_rmem_call(ofi_util_mr_close(rma->ofi.msg.mr_local));
 #if (M_HAVE_CUDA)
-    m_cuda_call(cudaDeviceSynchronize());
     m_cuda_call(cudaHostUnregister((void*)&rma->ofi.qnode.ready));
     m_cuda_call(cudaFree((void*)rma->ofi.drma));
 #endif

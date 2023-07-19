@@ -1,19 +1,15 @@
 #ifndef DOFI_H_
 #define DOFI_H_
 
+//--------------------------------------------------------------------------------------------------
 #ifdef HAVE_CUDA
 #define M_HAVE_CUDA 1
-#else
-#define M_HAVE_CUDA 0
-#endif
+//--------------------------------------------------------------------------------------------------
+#include <cuda.h>
+#include "cuda_runtime_api.h"
 
-// device version of the RMA request
-struct ofi_device_rma_t {
-    volatile int* ready;
-};
-typedef struct ofi_device_rma_t* ofi_drma_t;
+typedef cudaStream_t rmem_stream_t;
 
-//------------------------------------------------------------------------------
 #ifndef NDEBUG
 #define m_cuda_call(func)                                                            \
     do {                                                                             \
@@ -27,7 +23,20 @@ typedef struct ofi_device_rma_t* ofi_drma_t;
     } while (0)
 #endif
 
-//------------------------------------------------------------------------------
-extern int ofi_rma_start_device(ofi_drma_t drma);
+//--------------------------------------------------------------------------------------------------
+#else
+#define M_HAVE_CUDA 0
+//--------------------------------------------------------------------------------------------------
+typedef void* rmem_stream_t;
+#endif
+
+//--------------------------------------------------------------------------------------------------
+// device version of the RMA request
+struct ofi_device_rma_t {
+    volatile int* ready;
+};
+typedef struct ofi_device_rma_t* ofi_drma_t;
+
+extern int ofi_rma_start_device(rmem_stream_t* stream, ofi_drma_t drma);
 
 #endif

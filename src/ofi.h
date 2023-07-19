@@ -223,6 +223,7 @@ typedef struct {
     struct fid_ep* srx;
     struct fid_cq* cq;  // completion queue for RECEIVE and REMOTE_DATA
     struct fid_av* av;  // address vector
+    rmem_stream_t stream;
 } ofi_rma_trx_t;
 
 #if (!M_WRITE_DATA)
@@ -289,6 +290,8 @@ typedef struct {
         } sig;
         fi_addr_t addr;
         struct fid_ep* ep;
+        ofi_drma_t drma;
+        rmem_stream_t* stream;
     } ofi;
 } ofi_rma_t;
 
