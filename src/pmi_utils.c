@@ -115,6 +115,7 @@ int pmi_allgather(const size_t addr_len, const void* addr, void** addr_world) {
         int val_len = val_max_len;
         snprintf(kvs_key, key_max_len, "key%d-%d", pmi_key_count, i);
         memset(kvs_val, 0, val_max_len);
+        m_verb("KVS_GET(%s)",kvs_key);
         m_pmi_call(PMI_KVS_Get(kvs, kvs_key, kvs_val, val_len));
 
         uint8_t* c_addr = addr_list + i * addr_len;

@@ -64,7 +64,6 @@ int ofi_ctx_free(struct fi_info* prov, ofi_ctx_t** ctx){
 
 // main functions
 int ofi_init(ofi_comm_t* ofi) {
-
     // get the provider list
     m_rmem_call(ofi_util_get_prov(&ofi->prov));
     // struct fi_info* prov_list;
@@ -90,6 +89,8 @@ int ofi_init(ofi_comm_t* ofi) {
     m_rmem_call(pmi_init());
     m_rmem_call(pmi_get_comm_id(&ofi->rank, &ofi->size));
 
+    // set the initial value of unique_key
+    ofi->unique_mr_key = 0;
     //----------------------------------------------------------------------------------------------
     // open different communication contexts
     ofi->ctx = calloc(ofi->n_ctx, sizeof(ofi_ctx_t));

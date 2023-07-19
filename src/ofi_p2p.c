@@ -4,11 +4,25 @@
  */
 #include "ofi.h"
 #include "rmem_utils.h"
+#include "ofi_utils.h"
 
-int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* ofi) {
+int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* comm) {
+    //----------------------------------------------------------------------------------------------
+    m_rmem_call(ofi_util_mr_reg(p2p->buf, p2p->count, FI_SEND|FI_RECV, comm,
+                                &p2p->ofi.mr_local, &p2p->ofi.desc_local, NULL));
+    // if (comm->prov->domain_attr->mr_mode & FI_MR_LOCAL) {
+    //     m_assert(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY, "we assume prov key here");
+    //     uint64_t flags = 0;
+    //     uint64_t access = FI_SEND | FI_RECV;
+    //     m_ofi_call(fi_mr_reg(comm->domain, p2p->buf, p2p->count, access, 0, comm->unique_mr_key++, flags,
+    //                          &p2p->ofi.mr_local, NULL));
+    //     p2p->ofi.desc_local = fi_mr_desc(p2p->ofi.mr_local);
+    // } else {
+    //     p2p->ofi.mr_local = NULL;
+    //     p2p->ofi.desc_local = NULL;
+    // }
+    //----------------------------------------------------------------------------------------------
     p2p->ofi.cq.kind = m_ofi_cq_kind_rqst;
-    // register the flag
-    p2p->ofi.cq.rqst.flag = &p2p->ofi.completed;
     // init the data stuctures
     p2p->ofi.iov = (struct iovec){
         .iov_base = p2p->buf,
@@ -31,15 +45,21 @@ typedef enum {
 } p2p_opt_t;
 
 int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2p_opt_t op) {
+    //
     m_assert(ctx_id < comm->n_ctx, "ctx id = %d < the number of ctx = %d", ctx_id, comm->n_ctx);
     ofi_ctx_t* ctx = comm->ctx + ctx_id;
-
-    // set the completion param
-    p2p->ofi.cq.cq = ctx->p2p_cq;
-    m_countr_store(p2p->ofi.cq.rqst.flag, 0);
+    // set the progress param
+    p2p->ofi.progress.cq = ctx->p2p_cq;
+    p2p->ofi.progress.fallback_ctx = NULL;
+    // busy counter
+    m_countr_store(&p2p->ofi.cq.rqst.busy, 1);
     // address and tag depends on the communicator context
     p2p->ofi.msg.tag = ofi_set_tag(ctx_id, p2p->tag);
     p2p->ofi.msg.addr = ctx->p2p_addr[p2p->peer];
+
+    // finalize the MR
+    m_rmem_call(ofi_util_mr_bind(ctx->p2p_ep, p2p->ofi.mr_local, NULL, comm));
+    m_rmem_call(ofi_util_mr_enable(p2p->ofi.mr_local, comm, NULL));
 
     // we can use the inject (or FI_INJECT_COMPLETE) only if autoprogress cap is ON. Otherwise, not
     // reading the cq will lead to no progress, see issue https://github.com/pmodels/rmem/issues/4
@@ -53,7 +73,7 @@ int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2
                 m_ofi_call(fi_tinject(ctx->p2p_ep, p2p->buf, p2p->count, ctx->p2p_addr[p2p->peer],
                                       p2p->ofi.msg.tag));
                 // need to complete the request as no CQ entry will happen
-                m_countr_fetch_add(p2p->ofi.cq.rqst.flag, 1);
+                m_countr_fetch_add(&p2p->ofi.cq.rqst.busy, -1);
             } else {
                 m_ofi_call(fi_tsendmsg(ctx->p2p_ep, &p2p->ofi.msg, flag));
                 // m_ofi_call(fi_tsend(ctx->p2p_ep, p2p->buf, p2p->count, NULL,
@@ -78,4 +98,7 @@ int ofi_recv_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm) {
     return m_success;
 }
 
-int ofi_p2p_free(ofi_p2p_t* p2p) { return m_success; }
+int ofi_p2p_free(ofi_p2p_t* p2p) {
+    m_rmem_call(ofi_util_mr_close(p2p->ofi.mr_local));
+    return m_success;
+}

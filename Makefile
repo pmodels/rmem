@@ -28,7 +28,7 @@ BUILDDIR := ./build
 SRC_DIR := ./src
 OBJ_DIR := ./build
 # git commit
-# GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
 
 ## add the headers to the vpaths
 INC := -I$(SRC_DIR)
@@ -78,8 +78,11 @@ OBJ := $(CC_OBJ)
 
 ################################################################################
 # mandatory flags
-CCFLAGS =
-#-fPIC -DGIT_COMMIT=\"$(GIT_COMMIT)\"   
+CCFLAGS ?=
+CCFLAGS += -Wno-deprecated-declarations
+ifneq (,$(GIT_COMMIT))
+CCFLAGS += -DGIT_COMMIT=\"$(GIT_COMMIT)\"   
+endif
 
 # Makefile shenanigans
 comma:= ,
