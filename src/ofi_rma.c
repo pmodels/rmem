@@ -309,6 +309,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
         .iov_base = rma->buf,
         .iov_len = rma->count,
     };
+    m_verb("rma-init: base = %llu + disp = %lu", mem->ofi.base_list[rma->peer], rma->disp);
     rma->ofi.msg.riov = (struct fi_rma_iov){
         .addr = mem->ofi.base_list[rma->peer] + rma->disp,  // offset from key
         .len = rma->count,

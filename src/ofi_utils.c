@@ -353,15 +353,20 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     // get the base list, is needed even if we register NULL
     if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
         m_assert(base_list, "base_list should NOT be null");
-        void* list = calloc(ofi_get_size(comm), sizeof(uint64_t));
+        void* list = calloc(ofi_get_size(comm), sizeof(fi_addr_t));
         if (comm->prov->domain_attr->mr_mode & FI_MR_VIRT_ADDR) {
             m_verb("fill the base_list");
             m_assert(base_list, "base_list cannot be NULL");
-            uint64_t usr_base = (uint64_t)buf;
-            pmi_allgather(sizeof(usr_base), &usr_base, &list);
+            fi_addr_t usr_base = (fi_addr_t)buf;
+            pmi_allgather(sizeof(fi_addr_t), &usr_base, &list);
         }
         *base_list = list;
         m_verb("assign the base_list");
+#ifndef NDEBUG
+        for (int i = 0; i < ofi_get_size(comm); ++i) {
+            m_verb("base[%d] = %llu", i, (*base_list)[i]);
+        }
+#endif
     } else {
         m_verb("NO base_list");
         m_assert(!base_list, "base list should be NULL");
