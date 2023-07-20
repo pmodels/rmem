@@ -156,8 +156,8 @@ int ofi_util_get_prov(struct fi_info** prov) {
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
     // m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
     // request manual progress (comment when using sockets on MacOs)
-    // m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
-    // m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
+    m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
+    m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
     // no order required
     m_ofi_test_info(hints, tx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);
@@ -328,10 +328,13 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
         if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
             flags |= FI_RMA_EVENT;
         }
-        m_verb("registering memory: key = %llu, flags & FI_RMA_EVENT? %d", comm->unique_mr_key,
+        uint64_t rkey = 0;
+        if (!(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY)) {
+            rkey = comm->unique_mr_key++;
+        }
+        m_verb("registering memory: key = %llu, flags & FI_RMA_EVENT? %d", rkey,
                (flags & FI_RMA_EVENT) > 0);
-        m_ofi_call(
-            fi_mr_reg(comm->domain, buf, count, access, 0, comm->unique_mr_key++, flags, mr, NULL));
+        m_ofi_call(fi_mr_reg(comm->domain, buf, count, access, 0, rkey, flags, mr, NULL));
 
         // get the description if needed
         if (access & (FI_READ | FI_WRITE | FI_SEND | FI_RECV)) {
