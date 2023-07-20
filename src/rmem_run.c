@@ -114,10 +114,17 @@ void p2p_pre(run_param_t* param, void* data) {
     const size_t ttl_len = n_msg * msg_size;
 
     // allocate the buf
-    d->buf = calloc(ttl_len, sizeof(int));
+    int* tmp= calloc(ttl_len, sizeof(int));
     for (int i = 0; i < ttl_len; ++i) {
-        d->buf[i] = i + 1;
+        tmp[i] = i + 1;
     }
+#if (M_HAVE_CUDA)
+    m_cuda_call(cudaMalloc((void**)&d->buf,ttl_len*sizeof(int)));
+    m_cuda_call(cudaMemcpy(d->buf,tmp,ttl_len*sizeof(int),cudaMemcpyHostToDevice));
+    free(tmp);
+#else
+    d->buf = tmp;
+#endif
     // allocate the objects
     d->p2p = calloc(param->n_msg, sizeof(ofi_rma_t));
     for (int i = 0; i < param->n_msg; ++i) {
@@ -141,7 +148,11 @@ void p2p_post(run_param_t* param, void* data) {
         ofi_p2p_free(d->p2p + i);
     }
     free(d->p2p);
+#if (M_HAVE_CUDA)
+    m_cuda_call(cudaFree(d->buf));
+#else
     free(d->buf);
+#endif
 }
 double p2p_run_send(run_param_t* param, void* data) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
@@ -179,13 +190,22 @@ double p2p_run_recv(run_param_t* param, void* data) {
     }
     //------------------------------------------------
     // check the result
+#if (M_HAVE_CUDA)
+    int* tmp= calloc(ttl_len, sizeof(int));
+    m_cuda_call(cudaMemcpy(tmp,d->buf,ttl_len*sizeof(int),cudaMemcpyDeviceToHost));
+#else
+    int* tmp = d->buf;
+#endif
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
-        if (d->buf[i] != res) {
-            m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
+        if (tmp[i] != res) {
+            m_log("pmem[%d] = %d != %d", i, tmp[i], res);
         }
         d->buf[i] = 0.0;
     }
+#if (M_HAVE_CUDA)
+    free(tmp);
+#endif
     return time;
 }
 //==================================================================================================

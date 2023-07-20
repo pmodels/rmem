@@ -132,13 +132,14 @@ int ofi_util_get_prov(struct fi_info** prov) {
     hints->domain_attr->mr_mode |= FI_MR_ALLOCATED;
     hints->domain_attr->mr_mode |= FI_MR_VIRT_ADDR;
 
-    // enable GPU memory if needed
+    // enable GPU memory if needed and try to get those modes with the minimum caps
 #if (M_HAVE_CUDA)
     hints->domain_attr->mr_mode |= FI_MR_HMEM;
+    m_ofi_fatal_info(hints, caps, ofi_cap | FI_HMEM);
+#else
+    m_ofi_fatal_info(hints, caps, ofi_cap);  // implies SEND/RECV
 #endif
 
-    // try to get those modes with the minimum caps
-    m_ofi_fatal_info(hints, caps, ofi_cap);  // implies SEND/RECV
 
     // improve the selection if required in case of specific usage
 #if (M_SYNC_RMA_EVENT)
@@ -321,12 +322,15 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     bool useless = false;
     // don't register if the buffer is NULL or the count is 0
     useless |= (!buf || count == 0);
-    // don't register if mr_mode is not MR_LOCAL
+    m_verb("memory regitration for %p is useless? %d",buf,useless);
+    // don't register if mr_mode is not MR_LOCAL or FI_HMEM is enabled
     useless |= access & (FI_READ | FI_WRITE | FI_SEND | FI_RECV) &&
-               !(comm->prov->domain_attr->mr_mode & FI_MR_LOCAL);
+               !(comm->prov->domain_attr->mr_mode & (FI_MR_LOCAL | FI_MR_HMEM));
+    m_verb("memory regitration for %p is useless? %d",buf,useless);
+    // don't dd
     // if it's useless, return
     if (useless) {
-        m_verb("memory regitration is useless, skip it");
+        m_verb("memory regitration for %p is useless, skip it",buf);
         *mr = NULL;
         if (desc) {
             *desc = NULL;
@@ -334,7 +338,11 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     } else {
         //------------------------------------------------------------------------------------------
         // actually register the memory
+#if (M_HAVE_CUDA)
         uint64_t flags = 0x0;
+#else
+        uint64_t flags = FI_HMEM;
+#endif
         if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
             flags |= FI_RMA_EVENT;
         }
