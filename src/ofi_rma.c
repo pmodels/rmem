@@ -83,18 +83,14 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     mem->ofi.n_tx = comm->n_ctx;
     const int n_ttl_trx = comm->n_ctx + 1;
     m_assert(mem->ofi.n_rx <= mem->ofi.n_tx, "number of rx must be <= number of tx");
-    // allocate n_ctx + 1 structs
+    // allocate n_ctx + 1 structs and get the the right pointer ids
     ofi_rma_trx_t* trx = calloc(n_ttl_trx, sizeof(ofi_rma_trx_t));
+    mem->ofi.data_trx = trx + 0;
+    mem->ofi.sync_trx = trx + comm->n_ctx;
     for (int i = 0; i < n_ttl_trx; ++i) {
         const bool is_rx = (i < mem->ofi.n_rx);
         const bool is_tx = (i < mem->ofi.n_tx);
         const bool is_sync = (i == comm->n_ctx);
-        // associate the right trx struct
-        if (is_rx || is_tx) {
-            mem->ofi.data_trx = trx + i;
-        } else {
-            mem->ofi.sync_trx = trx + i;
-        }
 
         // ------------------- endpoint
         if (is_rx) {
@@ -132,10 +128,6 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         }
 
         // ------------------- counters
-        // struct fi_cntr_attr rx_cntr_attr = {
-        //     .events = FI_CNTR_EVENTS_COMP,
-        //     .wait_obj = FI_WAIT_UNSPEC,
-        // };
 // #if (M_SYNC_RMA_EVENT)
 //         if (is_rx) {
 //             // remote counters - count the number of fi_write/fi_read targeted to me
@@ -146,7 +138,6 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 //         }
 // #endif
         if (is_sync) {
-            // uint64_t ccntr_flag = FI_SEND | FI_RECV;
             // do NOT count the RECV calls, simplifies the sync logic :-)
             uint64_t ccntr_flag = FI_SEND;
             m_ofi_call(fi_ep_bind(trx[i].ep, &mem->ofi.ccntr->fid, ccntr_flag));
@@ -505,7 +496,7 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
             &progress);
     }
     //----------------------------------------------------------------------------------------------
-    // wait for completion of the send calls, the recv cannot complete until the send did
+    // wait for completion of the send calls, will NOT generate CQ entries
     m_ofi_call(fi_cntr_wait(mem->ofi.ccntr, nrank, -1));
     m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
 
@@ -527,6 +518,7 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
     };
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
+        // all the ctx of sync.cqdata will lead to the same
         .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
     };
     for (int i = 0; i < nrank; ++i) {
@@ -567,7 +559,6 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
                                   trx->addr[rank[i]], tag, &cqd->ctx),
                          &progress);
     }
-    // wait for completion of the send calls, otherwise they will be delayed
     //----------------------------------------------------------------------------------------------
     // count the number of completed calls and wait till they are all done
     // must complete all the sync call done in rmem_post (if any) + the signal calls
@@ -580,14 +571,22 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     m_verb("complete: waiting for %d syncs, %d calls (total: %" PRIu64 ")", nrank, ttl_data,
            threshold);
 #endif
-    m_ofi_call(fi_cntr_wait(mem->ofi.ccntr, threshold, -1));
+    // sync send calls do NOT generate cq entries but we need to progress them anyway
+    // rma calls generate cq entries so they need to be processed
+    // we loop on data_trx array using the global length
+    int i = 0;
+    do {
+        progress.cq = mem->ofi.data_trx[i].cq;
+        m_ofi_call(ofi_progress(&progress));
+        i = (i + 1) % (mem->ofi.n_tx + 1);
+    } while (fi_cntr_read(mem->ofi.ccntr) < threshold);
     m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
     return m_success;
 }
 
 int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     //----------------------------------------------------------------------------------------------
-    // ideally we can pre-post them, but then the fast completion has an issue
+    // ideally we can pre-post them, but then the fast completion would have to cancel them
     struct iovec iov = {
         .iov_len = sizeof(uint64_t),
     };
@@ -611,10 +610,11 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         msg.addr = mem->ofi.sync_trx->addr[rank[i]];
         m_ofi_call_again(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags),&progress);
     }
-    // compare the number of calls done to the value in the epoch if everybody has finished
+    //----------------------------------------------------------------------------------------------
+    // get the number of calls done by the origins
     int i = 0;
     while (m_countr_load(mem->ofi.sync.epoch + 1) < nrank) {
-        // every try progress the sync, we really need it
+        // every try progress the sync, we really need it!
         progress.cq = mem->ofi.sync_trx->cq;
         ofi_progress(&progress);
 
@@ -622,9 +622,10 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         progress.cq = mem->ofi.data_trx[i].cq;
         ofi_progress(&progress);
 
-        // update the counter
+        // update the counter to loop on the data
         i = (i + 1) % mem->ofi.n_tx;
     }
+    // now we know for how many calls we have to wait, all the RECV have completed at this point
     m_verb("waitall: waiting for %d calls to complete", m_countr_load(mem->ofi.sync.epoch + 2));
 #if (M_SYNC_RMA_EVENT)
     uint64_t threshold = m_countr_load(mem->ofi.sync.epoch + 2);
@@ -633,6 +634,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
 #else
     // every put comes with data that will substract 1 to the epoch[2] value
+    // no need to progress the sync_trx here!
     i = 0;
     while (m_countr_load(mem->ofi.sync.epoch + 2) > 0) {
         progress.cq = mem->ofi.data_trx[i].cq;
@@ -651,7 +653,17 @@ int ofi_rmem_complete_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) 
 #else
     uint64_t threshold = ncalls;
 #endif
-    m_ofi_call(fi_cntr_wait(mem->ofi.ccntr, threshold, -1));
+    // rma calls generate cq entries so they need to be processed, we loop on the data_trx only
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+    };
+    int i = 0;
+    do {
+        progress.cq = mem->ofi.data_trx[i].cq;
+        m_ofi_call(ofi_progress(&progress));
+        i = (i + 1) % (mem->ofi.n_tx);
+    } while (fi_cntr_read(mem->ofi.ccntr) < threshold);
     m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
     return m_success;
 }
@@ -663,7 +675,6 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
     // the counter is linked to the MR so waiting on it will trigger progress
     m_ofi_call(fi_cntr_wait(mem->ofi.rcntr, ncalls, -1));
     m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
-    m_countr_fetch_add(mem->ofi.sync.epoch + 2, -ncalls);
 #else
     // every put comes with data that will substract 1 to the epoch[2] value
     // first bump the value of epoch[2]
