@@ -30,7 +30,7 @@ int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* comm) {
     };
     p2p->ofi.msg = (struct fi_msg_tagged){
         .msg_iov = &p2p->ofi.iov,
-        .desc = NULL,
+        .desc = &p2p->ofi.desc_local,
         .iov_count = 1,
         .ignore = 0x0,
         .context = &p2p->ofi.cq.ctx,
