@@ -491,7 +491,6 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     m_countr_store(mem->ofi.sync.epoch + 2, 0);
 
     // notify readiness to the rank list
-    m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
         .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
@@ -508,14 +507,13 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     //----------------------------------------------------------------------------------------------
     // wait for completion of the send calls, the recv cannot complete until the send did
     m_ofi_call(fi_cntr_wait(mem->ofi.ccntr, nrank, -1));
+    m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
 
     return m_success;
 }
 
 // wait for the processes in comm to notify their exposure
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
-    // reset the completion counter, we start counting now
-    m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
     // open the handshake requests
     struct iovec iov = {
         .iov_len = sizeof(uint64_t),
@@ -582,7 +580,8 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     m_verb("complete: waiting for %d syncs, %d calls (total: %" PRIu64 ")", nrank, ttl_data,
            threshold);
 #endif
-    fi_cntr_wait(mem->ofi.ccntr, threshold, -1);
+    m_ofi_call(fi_cntr_wait(mem->ofi.ccntr, threshold, -1));
+    m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
     return m_success;
 }
 
@@ -652,7 +651,8 @@ int ofi_rmem_complete_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) 
 #else
     uint64_t threshold = ncalls;
 #endif
-    fi_cntr_wait(mem->ofi.ccntr, threshold, -1);
+    m_ofi_call(fi_cntr_wait(mem->ofi.ccntr, threshold, -1));
+    m_ofi_call(fi_cntr_set(mem->ofi.ccntr, 0));
     return m_success;
 }
 
