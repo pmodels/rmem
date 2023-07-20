@@ -9,7 +9,6 @@
 #include "pmi.h"
 #include "rmem_profile.h"
 
-#define size_max        1 << 22
 #define n_measure       50
 #define n_warmup        5
 #define retry_threshold 0.05
@@ -181,10 +180,14 @@ double p2p_run_recv(run_param_t* param, void* data) {
     // check the result
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
+#ifndef NDEBUG
+        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+#else
         if (d->buf[i] != res) {
             m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
         }
-        d->buf[i] = 0.0;
+#endif
+        d->buf[i] = 0;
     }
     return time;
 }
@@ -353,10 +356,14 @@ double rma_run_recv(run_param_t* param, void* data) {
     // check the result
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
+#ifndef NDEBUG
+        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+#else
         if (d->buf[i] != res) {
             m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
         }
-        d->buf[i] = 0.0;
+#endif
+        d->buf[i] = 0;
     }
     return time;
 }
@@ -379,10 +386,14 @@ double rma_fast_run_recv(run_param_t* param, void* data) {
     // check the result
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
+#ifndef NDEBUG
+        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+#else
         if (d->buf[i] != res) {
             m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
         }
-        d->buf[i] = 0.0;
+#endif
+        d->buf[i] = 0;
     }
     return time;
 }
@@ -407,10 +418,14 @@ double sig_run_recv(run_param_t* param, void* data) {
     // check the result
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
+#ifndef NDEBUG
+        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+#else
         if (d->buf[i] != res) {
             m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
         }
-        d->buf[i] = 0.0;
+#endif
+        d->buf[i] = 0;
     }
     return time;
 }
@@ -431,10 +446,14 @@ double lat_run_recv(run_param_t* param, void* data) {
     // check the result
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
+#ifndef NDEBUG
+        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+#else
         if (d->buf[i] != res) {
             m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
         }
-        d->buf[i] = 0.0;
+#endif
+        d->buf[i] = 0;
     }
     return time;
 }

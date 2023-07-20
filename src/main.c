@@ -23,9 +23,9 @@ void print_info(char* foldr_name, char* prov_name) {
 
     fprintf(file, "----------------------------------------------------------------\n");
 #ifdef GIT_COMMIT
-    fprintf(file, "commit: %s", GIT_COMMIT);
+    fprintf(file, "commit: %s\n", GIT_COMMIT);
 #else
-    fprintf(file, "commit: unknown");
+    fprintf(file, "commit: unknown\n");
 #endif
     fprintf(file, "provider: %s\n", prov_name);
 #if (M_WRITE_DATA)
