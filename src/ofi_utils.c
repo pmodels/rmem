@@ -139,10 +139,10 @@ int ofi_util_get_prov(struct fi_info** prov) {
 #if (M_SYNC_RMA_EVENT)
     // request support for MR_RMA_EVENT
     hints->domain_attr->mr_mode |= FI_MR_RMA_EVENT;
-    m_ofi_fatal_info(hints, caps, FI_RMA_EVENT);
+    m_ofi_fatal_info(hints, caps, FI_RMA_EVENT | FI_REMOTE_READ | FI_REMOTE_WRITE);
 #endif
 #if (!M_WRITE_DATA)
-    m_ofi_fatal_info(hints, caps, FI_ATOMIC);  // implies (REMOTE_)READ/WRITE
+    m_ofi_fatal_info(hints, caps, FI_ATOMIC | FI_FENCE);  // implies (REMOTE_)READ/WRITE
 #endif
 
     //----------------------------------------------------------------------------------------------
@@ -375,14 +375,21 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
 int ofi_util_mr_bind(struct fid_ep* ep, struct fid_mr* mr, struct fid_cntr* cntr,
                           ofi_comm_t* comm) {
     if (mr) {
-        // bind the counter to the mr
-        if (cntr) {
-            m_ofi_call(fi_mr_bind(mr, &cntr->fid, FI_REMOTE_WRITE));
-        }
-        // bind the mr to the ep
-        if (ep && comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
-            uint64_t mr_trx_flags = 0;
-            m_ofi_call(fi_mr_bind(mr, &ep->fid, mr_trx_flags));
+        if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+            // bind the counter to the mr
+            if (cntr) {
+                m_ofi_call(fi_mr_bind(mr, &cntr->fid, FI_REMOTE_WRITE));
+            }
+            // bind the mr to the ep
+            if (ep) {
+                uint64_t mr_trx_flags = 0;
+                m_ofi_call(fi_mr_bind(mr, &ep->fid, mr_trx_flags));
+            }
+        } else {
+            // bind the counter to the EP
+            if (cntr && ep) {
+                m_ofi_call(fi_ep_bind(ep, &cntr->fid, FI_REMOTE_WRITE));
+            }
         }
     }
     return m_success;
