@@ -51,12 +51,30 @@ int main(int argc, char** argv) {
     comm.n_ctx = nth;
     m_rmem_call(ofi_init(&comm));
 
+    // allocate the shared mem
+    ofi_rmem_t rma_mem = {
+        .buf = NULL,
+        .count = 0,
+    };
+
     // run parameter
     run_param_t param = {
         .msg_size = 1 << 22,
-        .n_msg = 2,
-        .comm = &comm,
+        .n_msg = 2, 
+        .comm = &comm, 
+        .mem = &rma_mem
     };
+
+    // allocate the shared mem for the receiver
+    if (!is_sender(ofi_get_rank(&comm))) {
+        const size_t ttl_len = param.msg_size * param.n_msg;
+        // receiver needs the remote buffer
+        rma_mem = (ofi_rmem_t){
+            .buf = calloc(ttl_len, sizeof(int)),
+            .count = ttl_len * sizeof(int),
+        };
+    }
+    ofi_rmem_init(&rma_mem, param.comm);
 
     //----------------------------------------------------------------------------------------------
     // P2P
@@ -153,6 +171,10 @@ int main(int argc, char** argv) {
         };
         run_test(&plat_send, &plat_recv, param, &plat_time);
     }
+    //----------------------------------------------------------------------------------------------
+    // free
+    ofi_rmem_free(&rma_mem, param.comm);
+    free(rma_mem.buf);
 
     //----------------------------------------------------------------------------------------------
     if (!is_sender(comm.rank)) {

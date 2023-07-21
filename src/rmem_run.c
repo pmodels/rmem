@@ -46,6 +46,7 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
             run_param_t cparam = {
                 .msg_size = msg_size,
                 .comm = param.comm,
+                .mem = param.mem,
                 .n_msg = imsg,
             };
             PMI_Barrier();
@@ -207,27 +208,13 @@ void rma_alloc(run_param_t* param, void* data) {
         for (int i = 0; i < ttl_len; ++i) {
             d->buf[i] = i + 1;
         }
-        // no remote buffer
-        d->mem = (ofi_rmem_t){
-            .buf = NULL,
-            .count = 0,
-        };
-        ofi_rmem_init(&d->mem, param->comm);
-    } else {
-        // receiver needs the remote buffer
-        d->buf = calloc(ttl_len, sizeof(int));
-        d->mem = (ofi_rmem_t){
-            .buf = d->buf,
-            .count = ttl_len * sizeof(int),
-        };
-        ofi_rmem_init(&d->mem, param->comm);
     }
 }
-void rma_dealloc(run_param_t* param,void*data)
-{
+void rma_dealloc(run_param_t* param, void* data) {
     run_rma_data_t* d = (run_rma_data_t*)data;
-    ofi_rmem_free(&d->mem, param->comm);
-    free(d->buf);
+    if (is_sender(param->comm->rank)) {
+        free(d->buf);
+    }
 }
 
 void put_pre_send(run_param_t* param, void* data) {
@@ -246,7 +233,7 @@ void put_pre_send(run_param_t* param, void* data) {
             .disp = i * msg_size * sizeof(int),
             .peer = peer(param->comm->rank, param->comm->size),
         };
-        ofi_rma_put_init(d->rma + i, &d->mem, 0, param->comm);
+        ofi_rma_put_init(d->rma + i, param->mem, 0, param->comm);
     }
 }
 
@@ -266,7 +253,7 @@ void sig_pre_send(run_param_t* param, void* data) {
             .disp = i * msg_size * sizeof(int),
             .peer = peer(param->comm->rank, param->comm->size),
         };
-        ofi_rma_put_signal_init(d->rma + i,& d->mem, 0, param->comm);
+        ofi_rma_put_signal_init(d->rma + i, param->mem, 0, param->comm);
     }
 }
 
@@ -298,11 +285,11 @@ double rma_run_send(run_param_t* param, void* data) {
     const int buddy = peer(param->comm->rank, param->comm->size);
 
     PMI_Barrier();  // start exposure
-    ofi_rmem_start(1, &buddy, &d->mem, param->comm);
+    ofi_rmem_start(1, &buddy, param->mem, param->comm);
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_start(&d->mem, d->rma + j);
+        ofi_rma_start(param->mem, d->rma + j);
     }
-    ofi_rmem_complete(1, &buddy, &d->mem, param->comm);
+    ofi_rmem_complete(1, &buddy, param->mem, param->comm);
     return 0.0;
 }
 double rma_fast_run_send(run_param_t* param, void* data) {
@@ -313,11 +300,11 @@ double rma_fast_run_send(run_param_t* param, void* data) {
     const int buddy = peer(param->comm->rank, param->comm->size);
 
     PMI_Barrier();  // start exposure
-    ofi_rmem_start(1, &buddy, &d->mem, param->comm);
+    ofi_rmem_start(1, &buddy, param->mem, param->comm);
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_start(&d->mem, d->rma + j);
+        ofi_rma_start(param->mem, d->rma + j);
     }
-    ofi_rmem_complete_fast(n_msg, &d->mem, param->comm);
+    ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
     return 0.0;
 }
 double lat_run_send(run_param_t* param, void* data) {
@@ -327,12 +314,12 @@ double lat_run_send(run_param_t* param, void* data) {
     const size_t ttl_len = n_msg * msg_size;
     const int buddy = peer(param->comm->rank, param->comm->size);
 
-    ofi_rmem_start(1, &buddy, &d->mem, param->comm);
+    ofi_rmem_start(1, &buddy, param->mem, param->comm);
     PMI_Barrier();  // start exposure
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_start(&d->mem, d->rma + j);
+        ofi_rma_start(param->mem, d->rma + j);
     }
-    ofi_rmem_complete_fast(n_msg, &d->mem, param->comm);
+    ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
     return 0.0;
 }
 
@@ -349,21 +336,22 @@ double rma_run_recv(run_param_t* param, void* data) {
     //------------------------------------------------
     PMI_Barrier();
     m_rmem_prof(prof, time) {
-        ofi_rmem_post(1, &buddy, &d->mem, param->comm);
-        ofi_rmem_wait(1, &buddy, &d->mem, param->comm);
+        ofi_rmem_post(1, &buddy, param->mem, param->comm);
+        ofi_rmem_wait(1, &buddy, param->mem, param->comm);
     }
     //------------------------------------------------
     // check the result
+    int* mem_buf = (int*)param->mem->buf;
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
 #ifndef NDEBUG
-        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+        m_assert(mem_buf[i] == res, "pmem[%d] = %d != %d", i, mem_buf[i], res);
 #else
-        if (d->buf[i] != res) {
-            m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
+        if (mem_buf[i] != res) {
+            m_log("pmem[%d] = %d != %d", i, mem_buf[i], res);
         }
 #endif
-        d->buf[i] = 0;
+        mem_buf[i] = 0;
     }
     return time;
 }
@@ -379,21 +367,22 @@ double rma_fast_run_recv(run_param_t* param, void* data) {
     //------------------------------------------------
     PMI_Barrier();
     m_rmem_prof(prof, time) {
-        ofi_rmem_post(1, &buddy, &d->mem, param->comm);
-        ofi_rmem_wait_fast(n_msg, &d->mem, param->comm);
+        ofi_rmem_post(1, &buddy, param->mem, param->comm);
+        ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
     }
     //------------------------------------------------
     // check the result
+    int* mem_buf = (int*)param->mem->buf;
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
 #ifndef NDEBUG
-        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+        m_assert(mem_buf[i] == res, "pmem[%d] = %d != %d", i, mem_buf[i], res);
 #else
-        if (d->buf[i] != res) {
-            m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
+        if (mem_buf[i] != res) {
+            m_log("pmem[%d] = %d != %d", i, mem_buf[i], res);
         }
 #endif
-        d->buf[i] = 0;
+        mem_buf[i] = 0;
     }
     return time;
 }
@@ -410,22 +399,23 @@ double sig_run_recv(run_param_t* param, void* data) {
     //------------------------------------------------
     PMI_Barrier();
     m_rmem_prof(prof, time) {
-        ofi_rmem_post(1, &buddy, &d->mem, param->comm);
-        ofi_rmem_sig_wait(n_msg, &d->mem);
-        ofi_rmem_wait(1, &buddy, &d->mem, param->comm);
+        ofi_rmem_post(1, &buddy, param->mem, param->comm);
+        ofi_rmem_sig_wait(n_msg, param->mem);
+        ofi_rmem_wait(1, &buddy, param->mem, param->comm);
     }
     //------------------------------------------------
     // check the result
+    int* mem_buf = (int*)param->mem->buf;
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
 #ifndef NDEBUG
-        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+        m_assert(mem_buf[i] == res, "pmem[%d] = %d != %d", i, mem_buf[i], res);
 #else
-        if (d->buf[i] != res) {
-            m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
+        if (mem_buf[i] != res) {
+            m_log("pmem[%d] = %d != %d", i, mem_buf[i], res);
         }
 #endif
-        d->buf[i] = 0;
+        mem_buf[i] = 0;
     }
     return time;
 }
@@ -439,21 +429,22 @@ double lat_run_recv(run_param_t* param, void* data) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    ofi_rmem_post(1, &buddy, &d->mem, param->comm);
+    ofi_rmem_post(1, &buddy, param->mem, param->comm);
     PMI_Barrier();
-    m_rmem_prof(prof, time) { ofi_rmem_wait_fast(n_msg, &d->mem, param->comm); }
+    m_rmem_prof(prof, time) { ofi_rmem_wait_fast(n_msg, param->mem, param->comm); }
     //------------------------------------------------
     // check the result
+    int* mem_buf = (int*)param->mem->buf;
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
 #ifndef NDEBUG
-        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+        m_assert(mem_buf[i] == res, "pmem[%d] = %d != %d", i, mem_buf[i], res);
 #else
-        if (d->buf[i] != res) {
-            m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
+        if (mem_buf[i] != res) {
+            m_log("pmem[%d] = %d != %d", i, mem_buf[i], res);
         }
 #endif
-        d->buf[i] = 0;
+        mem_buf[i] = 0;
     }
     return time;
 }

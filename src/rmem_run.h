@@ -25,6 +25,7 @@ typedef struct {
 } run_time_t;
 
 typedef struct {
+    ofi_rmem_t* mem;
     ofi_comm_t* comm;
     int n_msg;     // number of messages
     int msg_size;  // size of a message
@@ -43,7 +44,6 @@ typedef struct {
 } run_p2p_data_t;
 
 typedef struct {
-    ofi_rmem_t mem; // remote mem
     ofi_rma_t* rma; // array of op
     int* buf;
 } run_rma_data_t;

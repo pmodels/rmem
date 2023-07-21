@@ -313,7 +313,7 @@ typedef struct {
         int n_tx;  // number of transmit contexts
         // buffer addresses
         struct fid_mr* mr;
-        uint64_t* base_list;  // list of base addresses
+        fi_addr_t* base_list;  // list of base addresses
         uint64_t* key_list;  // list of remote keys
         // transmit and receive contexts
         ofi_rma_trx_t* sync_trx;
