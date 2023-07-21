@@ -19,7 +19,7 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
     uint32_t post = m_ofi_data_get_post(*data);
     if (post > 0) {
         m_assert(post <= 1, "post must be <=1");
-        m_countr_fetch_add(epoch + 0, post);
+        m_countr_fetch_add(m_rma_epoch_post(epoch), post);
         // if we get a post, we do not need to handle something else
         return;
     }
@@ -27,8 +27,9 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
     uint32_t nops = m_ofi_data_get_nops(*data);
     if (cmpl > 0) {
         m_assert(cmpl <= 1, "post must be <=1");
-        m_countr_fetch_add(epoch + 2, nops);
-        m_countr_fetch_add(epoch + 1, cmpl);
+        m_countr_fetch_add(m_rma_epoch_remote(epoch), nops);
+        m_countr_fetch_add(m_rma_epoch_cmpl(epoch), cmpl);
+        m_verb("sync: counter +%d, now = %d",nops,m_countr_load(m_rma_epoch_remote(epoch)));
         // if we get a complete, we do not need to handle something else
         return;
     }
@@ -36,13 +37,14 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
     if (rcqd > 0) {
         // if we receive a remote cq data then we remove -1 to the epoch[2]
         m_assert(rcqd <= 1, "post must be <=1");
-        m_countr_fetch_add(epoch + 2, -1);
+        m_countr_fetch_add(m_rma_epoch_remote(epoch), -1);
+        m_verb("remote data: counter -1, now = %d",m_countr_load(m_rma_epoch_remote(epoch)));
     }
 #if (M_WRITE_DATA)
     uint32_t sig = m_ofi_data_get_sig(*data);
     if (sig > 0) {
         m_assert(sig <= 1, "post must be <=1");
-        m_countr_fetch_add(epoch + 3, 1);
+        m_countr_fetch_add(m_rma_epoch_signal(epoch), 1);
     }
 #endif
     return;
@@ -79,6 +81,11 @@ int ofi_progress(ofi_progress_t* progress) {
             m_assert(op_ctx, "the context cannot be null here");
             // recover the kind
             uint8_t kind = *((uint8_t*)op_ctx + m_ofi_cq_offset(kind));
+            if (kind & m_ofi_cq_inc_local) {
+                countr_t** epoch = (countr_t**)(progress->fallback_ctx+ m_ofi_cq_offset(sync.cntr));
+                m_assert(*epoch,"epoch is null, that's annoying");
+                m_countr_fetch_add(m_rma_epoch_local(*epoch), 1);
+            }
             if (kind & m_ofi_cq_kind_rqst) {
                 m_verb("rqst entry completed");
                 countr_t* cntr = (countr_t*)(op_ctx + m_ofi_cq_offset(rqst.busy));

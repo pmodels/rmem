@@ -289,6 +289,9 @@ int main(int argc, char** argv) {
     free(psig_time.ci);
     free(plat_time.avg);
     free(plat_time.ci);
+    free(pfast_time.avg);
+    free(pfast_time.ci);
+
     m_rmem_call(ofi_finalize(&comm));
     return EXIT_SUCCESS;
 }
