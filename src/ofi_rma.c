@@ -32,8 +32,7 @@
     } while (0)
 #else
 #define m_mem_check_empty_cq(cq) \
-    do {                         \
-    } while (0)
+    { ((void)0); }
 
 #endif
 
@@ -680,7 +679,16 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     // the counter is linked to the MR so waiting on it will trigger progress
     m_verb("current value of rcntr: %llu",fi_cntr_read(mem->ofi.rcntr));
     m_ofi_call(fi_cntr_wait(mem->ofi.rcntr, threshold, -1));
+#ifndef NDEBUG
+    // trigger progress on the EP
+    for (int i = 0; i < (mem->ofi.n_tx + 1); ++i) {
+        m_mem_check_empty_cq(mem->ofi.data_trx[i].cq);
+    }
+    // re-read the value to make sure it's the one expected
+    m_assert(fi_cntr_read(mem->ofi.rcntr) == threshold, "the value must be threshold");
+#endif
     m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
+    m_assert(!fi_cntr_readerr(mem->ofi.rcntr),"cntr has errors");
 #else
     // every put comes with data that will substract 1 to the epoch[2] value
     // no need to progress the sync_trx here!

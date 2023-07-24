@@ -192,6 +192,44 @@ double p2p_run_recv(run_param_t* param, void* data) {
     }
     return time;
 }
+double p2p_fast_run_send(run_param_t* param, void* data) {
+    p2p_run_send(param, data);
+    return 0.0;
+}
+double p2p_fast_run_recv(run_param_t* param, void* data) {
+    run_p2p_data_t* d = (run_p2p_data_t*)data;
+    ofi_p2p_t* p2p = d->p2p;
+    const int n_msg = param->n_msg;
+    const size_t msg_size = param->msg_size;
+    const size_t ttl_len = n_msg * msg_size;
+
+    double time;
+    rmem_prof_t prof = {.name = "recv"};
+    //------------------------------------------------
+    for (int j = 0; j < n_msg; ++j) {
+        ofi_recv_enqueue(p2p + j, 0, param->comm);
+    }
+    PMI_Barrier();
+    m_rmem_prof(prof, time) {
+        for (int j = 0; j < n_msg; ++j) {
+            ofi_p2p_wait(p2p + j);
+        }
+    }
+    //------------------------------------------------
+    // check the result
+    for (int i = 0; i < ttl_len; ++i) {
+        int res = i + 1;
+#ifndef NDEBUG
+        m_assert(d->buf[i] == res, "pmem[%d] = %d != %d", i, d->buf[i], res);
+#else
+        if (d->buf[i] != res) {
+            m_log("pmem[%d] = %d != %d", i, d->buf[i], res);
+        }
+#endif
+        d->buf[i] = 0;
+    }
+    return time;
+}
 //==================================================================================================
 //= RMA
 //==================================================================================================

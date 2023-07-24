@@ -56,6 +56,8 @@ void p2p_pre(run_param_t* param, void* data);
 void p2p_post(run_param_t* param, void* data);
 double p2p_run_send(run_param_t* param, void* data);
 double p2p_run_recv(run_param_t* param, void* data);
+double p2p_fast_run_send(run_param_t* param, void* data);
+double p2p_fast_run_recv(run_param_t* param, void* data);
 
 //--------------------------------------------------------------------------------------------------
 // PRE
