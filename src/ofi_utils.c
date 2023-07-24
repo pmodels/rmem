@@ -325,9 +325,13 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     } else {
         // actually register the memory
         uint64_t flags = 0x0;
+#if (M_SYNC_RMA_EVENT)
         if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
+            m_verb("using FI_RMA_EVENT to register the MR");
+            m_assert(comm->prov->caps & FI_RMA_EVENT, "the provider must have FI_RMA_EVENT");
             flags |= FI_RMA_EVENT;
         }
+#endif
         uint64_t rkey = 0;
         if (!(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY)) {
             rkey = comm->unique_mr_key++;
@@ -381,18 +385,22 @@ int ofi_util_mr_bind(struct fid_ep* ep, struct fid_mr* mr, struct fid_cntr* cntr
                           ofi_comm_t* comm) {
     if (mr) {
         if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+            m_verb("MR_ENDPOINT:");
             // bind the counter to the mr
             if (cntr) {
+                m_verb("bind the counter to the MR");
                 m_ofi_call(fi_mr_bind(mr, &cntr->fid, FI_REMOTE_WRITE));
             }
             // bind the mr to the ep
             if (ep) {
                 uint64_t mr_trx_flags = 0;
+                m_verb("bind the MR to the EP");
                 m_ofi_call(fi_mr_bind(mr, &ep->fid, mr_trx_flags));
             }
         } else {
             // bind the counter to the EP
             if (cntr && ep) {
+                m_verb("no MR_ENDPOINT: bind the counter to the EP directly");
                 m_ofi_call(fi_ep_bind(ep, &cntr->fid, FI_REMOTE_WRITE));
             }
         }

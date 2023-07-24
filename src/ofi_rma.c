@@ -85,6 +85,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         .wait_obj = FI_WAIT_UNSPEC,
     };
     // remote counters - count the number of fi_write/fi_read targeted to me
+    m_verb("open remote counter");
     m_ofi_call(fi_cntr_open(comm->domain, &cntr_attr, &mem->ofi.rcntr, NULL));
     m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
 #endif
@@ -103,6 +104,9 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         const bool is_rx = (i < mem->ofi.n_rx);
         const bool is_tx = (i < mem->ofi.n_tx);
         const bool is_sync = (i == comm->n_ctx);
+        m_verb("-----------------");
+        m_verb("creating EP %d/%d: is_rx? %d, is_tx? %d, is_sync? %d", i, n_ttl_trx, is_rx, is_tx,
+               is_sync);
 
         // ------------------- endpoint
         if (is_rx) {
@@ -152,12 +156,15 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         // if MR_ENDPOINT we have to enable and then bind the MR
         if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
             // enable the EP
+            m_verb("enable the EP");
             m_ofi_call(fi_enable(trx[i].ep));
         }
         if (is_rx) {
 #if (M_SYNC_RMA_EVENT)
+            m_verb("bind the MR");
             m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.mr, mem->ofi.rcntr, comm));
 #if (!M_WRITE_DATA)
+            m_verb("bind the signal MR");
             m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.signal.mr_local, NULL, comm));
             m_rmem_call(
                 ofi_util_mr_bind(trx[i].ep, mem->ofi.signal.mr, mem->ofi.signal.scntr, comm));
@@ -174,13 +181,16 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         // is not MR_ENDPOINT, first bind and then enable
         if (!(comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT)) {
             // enable the EP
+            m_verb("enable the EP");
             m_ofi_call(fi_enable(trx[i].ep));
         }
         if (is_rx || is_sync) {
+            m_verb("get the AV");
             // get the addresses from others
             m_rmem_call(ofi_util_av(comm->size, trx[i].ep, trx[i].av, &trx[i].addr));
         }
         m_verb("done with EP # %d", i);
+        m_verb("-----------------");
     }
 
     //---------------------------------------------------------------------------------------------
