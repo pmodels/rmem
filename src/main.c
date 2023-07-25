@@ -23,9 +23,9 @@ void print_info(char* foldr_name, char* prov_name) {
 
     fprintf(file, "----------------------------------------------------------------\n");
 #ifdef GIT_COMMIT
-    fprintf(file, "commit: %s", GIT_COMMIT);
+    fprintf(file, "commit: %s\n", GIT_COMMIT);
 #else
-    fprintf(file, "commit: unknown");
+    fprintf(file, "commit: unknown\n");
 #endif
     fprintf(file, "provider: %s\n", prov_name);
 #if (M_WRITE_DATA)
@@ -51,12 +51,30 @@ int main(int argc, char** argv) {
     comm.n_ctx = nth;
     m_rmem_call(ofi_init(&comm));
 
+    // allocate the shared mem
+    ofi_rmem_t rma_mem = {
+        .buf = NULL,
+        .count = 0,
+    };
+
     // run parameter
     run_param_t param = {
         .msg_size = 1 << 22,
-        .n_msg = 2,
-        .comm = &comm,
+        .n_msg = 2, 
+        .comm = &comm, 
+        .mem = &rma_mem
     };
+
+    // allocate the shared mem for the receiver
+    if (!is_sender(ofi_get_rank(&comm))) {
+        const size_t ttl_len = param.msg_size * param.n_msg;
+        // receiver needs the remote buffer
+        rma_mem = (ofi_rmem_t){
+            .buf = calloc(ttl_len, sizeof(int)),
+            .count = ttl_len * sizeof(int),
+        };
+    }
+    ofi_rmem_init(&rma_mem, param.comm);
 
     //----------------------------------------------------------------------------------------------
     // P2P
@@ -76,6 +94,25 @@ int main(int argc, char** argv) {
             .post = &p2p_post,
         };
         run_test(&p2p_send, &p2p_recv, param, &p2p_time);
+    }
+    //----------------------------------------------------------------------------------------------
+    // P2P FAST
+    run_time_t p2pf_time;
+    {
+        run_p2p_data_t p2pf_data;
+        run_t p2pf_send = {
+            .data = &p2pf_data,
+            .pre = &p2p_pre,
+            .run = &p2p_fast_run_send,
+            .post = &p2p_post,
+        };
+        run_t p2pf_recv = {
+            .data = &p2pf_data,
+            .pre = &p2p_pre,
+            .run = &p2p_fast_run_recv,
+            .post = &p2p_post,
+        };
+        run_test(&p2pf_send, &p2pf_recv, param, &p2pf_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT
@@ -153,6 +190,10 @@ int main(int argc, char** argv) {
         };
         run_test(&plat_send, &plat_recv, param, &plat_time);
     }
+    //----------------------------------------------------------------------------------------------
+    // free
+    ofi_rmem_free(&rma_mem, param.comm);
+    free(rma_mem.buf);
 
     //----------------------------------------------------------------------------------------------
     if (!is_sender(comm.rank)) {
@@ -196,6 +237,8 @@ int main(int argc, char** argv) {
                 const double ci_p2p = p2p_time.ci[idx] / imsg;
                 const double ti_put = put_time.avg[idx] / imsg;
                 const double ci_put = put_time.ci[idx] / imsg;
+                const double ti_p2pf = p2pf_time.avg[idx] / imsg;
+                const double ci_p2pf = p2pf_time.ci[idx] / imsg;
                 const double ti_psig = psig_time.avg[idx] / imsg;
                 const double ci_psig = psig_time.ci[idx] / imsg;
                 const double ti_plat = plat_time.avg[idx] / imsg;
@@ -208,14 +251,15 @@ int main(int argc, char** argv) {
                     "\tPUT       = %f +-[%f] (ratio = %f)\n"
                     "\tPUT FAST  = %f +-[%f] (ratio = %f)\n"
                     "\tPUT + SIG = %f +-[%f] (ratio = %f)\n"
-                    "\tPUT LAT   = %f +-[%f] (ratio = %f)\n",
+                    "\tPUT LAT   = %f +-[%f] (ratio = %f)\n"
+                    "\tP2P FAST  = %f +-[%f] (ratio = %f)\n",
                     msg_size * sizeof(int), imsg, ti_p2p, ci_p2p, ti_put, ci_put, ti_put / ti_p2p,
                     ti_fast, ci_fast, ti_fast / ti_p2p, ti_psig, ci_psig, ti_psig / ti_p2p, ti_plat,
-                    ci_plat, ti_plat / ti_p2p);
+                    ci_plat, ti_plat / ti_p2p, ti_p2pf, ci_p2pf, ti_p2pf / ti_p2p);
                 // write to csv
-                fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int), ti_p2p,
-                        ti_put, ti_fast, ti_psig, ti_plat, ci_p2p, ci_put, ci_fast, ci_psig,
-                        ci_plat);
+                fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int),
+                        ti_p2p, ti_put, ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast,
+                        ci_psig, ci_plat, ci_p2pf);
                 // bump the index
                 idx++;
             }
@@ -244,6 +288,8 @@ int main(int argc, char** argv) {
                 const double ci_p2p = p2p_time.ci[idx] / imsg;
                 const double ti_put = put_time.avg[idx] / imsg;
                 const double ci_put = put_time.ci[idx] / imsg;
+                const double ti_p2pf = p2pf_time.avg[idx] / imsg;
+                const double ci_p2pf = p2pf_time.ci[idx] / imsg;
                 const double ti_psig = psig_time.avg[idx] / imsg;
                 const double ci_psig = psig_time.ci[idx] / imsg;
                 const double ti_plat = plat_time.avg[idx] / imsg;
@@ -251,8 +297,9 @@ int main(int argc, char** argv) {
                 const double ti_fast = pfast_time.avg[idx] / imsg;
                 const double ci_fast = pfast_time.ci[idx] / imsg;
                 // write to csv
-                fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put, ti_fast,
-                        ti_psig, ti_plat, ci_p2p, ci_put, ci_fast, ci_psig, ci_plat);
+                fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put,
+                        ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast, ci_psig,
+                        ci_plat, ci_p2pf);
                 // bump the index
                 idx++;
             }
@@ -261,12 +308,17 @@ int main(int argc, char** argv) {
     }
     free(p2p_time.avg);
     free(p2p_time.ci);
+    free(p2pf_time.avg);
+    free(p2pf_time.ci);
     free(put_time.avg);
     free(put_time.ci);
     free(psig_time.avg);
     free(psig_time.ci);
     free(plat_time.avg);
     free(plat_time.ci);
+    free(pfast_time.avg);
+    free(pfast_time.ci);
+
     m_rmem_call(ofi_finalize(&comm));
     return EXIT_SUCCESS;
 }

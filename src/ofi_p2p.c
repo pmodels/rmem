@@ -71,19 +71,18 @@ int ofi_p2p_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, const p2
             uint64_t flag =
                 (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE) | FI_COMPLETION;
             if (do_inject) {
-                m_ofi_call(fi_tinject(ctx->p2p_ep, p2p->buf, p2p->count, ctx->p2p_addr[p2p->peer],
-                                      p2p->ofi.msg.tag));
+                m_ofi_call_again(fi_tinject(ctx->p2p_ep, p2p->buf, p2p->count,
+                                            ctx->p2p_addr[p2p->peer], p2p->ofi.msg.tag),
+                                 &p2p->ofi.progress);
                 // need to complete the request as no CQ entry will happen
                 m_countr_fetch_add(&p2p->ofi.cq.rqst.busy, -1);
             } else {
-                m_ofi_call(fi_tsendmsg(ctx->p2p_ep, &p2p->ofi.msg, flag));
-                // m_ofi_call(fi_tsend(ctx->p2p_ep, p2p->buf, p2p->count, NULL,
-                //                     ctx->p2p_addr[p2p->peer], tag, &p2p->ofi.cq.ctx));
+                m_ofi_call_again(fi_tsendmsg(ctx->p2p_ep, &p2p->ofi.msg, flag), &p2p->ofi.progress);
             }
         } break;
         case (P2P_OPT_RECV): {
             uint64_t flag = FI_COMPLETION;
-            m_ofi_call(fi_trecvmsg(ctx->srx, &p2p->ofi.msg, flag));
+            m_ofi_call_again(fi_trecvmsg(ctx->srx, &p2p->ofi.msg, flag), &p2p->ofi.progress);
         } break;
     }
     return m_success;

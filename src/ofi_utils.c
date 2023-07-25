@@ -145,10 +145,10 @@ int ofi_util_get_prov(struct fi_info** prov) {
 #if (M_SYNC_RMA_EVENT)
     // request support for MR_RMA_EVENT
     hints->domain_attr->mr_mode |= FI_MR_RMA_EVENT;
-    m_ofi_fatal_info(hints, caps, FI_RMA_EVENT);
+    m_ofi_fatal_info(hints, caps, FI_RMA_EVENT | FI_REMOTE_READ | FI_REMOTE_WRITE);
 #endif
 #if (!M_WRITE_DATA)
-    m_ofi_fatal_info(hints, caps, FI_ATOMIC);  // implies (REMOTE_)READ/WRITE
+    m_ofi_fatal_info(hints, caps, FI_ATOMIC | FI_FENCE);  // implies (REMOTE_)READ/WRITE
 #endif
 
     //----------------------------------------------------------------------------------------------
@@ -165,7 +165,8 @@ int ofi_util_get_prov(struct fi_info** prov) {
     // enable automatic ressource management
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
     m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
-    // request manual progress (comment when using RMA_EVENT sockets on MacOs)
+    // m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
+    // request manual progress (comment when using sockets on MacOs)
     m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
     m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
     // no order required
@@ -338,15 +339,20 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     } else {
         //------------------------------------------------------------------------------------------
         // actually register the memory
+        // get the flag
 #if (M_HAVE_CUDA)
-        uint64_t flags = 0x0;
-#else
         uint64_t flags = FI_HMEM;
+#else
+        uint64_t flags = 0x0;
 #endif
+#if (M_SYNC_RMA_EVENT)
         if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
+            m_verb("using FI_RMA_EVENT to register the MR");
+            m_assert(comm->prov->caps & FI_RMA_EVENT, "the provider must have FI_RMA_EVENT");
             flags |= FI_RMA_EVENT;
         }
-        // get attr structs
+#endif
+        // get device and iface
 #if (M_HAVE_CUDA)
         int device;
         enum fi_hmem_iface iface;
@@ -378,6 +384,10 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
         enum fi_hmem_iface iface = FI_HMEM_SYSTEM;
 #endif
         // register
+        uint64_t rkey = 0;
+        if (!(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY)) {
+            rkey = comm->unique_mr_key++;
+        }
         struct iovec iov = {
             .iov_base = buf,
             .iov_len = count,
@@ -387,12 +397,12 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
             .iov_count = 1,
             .access = access,
             .offset = 0,
-            .requested_key = comm->unique_mr_key++,
+            .requested_key =rkey,
             .context = NULL,
             .iface = iface,
             .device = device,
         };
-        m_verb("registering memory: key = %llu, flags & FI_RMA_EVENT? %d", comm->unique_mr_key,
+        m_verb("registering memory: key = %llu, flags & FI_RMA_EVENT? %d", rkey,
                (flags & FI_RMA_EVENT) > 0);
         m_ofi_call(fi_mr_regattr(comm->domain, &attr, flags, mr));
 
@@ -416,15 +426,20 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     // get the base list, is needed even if we register NULL
     if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
         m_assert(base_list, "base_list should NOT be null");
-        void* list = calloc(ofi_get_size(comm), sizeof(uint64_t));
+        void* list = calloc(ofi_get_size(comm), sizeof(fi_addr_t));
         if (comm->prov->domain_attr->mr_mode & FI_MR_VIRT_ADDR) {
             m_verb("fill the base_list");
             m_assert(base_list, "base_list cannot be NULL");
-            uint64_t usr_base = (uint64_t)buf;
-            pmi_allgather(sizeof(usr_base), &usr_base, &list);
+            fi_addr_t usr_base = (fi_addr_t)buf;
+            pmi_allgather(sizeof(fi_addr_t), &usr_base, &list);
         }
         *base_list = list;
         m_verb("assign the base_list");
+#ifndef NDEBUG
+        for (int i = 0; i < ofi_get_size(comm); ++i) {
+            m_verb("base[%d] = %llu", i, (*base_list)[i]);
+        }
+#endif
     } else {
         m_verb("NO base_list");
         m_assert(!base_list, "base list should be NULL");
@@ -438,14 +453,25 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
 int ofi_util_mr_bind(struct fid_ep* ep, struct fid_mr* mr, struct fid_cntr* cntr,
                           ofi_comm_t* comm) {
     if (mr) {
-        // bind the counter to the mr
-        if (cntr) {
-            m_ofi_call(fi_mr_bind(mr, &cntr->fid, FI_REMOTE_WRITE));
-        }
-        // bind the mr to the ep
-        if (ep && comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
-            uint64_t mr_trx_flags = 0;
-            m_ofi_call(fi_mr_bind(mr, &ep->fid, mr_trx_flags));
+        if (comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+            m_verb("MR_ENDPOINT:");
+            // bind the counter to the mr
+            if (cntr) {
+                m_verb("bind the counter to the MR");
+                m_ofi_call(fi_mr_bind(mr, &cntr->fid, FI_REMOTE_WRITE));
+            }
+            // bind the mr to the ep
+            if (ep) {
+                uint64_t mr_trx_flags = 0;
+                m_verb("bind the MR to the EP");
+                m_ofi_call(fi_mr_bind(mr, &ep->fid, mr_trx_flags));
+            }
+        } else {
+            // bind the counter to the EP
+            if (cntr && ep) {
+                m_verb("no MR_ENDPOINT: bind the counter to the EP directly");
+                m_ofi_call(fi_ep_bind(ep, &cntr->fid, FI_REMOTE_WRITE));
+            }
         }
     }
     return m_success;

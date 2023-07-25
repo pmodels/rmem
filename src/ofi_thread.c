@@ -27,9 +27,12 @@ void* ofi_tthread_main(void* arg) {
             m_ofi_rma_structgetptr(ofi_cqdata_t, msg_cq, msg.cq, task);
             m_ofi_rma_structgetptr(struct iovec, msg_iov, msg.iov, task);
             m_ofi_rma_structgetptr(struct fi_rma_iov, msg_riov, msg.riov, task);
+            m_ofi_rma_structgetptr(ofi_progress_t, rma_prog, progress, task);
+            m_ofi_rma_structgetptr(void*, msg_desc, msg.desc_local, task);
+
             struct fi_msg_rma msg = {
                 .msg_iov = msg_iov,
-                .desc = NULL,
+                .desc = msg_desc,
                 .iov_count = 1,
                 .addr = *addr,
                 .rma_iov = msg_riov,
@@ -44,7 +47,8 @@ void* ofi_tthread_main(void* arg) {
             m_ofi_rma_structgetptr(uint64_t, sig_data, sig.data, task);
             msg.data |= *sig_data;
 #endif
-            m_ofi_call(fi_writemsg(*ep, &msg, *msg_flags));
+            m_verb("doing it");
+            m_ofi_call_again(fi_writemsg(*ep, &msg, *msg_flags), rma_prog);
 #if (!M_WRITE_DATA)
             // signal if needed
             m_ofi_rma_structgetptr(uint64_t, sig_flags, sig.flags, task);
@@ -52,10 +56,11 @@ void* ofi_tthread_main(void* arg) {
                 m_ofi_rma_structgetptr(uint64_t, sig_flags, sig.flags, task);
                 m_ofi_rma_structgetptr(struct fi_ioc, sig_iov, sig.iov, task);
                 m_ofi_rma_structgetptr(struct fi_rma_ioc, sig_riov, sig.riov, task);
-                m_ofi_rma_structgetptr(struct fi_context, sig_ctx, sig.ctx, task);
+                m_ofi_rma_structgetptr(struct fi_context, sig_ctx, sig.cq.ctx, task);
+                m_ofi_rma_structgetptr(void *, sig_desc, sig.desc_local, task);
                 struct fi_msg_atomic msg = {
                     .msg_iov = sig_iov,
-                    .desc = NULL,
+                    .desc = sig_desc,
                     .iov_count = 1,
                     .addr = *addr,
                     .rma_iov = sig_riov,
@@ -65,7 +70,7 @@ void* ofi_tthread_main(void* arg) {
                     .data = 0,
                     .context = sig_ctx,
                 };
-                m_ofi_call(fi_atomicmsg(*ep, &msg, *sig_flags));
+                m_ofi_call_again(fi_atomicmsg(*ep, &msg, *sig_flags),rma_prog);
             }
 #endif
             // if we had to get a cq entry and the inject, mark is as done

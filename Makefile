@@ -159,7 +159,7 @@ verbose:
 	@OPTS="${OPTS} -DVERBOSE" $(MAKE) debug
 .PHONY: fast
 fast:
-	@OPTS="${OPTS} -O3 -DNEBUG" $(MAKE) $(TARGET)
+	@OPTS="${OPTS} -O3 -DNDEBUG" $(MAKE) $(TARGET)
 ################################################################################
 clean:
 	@rm -f $(OBJ_DIR)/*.o
