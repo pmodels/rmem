@@ -52,8 +52,10 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
 
 //--------------------------------------------------------------------------------------------------
 // point to point
-void p2p_pre(run_param_t* param, void* data);
-void p2p_post(run_param_t* param, void* data);
+void p2p_pre_send(run_param_t* param, void* data);
+void p2p_pre_recv(run_param_t* param, void* data);
+void p2p_post_send(run_param_t* param, void* data);
+void p2p_post_recv(run_param_t* param, void* data);
 double p2p_run_send(run_param_t* param, void* data);
 double p2p_run_recv(run_param_t* param, void* data);
 double p2p_fast_run_send(run_param_t* param, void* data);

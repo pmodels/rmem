@@ -83,15 +83,15 @@ int main(int argc, char** argv) {
         run_p2p_data_t p2p_data;
         run_t p2p_send = {
             .data = &p2p_data,
-            .pre = &p2p_pre,
+            .pre = &p2p_pre_send,
             .run = &p2p_run_send,
-            .post = &p2p_post,
+            .post = &p2p_post_send,
         };
         run_t p2p_recv = {
             .data = &p2p_data,
-            .pre = &p2p_pre,
+            .pre = &p2p_pre_recv,
             .run = &p2p_run_recv,
-            .post = &p2p_post,
+            .post = &p2p_post_recv,
         };
         run_test(&p2p_send, &p2p_recv, param, &p2p_time);
     }
@@ -102,15 +102,15 @@ int main(int argc, char** argv) {
         run_p2p_data_t p2pf_data;
         run_t p2pf_send = {
             .data = &p2pf_data,
-            .pre = &p2p_pre,
+            .pre = &p2p_pre_send,
             .run = &p2p_fast_run_send,
-            .post = &p2p_post,
+            .post = &p2p_post_send,
         };
         run_t p2pf_recv = {
             .data = &p2pf_data,
-            .pre = &p2p_pre,
+            .pre = &p2p_pre_recv,
             .run = &p2p_fast_run_recv,
-            .post = &p2p_post,
+            .post = &p2p_post_recv,
         };
         run_test(&p2pf_send, &p2pf_recv, param, &p2pf_time);
     }

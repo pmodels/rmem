@@ -208,6 +208,10 @@ typedef struct {
     void* fallback_ctx;
 } ofi_progress_t;
 
+typedef enum {
+    P2P_OPT_SEND,
+    P2P_OPT_RECV,
+} p2p_opt_t;
 typedef struct {
     // user provided information
     void* buf;     // address of the buffer
@@ -226,6 +230,10 @@ typedef struct {
         // iovs
         struct iovec iov;
         struct fi_msg_tagged msg;
+        // endpoint
+        p2p_opt_t kind;
+        uint64_t flags;
+        struct fid_ep* ep;
     } ofi;
 } ofi_p2p_t;
 
@@ -358,18 +366,15 @@ static inline int ofi_get_rank(ofi_comm_t* ofi) { return ofi->rank; }
 static inline int ofi_get_size(ofi_comm_t* ofi) { return ofi->size; }
 
 //-------------------------------------------------------------------------------------------------
-// create a point to point communication
-int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* comm);
-int ofi_p2p_free(ofi_p2p_t* p2p);
-
 // send/recv
-int ofi_send_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
-int ofi_recv_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
+int ofi_send_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
+int ofi_recv_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
+int ofi_p2p_start(ofi_p2p_t* p2p);
+int ofi_p2p_free(ofi_p2p_t* p2p);
 
 // progress
 int ofi_progress(ofi_progress_t* progress);
 int ofi_p2p_wait(ofi_p2p_t* p2p);
-int ofi_rma_wait(ofi_rma_t* p2p);
 
 //-------------------------------------------------------------------------------------------------
 // Remote memory management
