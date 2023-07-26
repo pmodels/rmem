@@ -15,6 +15,8 @@
 #include "rmem_run.h"
 #include "rmem_utils.h"
 
+#define m_run_time(t) (t ? (t[idx] / imsg) : 0.0)
+
 void print_info(char* foldr_name, char* prov_name) {
     char fname[128];
     snprintf(fname, 128, "%s/rmem.info", foldr_name);
@@ -233,18 +235,18 @@ int main(int argc, char** argv) {
                 // get the idx
                 int idx = idx_msg * n_size + idx_size;
                 // load the results
-                const double ti_p2p = p2p_time.avg[idx] / imsg;
-                const double ci_p2p = p2p_time.ci[idx] / imsg;
-                const double ti_put = put_time.avg[idx] / imsg;
-                const double ci_put = put_time.ci[idx] / imsg;
-                const double ti_p2pf = p2pf_time.avg[idx] / imsg;
-                const double ci_p2pf = p2pf_time.ci[idx] / imsg;
-                const double ti_psig = psig_time.avg[idx] / imsg;
-                const double ci_psig = psig_time.ci[idx] / imsg;
-                const double ti_plat = plat_time.avg[idx] / imsg;
-                const double ci_plat = plat_time.ci[idx] / imsg;
-                const double ti_fast = pfast_time.avg[idx] / imsg;
-                const double ci_fast = pfast_time.ci[idx] / imsg;
+                const double ti_p2p = m_run_time(p2p_time.avg);
+                const double ci_p2p = m_run_time(p2p_time.ci);
+                const double ti_put = m_run_time(put_time.avg);
+                const double ci_put = m_run_time(put_time.ci);
+                const double ti_p2pf = m_run_time(p2pf_time.avg);
+                const double ci_p2pf = m_run_time(p2pf_time.ci);
+                const double ti_psig = m_run_time(psig_time.avg);
+                const double ci_psig = m_run_time(psig_time.ci);
+                const double ti_plat = m_run_time(plat_time.avg);
+                const double ci_plat = m_run_time(plat_time.ci);
+                const double ti_fast = m_run_time(pfast_time.avg);
+                const double ci_fast = m_run_time(pfast_time.ci);
                 m_log(
                     "time/msg (%ld B/msg - %d msgs):\n"
                     "\tP2P       = %f +-[%f]\n"
@@ -284,18 +286,18 @@ int main(int argc, char** argv) {
                 // get the idx
                 int idx = idx_msg * n_size + idx_size;
                 // load the results
-                const double ti_p2p = p2p_time.avg[idx] / imsg;
-                const double ci_p2p = p2p_time.ci[idx] / imsg;
-                const double ti_put = put_time.avg[idx] / imsg;
-                const double ci_put = put_time.ci[idx] / imsg;
-                const double ti_p2pf = p2pf_time.avg[idx] / imsg;
-                const double ci_p2pf = p2pf_time.ci[idx] / imsg;
-                const double ti_psig = psig_time.avg[idx] / imsg;
-                const double ci_psig = psig_time.ci[idx] / imsg;
-                const double ti_plat = plat_time.avg[idx] / imsg;
-                const double ci_plat = plat_time.ci[idx] / imsg;
-                const double ti_fast = pfast_time.avg[idx] / imsg;
-                const double ci_fast = pfast_time.ci[idx] / imsg;
+                const double ti_p2p = m_run_time(p2p_time.avg);
+                const double ci_p2p = m_run_time(p2p_time.ci);
+                const double ti_put = m_run_time(put_time.avg);
+                const double ci_put = m_run_time(put_time.ci);
+                const double ti_p2pf = m_run_time(p2pf_time.avg);
+                const double ci_p2pf = m_run_time(p2pf_time.ci);
+                const double ti_psig = m_run_time(psig_time.avg);
+                const double ci_psig = m_run_time(psig_time.ci);
+                const double ti_plat = m_run_time(plat_time.avg);
+                const double ci_plat = m_run_time(plat_time.ci);
+                const double ti_fast = m_run_time(pfast_time.avg);
+                const double ci_fast = m_run_time(pfast_time.ci);
                 // write to csv
                 fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put,
                         ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast, ci_psig,
@@ -306,18 +308,18 @@ int main(int argc, char** argv) {
             fclose(file);
         }
     }
-    free(p2p_time.avg);
-    free(p2p_time.ci);
-    free(p2pf_time.avg);
-    free(p2pf_time.ci);
-    free(put_time.avg);
-    free(put_time.ci);
-    free(psig_time.avg);
-    free(psig_time.ci);
-    free(plat_time.avg);
-    free(plat_time.ci);
-    free(pfast_time.avg);
-    free(pfast_time.ci);
+    if (p2p_time.avg) free(p2p_time.avg);
+    if (p2p_time.ci) free(p2p_time.ci);
+    if (p2pf_time.avg) free(p2pf_time.avg);
+    if (p2pf_time.ci) free(p2pf_time.ci);
+    if (put_time.avg) free(put_time.avg);
+    if (put_time.ci) free(put_time.ci);
+    if (psig_time.avg) free(psig_time.avg);
+    if (psig_time.ci) free(psig_time.ci);
+    if (plat_time.avg) free(plat_time.avg);
+    if (plat_time.ci) free(plat_time.ci);
+    if (pfast_time.avg) free(pfast_time.avg);
+    if (pfast_time.ci) free(pfast_time.ci);
 
     m_rmem_call(ofi_finalize(&comm));
     return EXIT_SUCCESS;
