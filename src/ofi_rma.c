@@ -533,9 +533,13 @@ int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma) {
     //----------------------------------------------------------------------------------------------
     return m_success;
 }
-int ofi_rma_start(ofi_rma_t* rma) {
+int ofi_rma_start(ofi_rma_t* rma, rmem_device_t dev) {
 #if (M_HAVE_CUDA)
-    ofi_rma_start_device(rma->ofi.stream,rma->ofi.drma);
+    if (dev == RMEM_DEVICE) {
+        ofi_rma_start_device(rma->ofi.stream, rma->ofi.drma);
+    } else {
+        rma->ofi.qnode.ready++;
+    }
 #else
     rma->ofi.qnode.ready++;
 #endif

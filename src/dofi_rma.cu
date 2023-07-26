@@ -6,11 +6,8 @@ extern "C" {
 #if (M_HAVE_CUDA)
 #include <cuda.h>
 #include <cuda_runtime.h>
-__global__ void ofi_device_inc_ready(ofi_drma_t drma) {
-    // printf("triggering from the GPU, with %p\n",drma);
-    // printf("triggering from the GPU, address = %p\n",drma->ready);
-    drma->ready[0]++;
-}
+
+__global__ void ofi_device_inc_ready(ofi_drma_t drma) { m_rmem_trigger(drma); }
 
 extern "C" int ofi_rma_start_device(rmem_stream_t* stream, ofi_drma_t drma) {
     // m_log("launching kernel with request %p\n",drma);

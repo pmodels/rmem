@@ -348,7 +348,11 @@ void sig_pre_send(run_param_t* param, void* data) {
     }
 }
 
-void rma_pre_recv(run_param_t* param, void* data) {
+void put_pre_recv(run_param_t* param, void* data) {
+    // get the allocation of buffers
+    rma_alloc(param, data);
+}
+void sig_pre_recv(run_param_t* param, void* data) {
     // get the allocation of buffers
     rma_alloc(param, data);
 }
@@ -368,6 +372,25 @@ void rma_post(run_param_t* param, void* data) {
 }
 
 //--------------------------------------------------------------------------------------------------
+double rma_run_send_gpu(run_param_t* param, void* data) {
+    run_rma_data_t* d = (run_rma_data_t*)data;
+    const int n_msg = param->n_msg;
+    const size_t msg_size = param->msg_size;
+    const size_t ttl_len = n_msg * msg_size;
+    const int buddy = peer(param->comm->rank, param->comm->size);
+
+    for (int j = 0; j < n_msg; ++j) {
+        ofi_rma_enqueue(param->mem, d->rma + j);
+    }
+
+    PMI_Barrier();  // start exposure
+    ofi_rmem_start(1, &buddy, param->mem, param->comm);
+    for (int j = 0; j < n_msg; ++j) {
+        ofi_rma_start(d->rma + j, RMEM_DEVICE);
+    }
+    ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+    return 0.0;
+}
 double rma_run_send(run_param_t* param, void* data) {
     run_rma_data_t* d = (run_rma_data_t*)data;
     const int n_msg = param->n_msg;
@@ -382,7 +405,7 @@ double rma_run_send(run_param_t* param, void* data) {
     PMI_Barrier();  // start exposure
     ofi_rmem_start(1, &buddy, param->mem, param->comm);
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_start(d->rma + j);
+        ofi_rma_start(d->rma + j, RMEM_HOST);
     }
     ofi_rmem_complete(1, &buddy, param->mem, param->comm);
     return 0.0;
@@ -401,7 +424,7 @@ double rma_fast_run_send(run_param_t* param, void* data) {
     PMI_Barrier();  // start exposure
     ofi_rmem_start(1, &buddy, param->mem, param->comm);
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_start(d->rma + j);
+        ofi_rma_start(d->rma + j, RMEM_HOST);
     }
     ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
     return 0.0;
@@ -420,7 +443,7 @@ double lat_run_send(run_param_t* param, void* data) {
     ofi_rmem_start(1, &buddy, param->mem, param->comm);
     PMI_Barrier();  // start exposure
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_start(d->rma + j);
+        ofi_rma_start(d->rma + j, RMEM_HOST);
     }
     ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
     return 0.0;
@@ -447,6 +470,7 @@ double rma_run_recv(run_param_t* param, void* data) {
     run_test_check(ttl_len, param->mem->buf);
     return time;
 }
+double rma_run_recv_gpu(run_param_t* param, void* data) { return rma_run_recv(param, data); }
 double rma_fast_run_recv(run_param_t* param, void* data) {
     run_rma_data_t* d = (run_rma_data_t*)data;
     const int n_msg = param->n_msg;

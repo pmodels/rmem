@@ -68,7 +68,8 @@ double p2p_fast_run_recv(run_param_t* param, void* data);
 void put_pre_send(run_param_t* param, void* data);
 void sig_pre_send(run_param_t* param, void* data);
 // recv
-void rma_pre_recv(run_param_t* param, void* data);
+void put_pre_recv(run_param_t* param, void* data);
+void sig_pre_recv(run_param_t* param, void* data);
 
 //----------------
 // POST
@@ -80,10 +81,12 @@ void rma_post(run_param_t* param, void* data);
 //----------------
 // send
 double rma_run_send(run_param_t* param, void* data);
+double rma_run_send_gpu(run_param_t* param, void* data);
 double rma_fast_run_send(run_param_t* param, void* data);
 double lat_run_send(run_param_t* param, void* data);
 // recv
 double rma_run_recv(run_param_t* param, void* data);
+double rma_run_recv_gpu(run_param_t* param, void* data);
 double rma_fast_run_recv(run_param_t* param, void* data);
 double sig_run_recv(run_param_t* param, void* data);
 double lat_run_recv(run_param_t* param, void* data);
