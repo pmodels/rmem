@@ -68,11 +68,21 @@ int main(int argc, char** argv) {
     // allocate the shared mem for the receiver
     if (!is_sender(ofi_get_rank(&comm))) {
         const size_t ttl_len = param.msg_size * param.n_msg;
+#if (M_HAVE_CUDA)
+        // receiver needs the remote buffer
+        rma_mem = (ofi_rmem_t){
+            .buf = NULL,
+            .count = ttl_len * sizeof(int),
+        };
+        m_cuda_call(cudaMalloc((void**)&rma_mem.buf, ttl_len * sizeof(int)));
+#else
         // receiver needs the remote buffer
         rma_mem = (ofi_rmem_t){
             .buf = calloc(ttl_len, sizeof(int)),
             .count = ttl_len * sizeof(int),
         };
+
+#endif
     }
     ofi_rmem_init(&rma_mem, param.comm);
 
@@ -188,12 +198,16 @@ int main(int argc, char** argv) {
             .run = &lat_run_recv,
             .post = &rma_post,
         };
-        run_test(&plat_send, &plat_recv, param, &plat_time);
+        //run_test(&plat_send, &plat_recv, param, &plat_time);
     }
     //----------------------------------------------------------------------------------------------
     // free
     ofi_rmem_free(&rma_mem, param.comm);
+#if (M_HAVE_CUDA)
+    m_cuda_call(cudaFree(rma_mem.buf));
+#else
     free(rma_mem.buf);
+#endif
 
     //----------------------------------------------------------------------------------------------
     if (!is_sender(comm.rank)) {
