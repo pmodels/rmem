@@ -156,7 +156,7 @@ static void p2p_pre_alloc(run_param_t* param, void* data) {
     d->buf = tmp;
 #endif
     // allocate the objects
-    d->p2p = calloc(param->n_msg, sizeof(ofi_rma_t));
+    d->p2p = calloc(param->n_msg, sizeof(ofi_p2p_t));
     for (int i = 0; i < param->n_msg; ++i) {
         d->p2p[i] = (ofi_p2p_t){
             .buf = d->buf + i * msg_size,
@@ -422,7 +422,7 @@ double rma_fast_run_send(run_param_t* param, void* data) {
     }
 
     PMI_Barrier();  // start exposure
-    ofi_rmem_start(1, &buddy, param->mem, param->comm);
+    ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
     for (int j = 0; j < n_msg; ++j) {
         ofi_rma_start(d->rma + j, RMEM_HOST);
     }
@@ -439,8 +439,7 @@ double lat_run_send(run_param_t* param, void* data) {
     for (int j = 0; j < n_msg; ++j) {
         ofi_rma_enqueue(param->mem, d->rma + j);
     }
-
-    ofi_rmem_start(1, &buddy, param->mem, param->comm);
+    ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
     PMI_Barrier();  // start exposure
     for (int j = 0; j < n_msg; ++j) {
         ofi_rma_start(d->rma + j, RMEM_HOST);
@@ -483,7 +482,7 @@ double rma_fast_run_recv(run_param_t* param, void* data) {
     //------------------------------------------------
     PMI_Barrier();
     m_rmem_prof(prof, time) {
-        ofi_rmem_post(1, &buddy, param->mem, param->comm);
+        ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
         ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
     }
     //------------------------------------------------
@@ -523,7 +522,7 @@ double lat_run_recv(run_param_t* param, void* data) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    ofi_rmem_post(1, &buddy, param->mem, param->comm);
+    ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
     PMI_Barrier();
     m_rmem_prof(prof, time) { ofi_rmem_wait_fast(n_msg, param->mem, param->comm); }
     //------------------------------------------------

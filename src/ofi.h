@@ -377,9 +377,6 @@ static inline int ofi_get_rank(ofi_comm_t* ofi) { return ofi->rank; }
 static inline int ofi_get_size(ofi_comm_t* ofi) { return ofi->size; }
 
 //-------------------------------------------------------------------------------------------------
-// create a point to point communication
-// int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* comm);
-
 // send/recv
 int ofi_send_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
 int ofi_recv_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
@@ -399,15 +396,16 @@ void* ofi_tthread_main(void* arg);
 int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm);
 
-// fast completion: useful to measure latency w/o the sync
-int ofi_rmem_complete_fast(const int ttl_data, ofi_rmem_t* mem, ofi_comm_t* comm);
-int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm);
-
 // PSCW 101
 int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
+// fast completion: useful to measure latency w/o the sync
+int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
+int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
+int ofi_rmem_complete_fast(const int ttl_data, ofi_rmem_t* mem, ofi_comm_t* comm);
+int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm);
 
 // signal
 int ofi_rmem_sig_wait(const uint32_t val, ofi_rmem_t* mem);

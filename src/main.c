@@ -181,7 +181,7 @@ int main(int argc, char** argv) {
             .run = &sig_run_recv,
             .post = &rma_post,
         };
-        run_test(&psig_send, &psig_recv, param, &psig_time);
+        //run_test(&psig_send, &psig_recv, param, &psig_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT FAST
