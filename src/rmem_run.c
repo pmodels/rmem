@@ -123,7 +123,7 @@ static void p2p_pre_alloc(run_param_t* param, void* data) {
         d->buf[i] = i + 1;
     }
     // allocate the objects
-    d->p2p = calloc(param->n_msg, sizeof(ofi_rma_t));
+    d->p2p = calloc(param->n_msg, sizeof(ofi_p2p_t));
     for (int i = 0; i < param->n_msg; ++i) {
         d->p2p[i] = (ofi_p2p_t){
             .buf = d->buf + i * msg_size,
