@@ -363,7 +363,7 @@ double rma_fast_run_send(run_param_t* param, void* data) {
     const int buddy = peer(param->comm->rank, param->comm->size);
 
     PMI_Barrier();  // start exposure
-    ofi_rmem_start(1, &buddy, param->mem, param->comm);
+    ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
     for (int j = 0; j < n_msg; ++j) {
         ofi_rma_start(param->mem, d->rma + j);
     }
@@ -377,7 +377,7 @@ double lat_run_send(run_param_t* param, void* data) {
     const size_t ttl_len = n_msg * msg_size;
     const int buddy = peer(param->comm->rank, param->comm->size);
 
-    ofi_rmem_start(1, &buddy, param->mem, param->comm);
+    ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
     PMI_Barrier();  // start exposure
     for (int j = 0; j < n_msg; ++j) {
         ofi_rma_start(param->mem, d->rma + j);
@@ -430,7 +430,7 @@ double rma_fast_run_recv(run_param_t* param, void* data) {
     //------------------------------------------------
     PMI_Barrier();
     m_rmem_prof(prof, time) {
-        ofi_rmem_post(1, &buddy, param->mem, param->comm);
+        ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
         ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
     }
     //------------------------------------------------
@@ -492,7 +492,7 @@ double lat_run_recv(run_param_t* param, void* data) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    ofi_rmem_post(1, &buddy, param->mem, param->comm);
+    ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
     PMI_Barrier();
     m_rmem_prof(prof, time) { ofi_rmem_wait_fast(n_msg, param->mem, param->comm); }
     //------------------------------------------------
