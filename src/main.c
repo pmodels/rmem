@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
 
     //----------------------------------------------------------------------------------------------
     // P2P
-    run_time_t p2p_time;
+    run_time_t p2p_time = {0};
     {
         run_p2p_data_t p2p_data;
         run_t p2p_send = {
@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
     }
     //----------------------------------------------------------------------------------------------
     // P2P FAST
-    run_time_t p2pf_time;
+    run_time_t p2pf_time= {0};
     {
         run_p2p_data_t p2pf_data;
         run_t p2pf_send = {
@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
     }
     //----------------------------------------------------------------------------------------------
     // PUT
-    run_time_t put_time;
+    run_time_t put_time = {0};
     {
         run_rma_data_t put_data;
         run_t put_send = {
@@ -137,7 +137,7 @@ int main(int argc, char** argv) {
     }
     //----------------------------------------------------------------------------------------------
     // PUT + SIGNAL
-    run_time_t psig_time;
+    run_time_t psig_time = {0};
     {
         run_rma_data_t psig_data;
         run_t psig_send = {
@@ -156,7 +156,7 @@ int main(int argc, char** argv) {
     }
     //----------------------------------------------------------------------------------------------
     // PUT FAST
-    run_time_t pfast_time;
+    run_time_t pfast_time = {0};
     {
         run_rma_data_t pfast_data;
         run_t plat_send = {
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
     }
     //----------------------------------------------------------------------------------------------
     // PUT LATENCY
-    run_time_t plat_time;
+    run_time_t plat_time = {0};
     {
         run_rma_data_t plat_data;
         run_t plat_send = {

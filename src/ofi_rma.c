@@ -87,6 +87,96 @@ static int ofi_rmem_post_fisend(const int nrank, const int* rank, ofi_rmem_t* me
     }
     return m_success;
 }
+#if (M_SYNC_ATOMIC)
+static int ofi_rmem_post_fiatomic(const int nrank, const int* rank, ofi_rmem_t* mem,
+                                  ofi_comm_t* comm) {
+    // notify readiness to the rank list
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+    };
+    *mem->ofi.sync.post.inc = 1;
+    for (int i = 0; i < nrank; ++i) {
+        // used for completion
+        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
+        cqdata->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
+        // issue the atomic, local var
+        struct fi_ioc iov = {
+            .count = 1,  // depends on datatype
+            .addr = mem->ofi.sync.post.inc,
+        };
+        struct fi_rma_ioc rma_iov = {
+            .count = 1,  // depends on datatype
+            .addr = mem->ofi.sync.post.base_list[rank[i]] + 0,
+            .key = mem->ofi.sync.post.key_list[rank[i]],
+        };
+        struct fi_msg_atomic msg = {
+            .msg_iov = &iov,
+            .desc = &mem->ofi.sync.post.desc_local_inc,
+            .iov_count = 1,
+            .addr = mem->ofi.sync_trx->addr[rank[i]],
+            .rma_iov = &rma_iov,
+            .rma_iov_count = 1,
+            .datatype = FI_INT32,
+            .op = FI_SUM,
+            .data = 0x0,  // atomics does NOT support FI_REMOTE_CQ_DATA
+            .context = &cqdata->ctx,
+        };
+
+        m_verb("atomic: of size %lu and %lu", iov.count, rma_iov.count);
+        m_verb("atomic: addr = %p", iov.addr);
+        m_verb("atomic: inc = %d", *mem->ofi.sync.post.inc);
+        m_ofi_call_again(fi_atomicmsg(mem->ofi.sync_trx->ep, &msg, FI_TRANSMIT_COMPLETE),
+                         &progress);
+    }
+    return m_success;
+}
+static int ofi_rmem_start_fiatomic(const int nrank, const int* rank, ofi_rmem_t* mem,
+                                   ofi_comm_t* comm) {
+    // notify readiness to the rank list
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+    };
+    // used for completion, only the first one
+    ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata;
+    cqdata->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
+    // issue the atomic
+    int myself = comm->rank;
+    struct fi_ioc iov = {
+        .addr = mem->ofi.sync.post.inc,
+        .count = 1,
+    };
+    struct fi_ioc res_iov = {
+        .addr = mem->ofi.sync.post.res,
+        .count = 1,
+    };
+    struct fi_rma_ioc rma_iov = {
+        .count = 1,
+        .addr = mem->ofi.sync.post.base_list[myself] + 0,
+        .key = mem->ofi.sync.post.key_list[myself],
+    };
+    struct fi_msg_atomic msg = {
+        .msg_iov = &iov,
+        .desc = &mem->ofi.sync.post.desc_local_inc,
+        .iov_count = 1,                           // 1,
+        .addr = mem->ofi.sync_trx->addr[myself],  // myself
+        .rma_iov = &rma_iov,
+        .rma_iov_count = 1,
+        .datatype = FI_INT32,
+        .op = FI_ATOMIC_READ,
+        .data = 0x0,  // atomics does NOT support FI_REMOTE_CQ_DATA
+        .context = &cqdata->ctx,
+    };
+    m_verb("atomic: of size %lu and %lu", iov.count, rma_iov.count);
+    m_ofi_call_again(
+        fi_fetch_atomicmsg(mem->ofi.sync_trx->ep, &msg, &res_iov, &mem->ofi.sync.post.desc_local_res, 1,
+                           FI_TRANSMIT_COMPLETE),
+        &progress);
+    return m_success;
+}
+#endif
+
 static int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem,
                                     ofi_comm_t* comm, int* ttl_data) {
     // count the number of calls issued for each of the ranks and notify them
@@ -160,6 +250,8 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("registering user memory");
     m_rmem_call(ofi_util_mr_reg(mem->buf, mem->count, FI_REMOTE_READ | FI_REMOTE_WRITE, comm,
                                 &mem->ofi.mr, NULL, &mem->ofi.base_list));
+
+    //----------------------------------------------------------------------------------------------
     // register the signal then
 #if (!M_WRITE_DATA)
     m_verb("registering the signal memory");
@@ -179,6 +271,25 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     };
     m_ofi_call(fi_cntr_open(comm->domain, &sig_cntr_attr, &mem->ofi.signal.scntr, NULL));
     m_ofi_call(fi_cntr_set(mem->ofi.signal.scntr, 0));
+#endif
+    //----------------------------------------------------------------------------------------------
+    // the sync data needed for the Post-start atomic protocol
+#if (M_SYNC_ATOMIC)
+    mem->ofi.sync.post.inc = malloc(sizeof(uint32_t));
+    mem->ofi.sync.post.res = malloc(sizeof(uint32_t));
+    mem->ofi.sync.post.val = malloc(sizeof(uint32_t));
+    mem->ofi.sync.post.val[0] = 0;
+    mem->ofi.sync.post.res[0] = 0;
+    mem->ofi.sync.post.inc[0] = 1;
+    m_rmem_call(ofi_util_mr_reg(mem->ofi.sync.post.val, sizeof(uint32_t),
+                                FI_REMOTE_READ | FI_REMOTE_WRITE, comm, &mem->ofi.sync.post.mr,
+                                NULL, &mem->ofi.sync.post.base_list));
+    m_rmem_call(ofi_util_mr_reg(mem->ofi.sync.post.inc, sizeof(uint32_t), FI_READ | FI_WRITE, comm,
+                                &mem->ofi.sync.post.mr_local_inc,
+                                &mem->ofi.sync.post.desc_local_inc, NULL));
+    m_rmem_call(ofi_util_mr_reg(mem->ofi.sync.post.res, sizeof(uint32_t), FI_READ | FI_WRITE, comm,
+                                &mem->ofi.sync.post.mr_local_res,
+                                &mem->ofi.sync.post.desc_local_res, NULL));
 #endif
     //---------------------------------------------------------------------------------------------
     // open shared completion and remote counter
@@ -282,6 +393,14 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 #endif
 #endif
         }
+
+#if (M_SYNC_ATOMIC)
+        if (is_sync) {
+            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.sync.post.mr, NULL, comm));
+            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.sync.post.mr_local_inc, NULL, comm));
+            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.sync.post.mr_local_res, NULL, comm));
+        }
+#endif
         // is not MR_ENDPOINT, first bind and then enable
         if (!(comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT)) {
             // enable the EP
@@ -304,6 +423,11 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 #if (!M_WRITE_DATA)
     m_rmem_call(ofi_util_mr_enable(mem->ofi.signal.mr, comm, &mem->ofi.signal.key_list));
     m_rmem_call(ofi_util_mr_enable(mem->ofi.signal.mr_local, comm, NULL));
+#endif
+#if (M_SYNC_ATOMIC)
+    m_rmem_call(ofi_util_mr_enable(mem->ofi.sync.post.mr, comm, &mem->ofi.sync.post.key_list));
+    m_rmem_call(ofi_util_mr_enable(mem->ofi.sync.post.mr_local_inc, comm, NULL));
+    m_rmem_call(ofi_util_mr_enable(mem->ofi.sync.post.mr_local_res, comm, NULL));
 #endif
 
     //---------------------------------------------------------------------------------------------
@@ -336,33 +460,6 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     return m_success;
 }
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
-    // //----------------------------------------------------------------------------------------------
-    // // cancel the pre-posted requests
-    // m_verb("cancel preposted recvs");
-    // for (int i = 0; i < comm->size; ++i) {
-    //     ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
-    //     void* context = &cqdata->ctx;
-    //     // we need to cancel the same context twice, of for each of the pre-posted recv.
-    //     // it's okay to cancel operations with the same context, only one will be canceled
-    //     // (https://ofiwg.github.io/libfabric/main/man/fi_endpoint.3.html)
-    //     m_ofi_call(fi_cancel(&mem->ofi.sync_trx->srx->fid, context));
-    //     m_ofi_call(fi_cancel(&mem->ofi.sync_trx->srx->fid, context));
-    // }
-    // int i = 0;
-    // while (i < 2 * comm->size) {
-    //     struct fi_cq_err_entry err;
-    //     m_ofi_call(fi_cq_readerr(mem->ofi.sync_trx->cq, &err, 0));
-    //     if (err.err == FI_ECANCELED) {
-    //         i++;
-    //     } else {
-    //         char prov_err[512];
-    //         fi_cq_strerror(mem->ofi.sync_trx->cq, err.prov_errno, err.err_data, prov_err, 512);
-    //         m_log("OFI-CQ ERROR: %s, provider says %s", fi_strerror(err.err), prov_err);
-    //     }
-    //     m_assert(err.err != FI_ECANCELED, "another error code has been returned");
-    // }
-    // TODO: wait for %d operations to be canceled
-    //
     //----------------------------------------------------------------------------------------------
     // free the sync
     for (int i = 0; i < comm->size; ++i) {
@@ -381,6 +478,16 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     free(mem->ofi.signal.base_list);
     free(mem->ofi.signal.val);
     free(mem->ofi.signal.inc);
+#endif
+#if (M_SYNC_ATOMIC)
+    m_rmem_call(ofi_util_mr_close(mem->ofi.sync.post.mr));
+    m_rmem_call(ofi_util_mr_close(mem->ofi.sync.post.mr_local_inc));
+    m_rmem_call(ofi_util_mr_close(mem->ofi.sync.post.mr_local_res));
+    free(mem->ofi.sync.post.key_list);
+    free(mem->ofi.sync.post.base_list);
+    free(mem->ofi.sync.post.val);
+    free(mem->ofi.sync.post.inc);
+    free(mem->ofi.sync.post.res);
 #endif
 
     // free the Tx first, need to close them before closing the AV in the Rx
@@ -631,7 +738,11 @@ int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_co
     // counters involved in the memory exposure: epoch[1:2]
     // do NOT reset the epoch[0], it's already exposed to the world!
     // post the send
+#if (M_SYNC_ATOMIC)
+    m_rmem_call(ofi_rmem_post_fiatomic(nrank, rank, mem, comm));
+#else
     m_rmem_call(ofi_rmem_post_fisend(nrank, rank, mem, comm));
+#endif
 
     //----------------------------------------------------------------------------------------------
     // wait for completion of the send calls
@@ -663,18 +774,40 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
     }
 #endif
 
-    // post the recvs
-    m_rmem_call(ofi_rmem_start_firecv(nrank, rank, mem, comm));
-    // wait for completion, recv are NOT tracked by ccntr
-    // all the ctx of sync.cqdata will lead to the same epoch array
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
         .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
     };
+#if (M_SYNC_ATOMIC)
+    // read the current value
+    int it = 0;
+    int cntr_cur = m_countr_load(m_rma_mepoch_local(mem));
+    while (*mem->ofi.sync.post.res < nrank) {
+        // issue a fi_fetch
+        m_verb("issuing an atomic number %d, res = %d",it,*mem->ofi.sync.post.res);
+        m_rmem_call(ofi_rmem_start_fiatomic(nrank, rank, mem, comm));
+        // count the number of issued atomics
+        it++;
+        // wait for completion of the atomic
+        while (m_countr_load(m_rma_mepoch_local(mem)) < (cntr_cur + it)) {
+            ofi_progress(&progress);
+        }
+        m_verb("atomics has completed, res = %d",*mem->ofi.sync.post.res);
+    }
+    m_countr_fetch_add(m_rma_mepoch_local(mem), -it);
+    // reset for next time
+    *mem->ofi.sync.post.val = 0;
+    *mem->ofi.sync.post.res = 0;
+#else
+    // post the recvs
+    m_rmem_call(ofi_rmem_start_firecv(nrank, rank, mem, comm));
+    // wait for completion, recv are NOT tracked by ccntr
+    // all the ctx of sync.cqdata will lead to the same epoch array
     do {
         ofi_progress(&progress);
     } while (m_countr_load(m_rma_mepoch_post(mem)) < nrank);
     m_countr_fetch_add(m_rma_mepoch_post(mem), -nrank);
+#endif
 
     // the sync cq MUST be empty now
 #ifndef NDEBUG

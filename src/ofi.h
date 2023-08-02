@@ -18,6 +18,9 @@
 #include "rdma/fi_atomic.h"
 #include "rmem.h"
 
+
+#define M_SYNC_ATOMIC 1
+
 #ifndef NO_RMA_EVENT
 #define M_SYNC_RMA_EVENT 1
 #else
@@ -280,9 +283,27 @@ typedef struct {
 #endif
 
 typedef struct {
+#if (M_SYNC_ATOMIC)
+    struct {
+        uint32_t* inc;  // increment value, always 1
+        uint32_t* res;  // result, used to read val
+        uint32_t* val;  // actual value
+        // mr for MR_LOCAL for INC
+        void* desc_local_inc;
+        struct fid_mr* mr_local_inc;
+        // mr for MR_LOCAL for RES
+        void* desc_local_res;
+        struct fid_mr* mr_local_res;
+        // structs for fi_atomics for VAL
+        uint64_t* base_list;  // list of base addresses
+        uint64_t* key_list;   // list of remote keys
+        void* desc;
+        struct fid_mr* mr;
+    } post;
+#endif
     countr_t isig;  //  issued signal (not sent to the target but still need to wait for completion)
     countr_t epch[m_rma_n_epoch];
-    countr_t* icntr;  // array of fi_write counter (for each rank)
+    countr_t* icntr;       // array of fi_write counter (for each rank)
     ofi_cqdata_t* cqdata;  // completion data for each rank
 } ofi_rma_sync_t;
 
