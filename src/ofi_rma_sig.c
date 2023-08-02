@@ -5,7 +5,7 @@ int ofi_rmem_sig_wait(const uint32_t val, ofi_rmem_t* mem) {
     ofi_progress_t progress = {
         .cq = NULL,
         // any cqdata will work, they all refer to the same epoch array
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_cw->ctx,
     };
 #if (M_WRITE_DATA)
     do {
