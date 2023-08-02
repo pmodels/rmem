@@ -307,7 +307,8 @@ typedef struct {
     countr_t isig;  //  issued signal (not sent to the target but still need to wait for completion)
     countr_t epch[m_rma_n_epoch];
     countr_t* icntr;       // array of fi_write counter (for each rank)
-    ofi_cqdata_t* cqdata;  // completion data for each rank
+    ofi_cqdata_t* cqdata_ps;  // completion data for each rank post-start
+    ofi_cqdata_t* cqdata_cw;  // completion data for each rank complete-wait
 } ofi_rma_sync_t;
 
 typedef struct {

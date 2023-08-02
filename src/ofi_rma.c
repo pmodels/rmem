@@ -56,10 +56,10 @@ static int ofi_rmem_start_firecv(const int nrank, const int* rank, ofi_rmem_t* m
     // all the ctx of sync.cqdata will lead to the same epoch array
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_ps->ctx,
     };
     for (int i = 0; i < nrank; ++i) {
-        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
+        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata_ps + i;
         cqdata->kind = m_ofi_cq_kind_sync;
         iov.iov_base = &cqdata->sync.buf;
         msg.desc = &cqdata->sync.buf_desc;
@@ -76,10 +76,10 @@ static int ofi_rmem_post_fisend(const int nrank, const int* rank, ofi_rmem_t* me
     // notify readiness to the rank list
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_ps->ctx,
     };
     for (int i = 0; i < nrank; ++i) {
-        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
+        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata_ps + i;
         cqdata->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
         cqdata->sync.buf = m_ofi_data_set_post;
         uint64_t tag = m_ofi_tag_set_ps;
@@ -96,12 +96,12 @@ static int ofi_rmem_post_fiatomic(const int nrank, const int* rank, ofi_rmem_t* 
     // notify readiness to the rank list
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_ps->ctx,
     };
     *mem->ofi.sync.post.inc = 1;
     for (int i = 0; i < nrank; ++i) {
         // used for completion
-        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
+        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata_ps + i;
         cqdata->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
         // issue the atomic, local var
         struct fi_ioc iov = {
@@ -139,10 +139,10 @@ static int ofi_rmem_start_fiatomic(const int nrank, const int* rank, ofi_rmem_t*
     // notify readiness to the rank list
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_ps->ctx,
     };
     // used for completion, only the first one
-    ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata;
+    ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata_ps;
     cqdata->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
     // issue the atomic
     int myself = comm->rank;
@@ -187,14 +187,14 @@ static int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t
     uint64_t tag = m_ofi_tag_set_cw;
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_cw->ctx,
     };
     for (int i = 0; i < nrank; ++i) {
         int issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
         *ttl_data += issued_rank;
         // notify
         ofi_rma_trx_t* trx = mem->ofi.sync_trx;
-        ofi_cqdata_t* cqd = mem->ofi.sync.cqdata + i;
+        ofi_cqdata_t* cqd = mem->ofi.sync.cqdata_cw + i;
         cqd->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
         cqd->sync.buf = m_ofi_data_set_cmpl | m_ofi_data_set_nops(issued_rank);
         m_ofi_call_again(fi_tsend(trx->ep, &cqd->sync.buf, sizeof(uint64_t), cqd->sync.buf_desc,
@@ -219,11 +219,11 @@ static int ofi_rmem_wait_firecv(const int nrank, const int* rank, ofi_rmem_t* me
     };
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_cw->ctx,
     };
     uint64_t flags = FI_COMPLETION;
     for (int i = 0; i < nrank; ++i) {
-        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata + i;
+        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata_cw + i;
         cqdata->kind = m_ofi_cq_kind_sync;
         iov.iov_base = &cqdata->sync.buf;
         msg.desc = &cqdata->sync.buf_desc;
@@ -442,9 +442,18 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     // allocate the data user for sync
     // we need one ctx entry per rank
     // all of them refer to the same sync epoch
-    mem->ofi.sync.cqdata = calloc(comm->size, sizeof(ofi_cqdata_t));
+    mem->ofi.sync.cqdata_ps = calloc(comm->size, sizeof(ofi_cqdata_t));
+    mem->ofi.sync.cqdata_cw = calloc(comm->size, sizeof(ofi_cqdata_t));
     for (int i = 0; i < comm->size; ++i) {
-        ofi_cqdata_t* ccq = mem->ofi.sync.cqdata + i;
+        ofi_cqdata_t* ccq = mem->ofi.sync.cqdata_ps + i;
+        ccq->kind = m_ofi_cq_kind_sync;
+        ccq->sync.cntr = mem->ofi.sync.epch;
+        m_rmem_call(ofi_util_mr_reg(&ccq->sync.buf, sizeof(uint64_t), FI_SEND | FI_RECV, comm,
+                                    &ccq->sync.buf_mr, &ccq->sync.buf_desc, NULL));
+        m_rmem_call(ofi_util_mr_bind(mem->ofi.sync_trx->ep, ccq->sync.buf_mr, NULL, comm));
+        m_rmem_call(ofi_util_mr_enable(ccq->sync.buf_mr, comm, NULL));
+
+        ccq = mem->ofi.sync.cqdata_cw + i;
         ccq->kind = m_ofi_cq_kind_sync;
         ccq->sync.cntr = mem->ofi.sync.epch;
         m_rmem_call(ofi_util_mr_reg(&ccq->sync.buf, sizeof(uint64_t), FI_SEND | FI_RECV, comm,
@@ -487,9 +496,11 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     //----------------------------------------------------------------------------------------------
     // free the sync
     for (int i = 0; i < comm->size; ++i) {
-        m_rmem_call(ofi_util_mr_close(mem->ofi.sync.cqdata[i].sync.buf_mr));
+        m_rmem_call(ofi_util_mr_close(mem->ofi.sync.cqdata_ps[i].sync.buf_mr));
+        m_rmem_call(ofi_util_mr_close(mem->ofi.sync.cqdata_cw[i].sync.buf_mr));
     }
-    free(mem->ofi.sync.cqdata);
+    free(mem->ofi.sync.cqdata_ps);
+    free(mem->ofi.sync.cqdata_cw);
     // free the MRs
     m_rmem_call(ofi_util_mr_close(mem->ofi.mr));
     free(mem->ofi.key_list);
@@ -581,7 +592,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     // cq and progress
     // any of the cqdata entry can be used to fallback, the first one always exists
     rma->ofi.progress.cq = mem->ofi.data_trx[ctx_id].cq;
-    rma->ofi.progress.fallback_ctx = &mem->ofi.sync.cqdata[0].ctx;
+    rma->ofi.progress.fallback_ctx = &mem->ofi.sync.cqdata_cw[0].ctx;
     switch (op) {
         case (RMA_OPT_PUT): {
             rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
@@ -860,21 +871,20 @@ int ofi_rma_free(ofi_rma_t* rma) {
 //==================================================================================================
 int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("posting");
-    m_rmem_call(ofi_rmem_post_fast(nrank, rank, mem, comm));
-    //----------------------------------------------------------------------------------------------
-    // prepost the recv for the "complete"
+    // prepost the recv for the wait
     m_rmem_call(ofi_rmem_wait_firecv(nrank, rank, mem, comm));
+    m_rmem_call(ofi_rmem_post_fast(nrank, rank, mem, comm));
     m_verb("posted");
     return m_success;
 }
 // notify the processes in comm of memory exposure epoch
 int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
-#ifndef NDEBUG
-    m_verb("posting-fast");
-    for (int i = 0; i < (mem->ofi.n_tx + 1); ++i) {
-        m_mem_check_empty_cq(mem->ofi.data_trx[i].cq);
-    }
-#endif
+// #ifndef NDEBUG
+    // m_verb("posting-fast");
+    // for (int i = 0; i < (mem->ofi.n_tx + 1); ++i) {
+    //     m_mem_check_empty_cq(mem->ofi.data_trx[i].cq);
+    // }
+// #endif
     // no call access in my memory can be done before the notification, it's safe to reset the
     // counters involved in the memory exposure: epoch[1:2]
     // do NOT reset the epoch[0], it's already exposed to the world!
@@ -889,7 +899,7 @@ int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_co
     // wait for completion of the send calls
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_ps->ctx,
     };
     while (m_countr_load(m_rma_mepoch_local(mem)) < nrank) {
         m_rmem_call(ofi_progress(&progress));
@@ -898,10 +908,10 @@ int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_co
 
     //----------------------------------------------------------------------------------------------
     // cq must be empty now
-#ifndef NDEBUG
-    m_mem_check_empty_cq(mem->ofi.sync_trx->cq);
+// #ifndef NDEBUG
+    // m_mem_check_empty_cq(mem->ofi.sync_trx->cq);
     m_verb("posted-fast");
-#endif
+// #endif
     return m_success;
 }
 
@@ -917,7 +927,7 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
 
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_ps->ctx,
     };
 #if (M_SYNC_ATOMIC)
     // read the current value
@@ -992,7 +1002,7 @@ int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* com
     // rma calls generate cq entries so they need to be processed, we loop on the data_trx only
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_cw->ctx,
     };
     int i = 0;
     // we have to complete on all the trx, sync and data
@@ -1019,7 +1029,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     // get the number of calls done by the origins
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_cw->ctx,
     };
     int i = 0;
     while (m_countr_load(m_rma_mepoch_cmpl(mem)) < nrank) {
@@ -1073,7 +1083,7 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
     // wait for it to come down
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
-        .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
+        .fallback_ctx = &mem->ofi.sync.cqdata_cw->ctx,
     };
     int i = 0;
     while (m_countr_load(m_rma_mepoch_remote(mem)) > 0) {
