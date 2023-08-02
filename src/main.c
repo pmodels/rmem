@@ -353,8 +353,8 @@ int main(int argc, char** argv) {
     if (p2pf_time.ci) free(p2pf_time.ci);
     if (put_time.avg) free(put_time.avg);
     if (put_time.ci) free(put_time.ci);
-    if (pgpu_time.avg) free(put_time.avg);
-    if (pgpu_time.ci) free(put_time.ci);
+    if (pgpu_time.avg) free(pgpu_time.avg);
+    if (pgpu_time.ci) free(pgpu_time.ci);
     if (psig_time.avg) free(psig_time.avg);
     if (psig_time.ci) free(psig_time.ci);
     if (plat_time.avg) free(plat_time.avg);
