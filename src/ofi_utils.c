@@ -144,6 +144,7 @@ int ofi_util_get_prov(struct fi_info** prov) {
 #if (!M_WRITE_DATA)
     m_ofi_fatal_info(hints, caps, FI_ATOMIC | FI_FENCE);  // implies (REMOTE_)READ/WRITE
 #endif
+    m_ofi_fatal_info(hints, caps, FI_ATOMIC);  // implies (REMOTE_)READ/WRITE
 
     //----------------------------------------------------------------------------------------------
     // try to get more specific behavior
