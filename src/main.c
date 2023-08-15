@@ -15,6 +15,8 @@
 #include "rmem_run.h"
 #include "rmem_utils.h"
 
+#define m_run_time(t) (t ? (t[idx] / imsg) : 0.0)
+
 void print_info(char* foldr_name, char* prov_name) {
     char fname[128];
     snprintf(fname, 128, "%s/rmem.info", foldr_name);
@@ -23,9 +25,9 @@ void print_info(char* foldr_name, char* prov_name) {
 
     fprintf(file, "----------------------------------------------------------------\n");
 #ifdef GIT_COMMIT
-    fprintf(file, "commit: %s", GIT_COMMIT);
+    fprintf(file, "commit: %s\n", GIT_COMMIT);
 #else
-    fprintf(file, "commit: unknown");
+    fprintf(file, "commit: unknown\n");
 #endif
     fprintf(file, "provider: %s\n", prov_name);
 #if (M_WRITE_DATA)
@@ -51,12 +53,30 @@ int main(int argc, char** argv) {
     comm.n_ctx = nth;
     m_rmem_call(ofi_init(&comm));
 
+    // allocate the shared mem
+    ofi_rmem_t rma_mem = {
+        .buf = NULL,
+        .count = 0,
+    };
+
     // run parameter
     run_param_t param = {
         .msg_size = 1 << 22,
-        .n_msg = 2,
-        .comm = &comm,
+        .n_msg = 2, 
+        .comm = &comm, 
+        .mem = &rma_mem
     };
+
+    // allocate the shared mem for the receiver
+    if (!is_sender(ofi_get_rank(&comm))) {
+        const size_t ttl_len = param.msg_size * param.n_msg;
+        // receiver needs the remote buffer
+        rma_mem = (ofi_rmem_t){
+            .buf = calloc(ttl_len, sizeof(int)),
+            .count = ttl_len * sizeof(int),
+        };
+    }
+    ofi_rmem_init(&rma_mem, param.comm);
 
     //----------------------------------------------------------------------------------------------
     // P2P
@@ -65,17 +85,36 @@ int main(int argc, char** argv) {
         run_p2p_data_t p2p_data;
         run_t p2p_send = {
             .data = &p2p_data,
-            .pre = &p2p_pre,
+            .pre = &p2p_pre_send,
             .run = &p2p_run_send,
-            .post = &p2p_post,
+            .post = &p2p_post_send,
         };
         run_t p2p_recv = {
             .data = &p2p_data,
-            .pre = &p2p_pre,
+            .pre = &p2p_pre_recv,
             .run = &p2p_run_recv,
-            .post = &p2p_post,
+            .post = &p2p_post_recv,
         };
         run_test(&p2p_send, &p2p_recv, param, &p2p_time);
+    }
+    //----------------------------------------------------------------------------------------------
+    // P2P FAST
+    run_time_t p2pf_time;
+    {
+        run_p2p_data_t p2pf_data;
+        run_t p2pf_send = {
+            .data = &p2pf_data,
+            .pre = &p2p_pre_send,
+            .run = &p2p_fast_run_send,
+            .post = &p2p_post_send,
+        };
+        run_t p2pf_recv = {
+            .data = &p2pf_data,
+            .pre = &p2p_pre_recv,
+            .run = &p2p_fast_run_recv,
+            .post = &p2p_post_recv,
+        };
+        run_test(&p2pf_send, &p2pf_recv, param, &p2pf_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT
@@ -113,7 +152,7 @@ int main(int argc, char** argv) {
             .run = &sig_run_recv,
             .post = &rma_post,
         };
-        run_test(&psig_send, &psig_recv, param, &psig_time);
+        //run_test(&psig_send, &psig_recv, param, &psig_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT FAST
@@ -153,6 +192,10 @@ int main(int argc, char** argv) {
         };
         run_test(&plat_send, &plat_recv, param, &plat_time);
     }
+    //----------------------------------------------------------------------------------------------
+    // free
+    ofi_rmem_free(&rma_mem, param.comm);
+    free(rma_mem.buf);
 
     //----------------------------------------------------------------------------------------------
     if (!is_sender(comm.rank)) {
@@ -192,30 +235,33 @@ int main(int argc, char** argv) {
                 // get the idx
                 int idx = idx_msg * n_size + idx_size;
                 // load the results
-                const double ti_p2p = p2p_time.avg[idx] / imsg;
-                const double ci_p2p = p2p_time.ci[idx] / imsg;
-                const double ti_put = put_time.avg[idx] / imsg;
-                const double ci_put = put_time.ci[idx] / imsg;
-                const double ti_psig = psig_time.avg[idx] / imsg;
-                const double ci_psig = psig_time.ci[idx] / imsg;
-                const double ti_plat = plat_time.avg[idx] / imsg;
-                const double ci_plat = plat_time.ci[idx] / imsg;
-                const double ti_fast = pfast_time.avg[idx] / imsg;
-                const double ci_fast = pfast_time.ci[idx] / imsg;
+                const double ti_p2p = m_run_time(p2p_time.avg);
+                const double ci_p2p = m_run_time(p2p_time.ci);
+                const double ti_put = m_run_time(put_time.avg);
+                const double ci_put = m_run_time(put_time.ci);
+                const double ti_p2pf = m_run_time(p2pf_time.avg);
+                const double ci_p2pf = m_run_time(p2pf_time.ci);
+                const double ti_psig = m_run_time(psig_time.avg);
+                const double ci_psig = m_run_time(psig_time.ci);
+                const double ti_plat = m_run_time(plat_time.avg);
+                const double ci_plat = m_run_time(plat_time.ci);
+                const double ti_fast = m_run_time(pfast_time.avg);
+                const double ci_fast = m_run_time(pfast_time.ci);
                 m_log(
                     "time/msg (%ld B/msg - %d msgs):\n"
                     "\tP2P       = %f +-[%f]\n"
                     "\tPUT       = %f +-[%f] (ratio = %f)\n"
                     "\tPUT FAST  = %f +-[%f] (ratio = %f)\n"
                     "\tPUT + SIG = %f +-[%f] (ratio = %f)\n"
-                    "\tPUT LAT   = %f +-[%f] (ratio = %f)\n",
+                    "\tPUT LAT   = %f +-[%f] (ratio = %f)\n"
+                    "\tP2P FAST  = %f +-[%f] (ratio = %f)\n",
                     msg_size * sizeof(int), imsg, ti_p2p, ci_p2p, ti_put, ci_put, ti_put / ti_p2p,
                     ti_fast, ci_fast, ti_fast / ti_p2p, ti_psig, ci_psig, ti_psig / ti_p2p, ti_plat,
-                    ci_plat, ti_plat / ti_p2p);
+                    ci_plat, ti_plat / ti_p2p, ti_p2pf, ci_p2pf, ti_p2pf / ti_p2p);
                 // write to csv
-                fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int), ti_p2p,
-                        ti_put, ti_fast, ti_psig, ti_plat, ci_p2p, ci_put, ci_fast, ci_psig,
-                        ci_plat);
+                fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int),
+                        ti_p2p, ti_put, ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast,
+                        ci_psig, ci_plat, ci_p2pf);
                 // bump the index
                 idx++;
             }
@@ -240,33 +286,41 @@ int main(int argc, char** argv) {
                 // get the idx
                 int idx = idx_msg * n_size + idx_size;
                 // load the results
-                const double ti_p2p = p2p_time.avg[idx] / imsg;
-                const double ci_p2p = p2p_time.ci[idx] / imsg;
-                const double ti_put = put_time.avg[idx] / imsg;
-                const double ci_put = put_time.ci[idx] / imsg;
-                const double ti_psig = psig_time.avg[idx] / imsg;
-                const double ci_psig = psig_time.ci[idx] / imsg;
-                const double ti_plat = plat_time.avg[idx] / imsg;
-                const double ci_plat = plat_time.ci[idx] / imsg;
-                const double ti_fast = pfast_time.avg[idx] / imsg;
-                const double ci_fast = pfast_time.ci[idx] / imsg;
+                const double ti_p2p = m_run_time(p2p_time.avg);
+                const double ci_p2p = m_run_time(p2p_time.ci);
+                const double ti_put = m_run_time(put_time.avg);
+                const double ci_put = m_run_time(put_time.ci);
+                const double ti_p2pf = m_run_time(p2pf_time.avg);
+                const double ci_p2pf = m_run_time(p2pf_time.ci);
+                const double ti_psig = m_run_time(psig_time.avg);
+                const double ci_psig = m_run_time(psig_time.ci);
+                const double ti_plat = m_run_time(plat_time.avg);
+                const double ci_plat = m_run_time(plat_time.ci);
+                const double ti_fast = m_run_time(pfast_time.avg);
+                const double ci_fast = m_run_time(pfast_time.ci);
                 // write to csv
-                fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put, ti_fast,
-                        ti_psig, ti_plat, ci_p2p, ci_put, ci_fast, ci_psig, ci_plat);
+                fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put,
+                        ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast, ci_psig,
+                        ci_plat, ci_p2pf);
                 // bump the index
                 idx++;
             }
             fclose(file);
         }
     }
-    free(p2p_time.avg);
-    free(p2p_time.ci);
-    free(put_time.avg);
-    free(put_time.ci);
-    free(psig_time.avg);
-    free(psig_time.ci);
-    free(plat_time.avg);
-    free(plat_time.ci);
+    if (p2p_time.avg) free(p2p_time.avg);
+    if (p2p_time.ci) free(p2p_time.ci);
+    if (p2pf_time.avg) free(p2pf_time.avg);
+    if (p2pf_time.ci) free(p2pf_time.ci);
+    if (put_time.avg) free(put_time.avg);
+    if (put_time.ci) free(put_time.ci);
+    if (psig_time.avg) free(psig_time.avg);
+    if (psig_time.ci) free(psig_time.ci);
+    if (plat_time.avg) free(plat_time.avg);
+    if (plat_time.ci) free(plat_time.ci);
+    if (pfast_time.avg) free(pfast_time.avg);
+    if (pfast_time.ci) free(pfast_time.ci);
+
     m_rmem_call(ofi_finalize(&comm));
     return EXIT_SUCCESS;
 }

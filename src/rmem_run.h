@@ -25,6 +25,7 @@ typedef struct {
 } run_time_t;
 
 typedef struct {
+    ofi_rmem_t* mem;
     ofi_comm_t* comm;
     int n_msg;     // number of messages
     int msg_size;  // size of a message
@@ -43,7 +44,6 @@ typedef struct {
 } run_p2p_data_t;
 
 typedef struct {
-    ofi_rmem_t mem; // remote mem
     ofi_rma_t* rma; // array of op
     int* buf;
 } run_rma_data_t;
@@ -52,10 +52,14 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
 
 //--------------------------------------------------------------------------------------------------
 // point to point
-void p2p_pre(run_param_t* param, void* data);
-void p2p_post(run_param_t* param, void* data);
+void p2p_pre_send(run_param_t* param, void* data);
+void p2p_pre_recv(run_param_t* param, void* data);
+void p2p_post_send(run_param_t* param, void* data);
+void p2p_post_recv(run_param_t* param, void* data);
 double p2p_run_send(run_param_t* param, void* data);
 double p2p_run_recv(run_param_t* param, void* data);
+double p2p_fast_run_send(run_param_t* param, void* data);
+double p2p_fast_run_recv(run_param_t* param, void* data);
 
 //--------------------------------------------------------------------------------------------------
 // PRE

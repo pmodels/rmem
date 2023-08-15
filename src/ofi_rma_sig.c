@@ -8,13 +8,13 @@ int ofi_rmem_sig_wait(const uint32_t val, ofi_rmem_t* mem) {
         .fallback_ctx = &mem->ofi.sync.cqdata->ctx,
     };
 #if (M_WRITE_DATA)
-    while (m_countr_load(mem->ofi.sync.epoch + 3) < val) {
+    do {
         progress.cq = mem->ofi.data_trx[i].cq;
         m_rmem_call(ofi_progress(&progress));
         // go to the next cq
         i = (i + 1) % mem->ofi.n_rx;
-    }
-    m_countr_store(mem->ofi.sync.epoch + 3, 0);
+    } while (m_countr_load(m_rma_mepoch_signal(mem)) < val);
+    m_countr_fetch_add(m_rma_mepoch_signal(mem), -val);
 #else
     m_verb("waiting for signal to be %d",val);
     m_ofi_call(fi_cntr_wait(mem->ofi.signal.scntr,val,-1));

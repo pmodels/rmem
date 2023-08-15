@@ -45,14 +45,45 @@ typedef struct fi_cq_entry ofi_cq_entry;
 //--------------------------------------------------------------------------------------------------
 
 //--------------------------------------------------------------------------------------------------
+#define m_ofi_call_again(func, progress)                                                  \
+    do {                                                                                  \
+        int m_ofi_call_res = func;                                                        \
+        if (m_ofi_call_res == -FI_EAGAIN) {                                               \
+            /* if the error code is FI_EAGAIN, try to progress and do it again*/          \
+            ofi_progress(progress);                                                       \
+        } else {                                                                          \
+            /* if it's a success, leave*/                                                 \
+            m_assert(m_ofi_call_res >= 0, "OFI ERROR: %s", fi_strerror(-m_ofi_call_res)); \
+            break;                                                                        \
+        }                                                                                 \
+    } while (1)
+
+#ifndef NDEBUG
 #define m_ofi_call(func)                                                              \
     do {                                                                              \
-        int m_ofi_call_res;                                                           \
-        do {                                                                          \
-            m_ofi_call_res = func;                                                    \
-        } while (m_ofi_call_res == -FI_EAGAIN);                                       \
+        int m_ofi_call_res = func;                                                    \
         m_assert(m_ofi_call_res >= 0, "OFI ERROR: %s", fi_strerror(-m_ofi_call_res)); \
     } while (0)
+#else
+#define m_ofi_call(func) \
+    do {                 \
+        func;            \
+    } while (0)
+#endif
+
+
+#ifndef NDEBUG
+#define m_pthread_call(func)                                                        \
+    do {                                                                            \
+        int m_pthread_call_res = func;                                              \
+        m_assert(m_pthread_call_res == 0, "PTHREAD ERROR: %d", m_pthread_call_res); \
+    } while (0)
+#else
+#define m_pthread_call(func) \
+    do {                     \
+        func;                \
+    } while (0)
+#endif
 
 //--------------------------------------------------------------------------------------------------
 // TAGGED SEND-RECV
@@ -110,6 +141,9 @@ static inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 #define m_ofi_data_get_nops(a) ((uint32_t)(a & m_ofi_data_mask_nops))
 
 //--------------------------------------------------------------------------------------------------
+// if true need to bump the local counter
+#define m_ofi_cq_inc_local (0x80)  // 1000 0000
+// define the opeation for after
 #define m_ofi_cq_kind_null (0x01)  // 0000 0001
 #define m_ofi_cq_kind_sync (0x02)  // 0000 0010
 #define m_ofi_cq_kind_rqst (0x04)  // 0000 0100
@@ -174,6 +208,10 @@ typedef struct {
     void* fallback_ctx;
 } ofi_progress_t;
 
+typedef enum {
+    P2P_OPT_SEND,
+    P2P_OPT_RECV,
+} p2p_opt_t;
 typedef struct {
     // user provided information
     void* buf;     // address of the buffer
@@ -192,6 +230,10 @@ typedef struct {
         // iovs
         struct iovec iov;
         struct fi_msg_tagged msg;
+        // endpoint
+        p2p_opt_t kind;
+        uint64_t flags;
+        struct fid_ep* ep;
     } ofi;
 } ofi_p2p_t;
 
@@ -220,15 +262,27 @@ typedef struct {
 } ofi_rma_sig_t;
 #endif
 
-typedef struct {
+#define m_rma_epoch_post(e)    (e + 0)                 // posted
+#define m_rma_epoch_cmpl(e)    (e + 1)                 // completed
+#define m_rma_epoch_remote(e)  (e + 2)                 // remote fi_write
+#define m_rma_epoch_local(e)   (e + 3)                 // local (tsend, signal, fi_write/read)
+#define m_rma_mepoch_post(m)   (m->ofi.sync.epch + 0)  // posted
+#define m_rma_mepoch_cmpl(m)   (m->ofi.sync.epch + 1)  // completed
+#define m_rma_mepoch_remote(m) (m->ofi.sync.epch + 2)  // remote fi_write
+#define m_rma_mepoch_local(m)  (m->ofi.sync.epch + 3)  // local (tsend, signal, fi_write/read)
+
 #if (M_WRITE_DATA)
-    countr_t epoch[4];  // epoch[0] = # of post, epoch[1] = # of completed, epoch[2] = working cntr,
-                        // epoch[3] = signal
+#define m_rma_epoch_signal(e)  (e + 4)                 // remote signal
+#define m_rma_mepoch_signal(m) (m->ofi.sync.epch + 4)  // remote signal
+#define m_rma_n_epoch          5
 #else
-    countr_t epoch[3];  // epoch[0] = # of post, epoch[1] = # of completed, epoch[2] = working cntr
-    countr_t scntr;    // signal counter
+#define m_rma_n_epoch 4
 #endif
-    countr_t* icntr;    // array of fi_write counter (for each rank)
+
+typedef struct {
+    countr_t isig;  //  issued signal (not sent to the target but still need to wait for completion)
+    countr_t epch[m_rma_n_epoch];
+    countr_t* icntr;  // array of fi_write counter (for each rank)
     ofi_cqdata_t* cqdata;  // completion data for each rank
 } ofi_rma_sync_t;
 
@@ -261,7 +315,8 @@ typedef struct {
             // iovs
             struct fi_ioc iov;
             struct fi_rma_ioc riov;
-            struct fi_context ctx;  // to replace by cqdata_t if RPUT_SIG is desired
+            ofi_cqdata_t cq;
+            // struct fi_context ctx;  // to replace by cqdata_t if RPUT_SIG is desired
 #endif
         } sig;
         fi_addr_t addr;
@@ -282,13 +337,12 @@ typedef struct {
         int n_tx;  // number of transmit contexts
         // buffer addresses
         struct fid_mr* mr;
-        uint64_t* base_list;  // list of base addresses
+        fi_addr_t* base_list;  // list of base addresses
         uint64_t* key_list;  // list of remote keys
         // transmit and receive contexts
         ofi_rma_trx_t* sync_trx;
         ofi_rma_trx_t* data_trx;
         // completion and remote counter global for all trx
-        struct fid_cntr* ccntr;
 #if (M_SYNC_RMA_EVENT)
         struct fid_cntr* rcntr;  // Completed CouNTeR put and get
 #endif
@@ -312,33 +366,31 @@ static inline int ofi_get_rank(ofi_comm_t* ofi) { return ofi->rank; }
 static inline int ofi_get_size(ofi_comm_t* ofi) { return ofi->size; }
 
 //-------------------------------------------------------------------------------------------------
-// create a point to point communication
-int ofi_p2p_create(ofi_p2p_t* p2p, ofi_comm_t* comm);
-int ofi_p2p_free(ofi_p2p_t* p2p);
-
 // send/recv
-int ofi_send_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
-int ofi_recv_enqueue(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
+int ofi_send_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
+int ofi_recv_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm);
+int ofi_p2p_start(ofi_p2p_t* p2p);
+int ofi_p2p_free(ofi_p2p_t* p2p);
 
 // progress
 int ofi_progress(ofi_progress_t* progress);
 int ofi_p2p_wait(ofi_p2p_t* p2p);
-int ofi_rma_wait(ofi_rma_t* p2p);
 
 //-------------------------------------------------------------------------------------------------
 // Remote memory management
 int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm);
 
-// fast completion: useful to measure latency w/o the sync
-int ofi_rmem_complete_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm);
-int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm);
-
 // PSCW 101
 int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
+// fast completion: useful to measure latency w/o the sync
+int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
+int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
+int ofi_rmem_complete_fast(const int ttl_data, ofi_rmem_t* mem, ofi_comm_t* comm);
+int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm);
 
 // signal
 int ofi_rmem_sig_wait(const uint32_t val, ofi_rmem_t* mem);
