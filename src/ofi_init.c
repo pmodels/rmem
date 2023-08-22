@@ -65,7 +65,8 @@ int ofi_ctx_free(struct fi_info* prov, ofi_ctx_t** ctx){
 // main functions
 int ofi_init(ofi_comm_t* ofi) {
     // get the provider list
-    m_rmem_call(ofi_util_get_prov(&ofi->prov));
+    ofi_mode_t prov_mode;
+    m_rmem_call(ofi_util_get_prov(&ofi->prov,&ofi->prov_mode));
     // struct fi_info* prov_list;
     // m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, NULL, &prov_list));
     //

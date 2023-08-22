@@ -40,13 +40,11 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
         m_countr_fetch_add(m_rma_epoch_remote(epoch), -1);
         m_verb("remote data: counter -1, now = %d",m_countr_load(m_rma_epoch_remote(epoch)));
     }
-#if (M_WRITE_DATA)
     uint32_t sig = m_ofi_data_get_sig(*data);
     if (sig > 0) {
         m_assert(sig <= 1, "post must be <=1");
         m_countr_fetch_add(m_rma_epoch_signal(epoch), 1);
     }
-#endif
     return;
 }
 
@@ -63,39 +61,38 @@ int ofi_progress(ofi_progress_t* progress) {
         //------------------------------------------------------------------------------------------
         // entries in the buffer
         for (int i = 0; i < ret; ++i) {
-            m_verb("processing #%d/%d",i,ret);
+            m_verb("processing #%d/%d", i, ret);
             // get the context
             uint8_t* op_ctx = (uint8_t*)event[i].op_context;
-#if (!M_SYNC_RMA_EVENT || M_WRITE_DATA)
             // is it a remote data?
             if (!op_ctx) {
                 m_verb("data entry completed: using the fallback");
                 op_ctx = progress->fallback_ctx;
-                countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.cntr));
+                countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.epoch_ptr));
                 uint64_t data = event[i].data;
                 ofi_cq_update_sync_tag(&data, *epoch);
                 continue;
             }
-#endif
             // if the context is null, the cq is used for remote data
             m_assert(op_ctx, "the context cannot be null here");
             // recover the kind
             uint8_t kind = *((uint8_t*)op_ctx + m_ofi_cq_offset(kind));
             if (kind & m_ofi_cq_inc_local) {
-                countr_t** epoch = (countr_t**)(progress->fallback_ctx+ m_ofi_cq_offset(sync.cntr));
-                m_assert(*epoch,"epoch is null, that's annoying");
+                countr_t** epoch =
+                    (countr_t**)(progress->fallback_ctx + m_ofi_cq_offset(sync.epoch_ptr));
+                m_assert(*epoch, "epoch is null, that's annoying");
                 m_countr_fetch_add(m_rma_epoch_local(*epoch), 1);
             }
             if (kind & m_ofi_cq_kind_rqst) {
                 m_verb("rqst entry completed");
                 countr_t* cntr = (countr_t*)(op_ctx + m_ofi_cq_offset(rqst.busy));
-                m_countr_fetch_add(cntr,-1);
+                m_countr_fetch_add(cntr, -1);
                 m_verb("decreasing flag value by -1");
                 continue;
             } else if (kind & m_ofi_cq_kind_sync) {
                 m_verb("sync entry completed");
-                countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.cntr));
-                uint64_t* data = (uint64_t*)(op_ctx + m_ofi_cq_offset(sync.buf));
+                countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(sync.epoch_ptr));
+                uint64_t* data = (uint64_t*)(op_ctx + m_ofi_cq_offset(sync.data));
                 ofi_cq_update_sync_tag(data, *epoch);
                 continue;
             } else if (kind & m_ofi_cq_kind_null) {

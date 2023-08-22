@@ -12,7 +12,7 @@
 #define n_measure       50
 #define n_warmup        5
 #define retry_threshold 0.05
-#define retry_max       20
+#define retry_max       2
 #define bar_max         50
 
 //==================================================================================================
@@ -463,7 +463,7 @@ double sig_run_recv(run_param_t* param, void* data) {
     PMI_Barrier();
     m_rmem_prof(prof, time) {
         ofi_rmem_post(1, &buddy, param->mem, param->comm);
-        ofi_rmem_sig_wait(n_msg, param->mem);
+        ofi_rmem_sig_wait(n_msg, param->mem, param->comm);
         ofi_rmem_wait(1, &buddy, param->mem, param->comm);
     }
     //------------------------------------------------

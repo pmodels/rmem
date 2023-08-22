@@ -54,38 +54,133 @@ typedef enum {
     M_OFI_EP_KIND_SHARED,
 } ofi_ep_kind_t;
 
-int ofi_prov_score(char* provname) {
+static int ofi_prov_score(char* provname, ofi_cap_t* caps) {
     if (0 == strcmp(provname, "cxi")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_RMA_EVENT | M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_FENCE;
+        }
         return 3;
-    } else if (0 == strcmp(provname, "psm3")) {
+    } else if (0 == strcmp(provname, "verbs;ofi_rxm")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA;
+        }
         return 2;
+    } else if (0 == strcmp(provname, "psm3")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_RMA_EVENT | M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA;
+        }
+        return 1;
     } else if (0 == strcmp(provname, "sockets")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA;
+        }
+        return 1;
+    } else if (0 == strcmp(provname, "tcp;ofi_rxm")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_CQ_DATA;
+        }
+        return 1;
+    } else if (0 == strcmp(provname, "tcp")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_CQ_DATA;
+        }
         return 1;
     }
     return 0;
 }
 
-#if (M_WRITE_DATA)
-#define ofi_sig_cap 0x0
-#else
-#define ofi_sig_cap FI_FENCE | FI_ATOMIC
-#endif
-#if (M_SYNC_RMA_EVENT)
-#define ofi_syn_cap FI_RMA_EVENT
-#else
-#define ofi_syn_cap 0x0
-#endif
-#define ofi_cap FI_MSG | FI_TAGGED | FI_RMA | FI_DIRECTED_RECV | ofi_sig_cap | ofi_syn_cap
-// #define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND | FI_ATOMIC
-// #if (M_SYNC_RMA_EVENT)
-// #define ofi_cap_ops_rx \
-//     FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_RMA_EVENT | FI_DIRECTED_RECV
-// #else
-// #define ofi_cap_ops_rx \
-//     FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_REMOTE_CQ_DATA | FI_DIRECTED_RECV
-// #endif
+/**
+ * @brief given a provider's capability set, determine the best modes to use
+ */
+static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_cap) {
+    //----------------------------------------------------------------------------------------------
+    // [1] ready-to-receive
+    if (mode->rtr_mode) {
+        switch (mode->rtr_mode) {
+            case (M_OFI_RTR_NULL):
+                m_assert(0, "null is not supported here");
+                break;
+            case M_OFI_RTR_ATOMIC:
+                *ofi_cap |= FI_ATOMIC;
+                m_log("choosing atomics, available? %d",m_ofi_prov_has_atomic(*prov_cap));
+                m_assert(m_ofi_prov_has_atomic(*prov_cap), "provider needs atomics capabilities");
+                break;
+            case M_OFI_RTR_TMSG:
+                *ofi_cap |= FI_TAGGED;
+                break;
+        }
+    } else {
+        if (m_ofi_prov_has_atomic(*prov_cap)) {
+            *ofi_cap |= FI_ATOMIC;
+            mode->rtr_mode = M_OFI_RTR_ATOMIC;
+        } else {
+            *ofi_cap |= FI_TAGGED;
+            mode->rtr_mode = M_OFI_RTR_TMSG;
+        }
+    }
+    //----------------------------------------------------------------------------------------------
+    // [2] remote completion
+    if (mode->rcmpl_mode) {
+        switch (mode->rcmpl_mode) {
+            case (M_OFI_RCMPL_NULL):
+                m_assert(0, "null is not supported here");
+                break;
+            case M_OFI_RCMPL_CQ_DATA:
+                m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
+                break;
+            case M_OFI_RCMPL_REMOTE_CNTR:
+                *ofi_cap |= FI_RMA_EVENT;
+                m_assert(m_ofi_prov_has_rma_event(*prov_cap),
+                         "provider needs rma event capabilities");
+                break;
+            case M_OFI_RCMPL_FENCE:
+                *ofi_cap |= FI_FENCE;
+                m_assert(m_ofi_prov_has_fence(*prov_cap), "provider needs fence capabilities");
+                break;
+        }
+    } else {
+        if (m_ofi_prov_has_cq_data(*prov_cap)) {
+            mode->rcmpl_mode = M_OFI_RCMPL_CQ_DATA;
+        } else if (m_ofi_prov_has_rma_event(*prov_cap)) {
+            *ofi_cap |= FI_RMA_EVENT;
+            mode->rcmpl_mode = M_OFI_RCMPL_REMOTE_CNTR;
+        } else if (m_ofi_prov_has_fence(*prov_cap)) {
+            *ofi_cap |= FI_FENCE;
+            mode->rcmpl_mode = M_OFI_RCMPL_FENCE;
+        } else {
+            m_assert(0, "I don't know how to handle remote completion");
+        }
+    }
+    //----------------------------------------------------------------------------------------------
+    // [3] signal mode
+    if (mode->sig_mode) {
+        switch (mode->sig_mode) {
+            case (M_OFI_SIG_NULL):
+                m_assert(0, "null is not supported here");
+                break;
+            case M_OFI_SIG_CQ_DATA:
+                m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
+                break;
+            case M_OFI_SIG_ATOMIC:
+                *ofi_cap |= FI_ATOMIC | FI_FENCE;
+                m_assert(m_ofi_prov_has_atomic(*prov_cap), "provider needs atomics capabilities");
+                m_assert(m_ofi_prov_has_fence(*prov_cap), "provider needs fencing capabilities");
+                break;
+        }
+    } else {
+        if (m_ofi_prov_has_cq_data(*prov_cap)) {
+            mode->sig_mode = M_OFI_SIG_CQ_DATA;
+        } else if (m_ofi_prov_has_atomic(*prov_cap) && m_ofi_prov_has_fence(*prov_cap)) {
+            *ofi_cap |= FI_ATOMIC | FI_FENCE;
+            mode->sig_mode = M_OFI_SIG_ATOMIC;
+        } else {
+            m_assert(0, "unable to use signals");
+        }
+    }
+    return m_success;
+}
 
-int ofi_util_get_prov(struct fi_info** prov) {
+int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     // get the list of available providers and select the best one
     int ofi_ver = fi_version();
     int best_score = -1;
@@ -93,12 +188,16 @@ int ofi_util_get_prov(struct fi_info** prov) {
     struct fi_info* prov_list = NULL;
     m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, NULL, &prov_list));
     for (struct fi_info* cprov = prov_list; cprov; cprov = cprov->next) {
-        int score = ofi_prov_score(cprov->fabric_attr->prov_name);
+        int score = ofi_prov_score(cprov->fabric_attr->prov_name,NULL);
         if (score > best_score) {
             best_score = score;
             best_prov = cprov;
         }
     }
+    // get the set of capabilities
+    uint8_t prov_cap = 0x00;
+    best_score = ofi_prov_score(best_prov->fabric_attr->prov_name, &prov_cap);
+    m_assert(prov_cap, "we need at least a few capabilities (cannot be %d)", prov_cap);
     char* prov_name = best_prov->fabric_attr->prov_name;
     m_verb("best provider is %s", prov_name);
 
@@ -107,11 +206,11 @@ int ofi_util_get_prov(struct fi_info** prov) {
     hints->fabric_attr->prov_name = malloc(strlen(prov_name) + 1);
     strcpy(hints->fabric_attr->prov_name, prov_name);
     fi_freeinfo(prov_list);  // no need of prov_list anymore
-    
-    // set the mode bits to 1, not doing this leads to provider selection failure
- //    hints->mode = ~0;
-	// hints->domain_attr->mode = ~0;
-	// hints->domain_attr->mr_mode = ~(FI_MR_BASIC | FI_MR_SCALABLE);
+
+    //----------------------------------------------------------------------------------------------
+    // get the operational modes
+    uint64_t mycap = FI_MSG | FI_TAGGED | FI_RMA | FI_DIRECTED_RECV;
+    m_rmem_call(ofi_prov_mode(&prov_cap, prov_mode, &mycap));
 
     //----------------------------------------------------------------------------------------------
     // basic requirement are the modes and the caps
@@ -123,7 +222,7 @@ int ofi_util_get_prov(struct fi_info** prov) {
     hints->mode |= FI_CONTEXT;
     // do not bind under the same cq/counter different capabilities endpoints
     hints->mode |= FI_RESTRICTED_COMP;
-    hints->domain_attr->mode |= FI_RESTRICTED_COMP; 
+    hints->domain_attr->mode |= FI_RESTRICTED_COMP;
     // MR endpoint is supported
     hints->domain_attr->mr_mode |= FI_MR_ENDPOINT;
     // optional:
@@ -132,19 +231,8 @@ int ofi_util_get_prov(struct fi_info** prov) {
     hints->domain_attr->mr_mode |= FI_MR_ALLOCATED;
     hints->domain_attr->mr_mode |= FI_MR_VIRT_ADDR;
 
-    // try to get those modes with the minimum caps
-    m_ofi_fatal_info(hints, caps, ofi_cap);  // implies SEND/RECV
-
-    // improve the selection if required in case of specific usage
-#if (M_SYNC_RMA_EVENT)
-    // request support for MR_RMA_EVENT
-    hints->domain_attr->mr_mode |= FI_MR_RMA_EVENT;
-    m_ofi_fatal_info(hints, caps, FI_RMA_EVENT | FI_REMOTE_READ | FI_REMOTE_WRITE);
-#endif
-#if (!M_WRITE_DATA)
-    m_ofi_fatal_info(hints, caps, FI_ATOMIC | FI_FENCE);  // implies (REMOTE_)READ/WRITE
-#endif
-    m_ofi_fatal_info(hints, caps, FI_ATOMIC);  // implies (REMOTE_)READ/WRITE
+    // make sure the provider has that
+    m_ofi_fatal_info(hints, caps, mycap);
 
     //----------------------------------------------------------------------------------------------
     // try to get more specific behavior
@@ -234,13 +322,13 @@ int ofi_util_new_ep(const bool new_ctx, struct fi_info* prov, struct fid_domain*
             m_verb("creating new STX/SRX");
             // create the shared receive and transmit context
             struct fi_tx_attr tx_attr = {
-                .caps = ofi_cap,
+                .caps = prov->caps,
                 .msg_order = FI_ORDER_NONE,
                 .comp_order = FI_ORDER_NONE,
             };
             m_ofi_call(fi_stx_context(dom, &tx_attr, stx, NULL));
             struct fi_rx_attr rx_attr = {
-                .caps = ofi_cap,
+                .caps = prov->caps,
                 .msg_order = FI_ORDER_NONE,
                 .comp_order = FI_ORDER_NONE,
             };
@@ -326,13 +414,12 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     } else {
         // actually register the memory
         uint64_t flags = 0x0;
-#if (M_SYNC_RMA_EVENT)
-        if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
+        if ((comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_REMOTE_CNTR) &&
+            access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
             m_verb("using FI_RMA_EVENT to register the MR");
             m_assert(comm->prov->caps & FI_RMA_EVENT, "the provider must have FI_RMA_EVENT");
             flags |= FI_RMA_EVENT;
         }
-#endif
         uint64_t rkey = 0;
         if (!(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY)) {
             rkey = comm->unique_mr_key++;

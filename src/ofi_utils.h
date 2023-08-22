@@ -9,7 +9,20 @@
 #include <stdbool.h>
 #include "ofi.h"
 
-int ofi_util_get_prov(struct fi_info** prov);
+// capabilities are defined over 8 bits
+typedef uint8_t ofi_cap_t;
+#define M_OFI_PROV_HAS_FENCE     0x01  // 0000 0001
+#define M_OFI_PROV_HAS_ATOMIC    0x02  // 0000 0010
+#define M_OFI_PROV_HAS_CQ_DATA   0x04  // 0000 0100
+#define M_OFI_PROV_HAS_RMA_EVENT 0x08  // 0000 1000
+
+#define m_ofi_prov_has_fence(a)     ((a)&M_OFI_PROV_HAS_FENCE)
+#define m_ofi_prov_has_atomic(a)    ((a)&M_OFI_PROV_HAS_ATOMIC)
+#define m_ofi_prov_has_cq_data(a)   ((a)&M_OFI_PROV_HAS_CQ_DATA)
+#define m_ofi_prov_has_rma_event(a) ((a)&M_OFI_PROV_HAS_RMA_EVENT)
+
+
+int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode);
 int ofi_util_new_ep(const bool new_ctx, struct fi_info* prov, struct fid_domain* dom,
                     struct fid_ep** ep, struct fid_stx** stx, struct fid_ep** srx);
 int ofi_util_free_ep(struct fi_info* prov, struct fid_ep** ep, struct fid_stx** stx,

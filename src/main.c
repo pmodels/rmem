@@ -14,42 +14,74 @@
 #include "ofi.h"
 #include "rmem_run.h"
 #include "rmem_utils.h"
+#include "rmem_argp.h"
 
 #define m_run_time(t) (t ? (t[idx] / imsg) : 0.0)
 
-void print_info(char* foldr_name, char* prov_name) {
+void print_info(char* foldr_name, char* prov_name, ofi_mode_t* mode) {
     char fname[128];
     snprintf(fname, 128, "%s/rmem.info", foldr_name);
     FILE* file = fopen(fname, "w+");
     m_assert(file, "cannot open %s", fname);
 
     fprintf(file, "----------------------------------------------------------------\n");
+    m_log("----------------------------------------------------------------");
 #ifdef GIT_COMMIT
     fprintf(file, "commit: %s\n", GIT_COMMIT);
 #else
     fprintf(file, "commit: unknown\n");
 #endif
-    fprintf(file, "provider: %s\n", prov_name);
-#if (M_WRITE_DATA)
-    fprintf(file, "using fi_writedata for signal\n");
-#else
-    fprintf(file, "using FI_FENCE for signal\n");
-#endif
-#if (M_SYNC_RMA_EVENT)
-    fprintf(file, "using rma event for sync\n");
-#else
-    fprintf(file, "using fi_writedata for sync\n");
-#endif
-    fprintf(file, "----------------------------------------------------------------\n");
 
+    fprintf(file, "provider: %s\n", prov_name);
+    switch (mode->sig_mode) {
+        case (M_OFI_SIG_NULL):
+            m_assert(0, "null is not supported here");
+            break;
+        case (M_OFI_SIG_ATOMIC):
+            fprintf(file, "\t- signal: ATOMIC\n");
+            break;
+        case (M_OFI_SIG_CQ_DATA):
+            fprintf(file, "\t- signal: CQ DATA\n");
+            break;
+    };
+    switch (mode->rtr_mode) {
+        case (M_OFI_RTR_NULL):
+            m_assert(0, "null is not supported here");
+            break;
+        case (M_OFI_RTR_ATOMIC):
+            fprintf(file, "\t- ready-to-receive: ATOMIC\n");
+            break;
+        case (M_OFI_RTR_TMSG):
+            fprintf(file, "\t- ready-to-receive: TAGGED MSG\n");
+            break;
+    };
+    switch (mode->rcmpl_mode) {
+        case (M_OFI_RCMPL_NULL):
+            m_assert(0, "null is not supported here");
+            break;
+        case (M_OFI_RCMPL_CQ_DATA):
+            fprintf(file, "\t- remote completion: CQ_DATA\n");
+            break;
+        case (M_OFI_RCMPL_FENCE):
+            fprintf(file, "\t- remote completion: FENCE\n");
+            break;
+        case (M_OFI_RCMPL_REMOTE_CNTR):
+            fprintf(file, "\t- remote completion: REMOTE COUNTER\n");
+            break;
+    };
+    fprintf(file, "----------------------------------------------------------------\n");
     fclose(file);
 }
 
 int main(int argc, char** argv) {
     //----------------------------------------------------------------------------------------------
+    //----------------------------------------------------------------------------------------------
     // create a communicator with as many context as threads
     const int nth = 1;  // omp_get_max_threads();
     ofi_comm_t comm;
+    // parse arguments
+    argp_parse(&argp, argc, argv, 0, 0, &comm.prov_mode);
+    // init the comm
     comm.n_ctx = nth;
     m_rmem_call(ofi_init(&comm));
 
@@ -211,7 +243,7 @@ int main(int argc, char** argv) {
         m_verb("found folder: %s",foldr_name);
 
         // get some 101 info
-        print_info(foldr_name, ofi_name(&comm));
+        print_info(foldr_name, ofi_name(&comm),&comm.prov_mode);
 
         //------------------------------------------------------------------------------------------
         // save the results per msg size
