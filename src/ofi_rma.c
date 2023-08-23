@@ -276,15 +276,12 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     rma->ofi.progress.cq = mem->ofi.data_trx[ctx_id].cq;
     rma->ofi.progress.fallback_ctx = &mem->ofi.sync.cqdata_cw[0].ctx;
     switch (op) {
-        case (RMA_OPT_PUT): {
+        case (RMA_OPT_PUT):
+        case (RMA_OPT_PUT_SIG): {
             rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
         } break;
         case (RMA_OPT_RPUT): {
             rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_rqst;
-            m_countr_store(&rma->ofi.msg.cq.rqst.busy, 1);
-        } break;
-        case (RMA_OPT_PUT_SIG): {
-            rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
         } break;
     }
     //----------------------------------------------------------------------------------------------
@@ -392,6 +389,13 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
         .data = rma->ofi.msg.data | rma->ofi.sig.data,
         .context = &rma->ofi.msg.cq.ctx,
     };
+    //----------------------------------------------------------------------------------------------
+    // reset the busy value
+    if (rma->ofi.msg.cq.kind == m_ofi_cq_kind_rqst) {
+        int curr = m_countr_exchange(&rma->ofi.msg.cq.rqst.busy, 1);
+        m_assert(!curr, "the busy value is not 0: %d", curr);
+    }
+    // do the comm
     m_verb("doing it: write msg with kind =%d (inc local? %d) to ep %p: cqdata = %llu",
            rma->ofi.msg.cq.kind & 0x0f, rma->ofi.msg.cq.kind & m_ofi_cq_inc_local, rma->ofi.ep,
            msg.data);

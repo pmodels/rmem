@@ -8,7 +8,7 @@
 #ifdef GIT_COMMIT
 const char *argp_program_version ="rmem - "GIT_COMMIT;
 #else
-const char *argp_program_version ="rmem;
+const char *argp_program_version ="rmem";
 #endif
 
 

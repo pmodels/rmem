@@ -566,6 +566,7 @@ int ofi_util_sig_wait(ofi_mem_sig_t* sig, int myrank, fi_addr_t myaddr, struct f
     // setup the data structures
     ofi_cqdata_t* cqdata = &sig->read_cqdata;
     cqdata->kind = m_ofi_cq_kind_rqst;
+    m_countr_store(&cqdata->rqst.busy, 0);
     // even if we read it, we need to provide a source buffer
     struct fi_ioc iov = {
         .addr = &sig->inc,
@@ -596,17 +597,18 @@ int ofi_util_sig_wait(ofi_mem_sig_t* sig, int myrank, fi_addr_t myaddr, struct f
     while (sig->res < threshold) {
         // issue a fi_fetch
         m_verb("issuing an atomic number %d, res = %d", it, sig->res);
+        int curr = m_countr_exchange(&sig->read_cqdata.rqst.busy, 1);
+        m_assert(!curr, "current value should be 0 and not %d", curr);
         m_ofi_call_again(
             fi_fetch_atomicmsg(ep, &msg, &res_iov, &sig->res_mr.desc, 1, FI_TRANSMIT_COMPLETE),
             progress);
-        m_countr_fetch_add(&sig->read_cqdata.rqst.busy, 1);
         // count the number of issued atomics
         it++;
         // wait for completion of the atomic
-        while (!m_countr_load(&sig->read_cqdata.rqst.busy)) {
+        while (m_countr_load(&sig->read_cqdata.rqst.busy)) {
             ofi_progress(progress);
         }
-        m_verb("atomics has completed, res = %d", sig->res);
+        m_verb("atomics has completed, res = %d, busy = %d", sig->res,m_countr_load(&sig->read_cqdata.rqst.busy));
     }
     sig->res = 0;
     return m_success;
