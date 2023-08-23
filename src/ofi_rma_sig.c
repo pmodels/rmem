@@ -1,4 +1,5 @@
 #include "ofi.h"
+#include "ofi_utils.h"
 
 int ofi_rmem_sig_wait(const uint32_t val, ofi_rmem_t* mem, ofi_comm_t* comm) {
     int i = 0;
@@ -22,8 +23,12 @@ int ofi_rmem_sig_wait(const uint32_t val, ofi_rmem_t* mem, ofi_comm_t* comm) {
         } break;
         case (M_OFI_SIG_ATOMIC): {
             m_verb("waiting for signal to be %d", val);
-            m_ofi_call(fi_cntr_wait(mem->ofi.signal.scntr, val, -1));
-            m_ofi_call(fi_cntr_set(mem->ofi.signal.scntr, 0));
+            // the EP here doesn't matter because the MR has been attached to all of them
+            // so we randomly choose index 0 to check this
+            progress.cq = mem->ofi.data_trx[0].cq;
+            m_rmem_call(ofi_util_sig_wait(&mem->ofi.signal, comm->rank,
+                                               mem->ofi.data_trx[0].addr[comm->rank],
+                                               mem->ofi.data_trx[0].ep, &progress, val));
         } break;
     }
     return m_success;

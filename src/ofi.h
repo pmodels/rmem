@@ -315,19 +315,26 @@ typedef struct {
 } ofi_rma_trx_t;
 
 typedef struct {
-    // signal counter - must be allocated to comply with FI_MR_ALLOCATE
-    uint32_t* inc;  // increment value, always 1
-    uint32_t* val;  // actual counter value
-    // mr for MR_LOCAL
-    void* desc_local;
-    struct fid_mr* mr_local;
-    // structs for fi_atomics
-    uint64_t* base_list;  // list of base addresses
-    uint64_t* key_list;   // list of remote keys
-    struct fid_mr* mr;
-    // remote counters for the signal, always available per the static assert above
-    struct fid_cntr* scntr;
-} ofi_rma_sig_t;
+    uint32_t inc;  //!< increment, always 1
+    uint32_t val;  //!< exposed value
+    uint32_t res;  //!< local value to red the exposed one
+    ofi_local_mr_t inc_mr;
+    ofi_local_mr_t res_mr;
+    ofi_remote_mr_t val_mr;
+    ofi_cqdata_t read_cqdata; //!< cqdata used to read the value
+    // // signal counter - must be allocated to comply with FI_MR_ALLOCATE
+    // uint32_t* inc;  // increment value, always 1
+    // uint32_t* val;  // actual counter value
+    // // mr for MR_LOCAL
+    // void* desc_local;
+    // struct fid_mr* mr_local;
+    // // structs for fi_atomics
+    // uint64_t* base_list;  // list of base addresses
+    // uint64_t* key_list;   // list of remote keys
+    // struct fid_mr* mr;
+    // // remote counters for the signal, always available per the static assert above
+    // struct fid_cntr* scntr;
+} ofi_mem_sig_t;
 
 #define m_rma_epoch_post(e)    (e + 0)                 // posted
 #define m_rma_epoch_cmpl(e)    (e + 1)                 // completed
@@ -348,20 +355,13 @@ typedef struct {
  * - we need different cqdata_t for PS and CW to be able to prepost the CW handshake
  */
 typedef struct {
-    struct {
-        uint32_t inc; //!< increment, always 1
-        uint32_t val; //!< exposed value
-        uint32_t res; //!< local value to red the exposed one
-        ofi_local_mr_t inc_mr;
-        ofi_local_mr_t res_mr;
-        ofi_remote_mr_t val_mr;
-    } rtr;  //!< atomic sync
+    ofi_mem_sig_t rtr;       //!< remote memory signal used
+    ofi_cqdata_t* cqdata_ps;  //!< completion data for each rank Post-Start
+    ofi_cqdata_t* cqdata_cw;  //!< completion data for each rank Complete-Wait
 
     countr_t isig;  //!< number of issued rma calls (for local completion)
     countr_t epch[m_rma_n_epoch];
-    countr_t* icntr;          //!< array of fi_write counter (for each rank)
-    ofi_cqdata_t* cqdata_ps;  //!< completion data for each rank Post-Start
-    ofi_cqdata_t* cqdata_cw;  //!< completion data for each rank Complete-Wait
+    countr_t* icntr;  //!< array of fi_write counter (for each rank)
 } ofi_rma_sync_t;
 
 typedef struct {
@@ -419,7 +419,7 @@ typedef struct {
         // completion and remote counter global for all trx
         struct fid_cntr* rcntr;  // Completed CouNTeR put and get
         // signaling
-        ofi_rma_sig_t signal;
+        ofi_mem_sig_t signal;
         // synchronization (PSCW)
         ofi_rma_sync_t sync;
     } ofi;

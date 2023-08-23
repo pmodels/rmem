@@ -35,4 +35,10 @@ int ofi_util_mr_bind(struct fid_ep* ep, struct fid_mr* mr, struct fid_cntr* cntr
 int ofi_util_mr_enable(struct fid_mr* mr, ofi_comm_t* comm, uint64_t** key_list);
 int ofi_util_mr_close(struct fid_mr* mr);
 
+int ofi_util_sig_reg(ofi_mem_sig_t* sig, ofi_comm_t* comm);
+int ofi_util_sig_bind(ofi_mem_sig_t* sig, struct fid_ep* ep, ofi_comm_t* comm);
+int ofi_util_sig_enable(ofi_mem_sig_t* sig, ofi_comm_t* comm);
+int ofi_util_sig_close(ofi_mem_sig_t* sig);
+int ofi_util_sig_wait(ofi_mem_sig_t* sig, int myrank, fi_addr_t myaddr, struct fid_ep* ep,
+                      ofi_progress_t* progress, uint32_t threshold);
 #endif

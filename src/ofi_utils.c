@@ -521,4 +521,93 @@ int ofi_util_mr_close(struct fid_mr* mr){
     return m_success;
 }
 
+//--------------------------------------------------------------------------------------------------
+int ofi_util_sig_reg(ofi_mem_sig_t* sig, ofi_comm_t* comm) {
+    sig->val = 0;
+    sig->res = 0;
+    sig->inc = 1;
+    m_rmem_call(ofi_util_mr_reg(&sig->val, sizeof(uint32_t), FI_REMOTE_READ | FI_REMOTE_WRITE, comm,
+                                &sig->val_mr.mr, NULL, &sig->val_mr.base_list));
+    m_rmem_call(ofi_util_mr_reg(&sig->inc, sizeof(uint32_t), FI_READ | FI_WRITE, comm,
+                                &sig->inc_mr.mr, &sig->inc_mr.desc, NULL));
+    m_rmem_call(ofi_util_mr_reg(&sig->res, sizeof(uint32_t), FI_READ | FI_WRITE, comm,
+                                &sig->res_mr.mr, &sig->res_mr.desc, NULL));
+    return m_success;
+}
+int ofi_util_sig_bind(ofi_mem_sig_t* sig, struct fid_ep* ep, ofi_comm_t* comm) {
+    m_rmem_call(ofi_util_mr_bind(ep, sig->inc_mr.mr, NULL, comm));
+    m_rmem_call(ofi_util_mr_bind(ep, sig->val_mr.mr, NULL, comm));
+    m_rmem_call(ofi_util_mr_bind(ep, sig->res_mr.mr, NULL, comm));
+    return m_success;
+}
+int ofi_util_sig_enable(ofi_mem_sig_t* sig, ofi_comm_t* comm) {
+    m_rmem_call(ofi_util_mr_enable(sig->val_mr.mr, comm, &sig->val_mr.key_list));
+    m_rmem_call(ofi_util_mr_enable(sig->inc_mr.mr, comm, NULL));
+    m_rmem_call(ofi_util_mr_enable(sig->res_mr.mr, comm, NULL));
+    return m_success;
+}
+int ofi_util_sig_close(ofi_mem_sig_t* sig) {
+    m_rmem_call(ofi_util_mr_close(sig->val_mr.mr));
+    m_rmem_call(ofi_util_mr_close(sig->inc_mr.mr));
+    m_rmem_call(ofi_util_mr_close(sig->res_mr.mr));
+    free(sig->val_mr.key_list);
+    free(sig->val_mr.base_list);
+    return m_success;
+}
+/**
+ * @brief progress till the value exposed in sig has reached the desired threshold
+ *
+ * WARNING: the rank, addr, EP, and CQ in progress MUST be compatible
+*/
+int ofi_util_sig_wait(ofi_mem_sig_t* sig, int myrank, fi_addr_t myaddr, struct fid_ep* ep,
+                           ofi_progress_t* progress, uint32_t threshold) {
+    // setup the data structures
+    ofi_cqdata_t* cqdata = &sig->read_cqdata;
+    cqdata->kind = m_ofi_cq_kind_rqst;
+    // even if we read it, we need to provide a source buffer
+    struct fi_ioc iov = {
+        .addr = &sig->inc,
+        .count = 1,
+    };
+    struct fi_ioc res_iov = {
+        .addr = &sig->res,
+        .count = 1,
+    };
+    struct fi_rma_ioc rma_iov = {
+        .count = 1,
+        .addr = sig->val_mr.base_list[myrank] + 0,
+        .key = sig->val_mr.key_list[myrank],
+    };
+    struct fi_msg_atomic msg = {
+        .msg_iov = &iov,
+        .desc = &sig->inc_mr.desc,
+        .iov_count = 1,  // 1,
+        .addr = myaddr,  // myself
+        .rma_iov = &rma_iov,
+        .rma_iov_count = 1,
+        .datatype = FI_INT32,
+        .op = FI_ATOMIC_READ,
+        .data = 0x0,
+        .context = &cqdata->ctx,
+    };
+    int it = 0;
+    while (sig->res < threshold) {
+        // issue a fi_fetch
+        m_verb("issuing an atomic number %d, res = %d", it, mem->ofi.sync.rtr.res);
+        m_ofi_call_again(
+            fi_fetch_atomicmsg(ep, &msg, &res_iov, &sig->res_mr.desc, 1, FI_TRANSMIT_COMPLETE),
+            progress);
+        m_countr_fetch_add(&sig->read_cqdata.rqst.busy, 1);
+        // count the number of issued atomics
+        it++;
+        // wait for completion of the atomic
+        while (!m_countr_load(&sig->read_cqdata.rqst.busy)) {
+            ofi_progress(progress);
+        }
+        m_verb("atomics has completed, res = %d", mem->ofi.sync.rtr.res);
+    }
+    sig->res = 0;
+    return m_success;
+}
+
 // end of file

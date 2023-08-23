@@ -41,38 +41,12 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     // register the signal then
     if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
         m_verb("registering the signal memory");
-        mem->ofi.signal.val = malloc(sizeof(uint32_t));
-        mem->ofi.signal.inc = malloc(sizeof(uint32_t));
-        mem->ofi.signal.val[0] = 0;
-        mem->ofi.signal.inc[0] = 1;
-        m_rmem_call(ofi_util_mr_reg(mem->ofi.signal.val, sizeof(uint32_t),
-                                    FI_REMOTE_READ | FI_REMOTE_WRITE, comm, &mem->ofi.signal.mr,
-                                    NULL, &mem->ofi.signal.base_list));
-        m_rmem_call(ofi_util_mr_reg(mem->ofi.signal.inc, sizeof(uint32_t), FI_READ | FI_WRITE, comm,
-                                    &mem->ofi.signal.mr_local, &mem->ofi.signal.desc_local, NULL));
-        // create the remote signal
-        struct fi_cntr_attr sig_cntr_attr = {
-            .events = FI_CNTR_EVENTS_COMP,
-            .wait_obj = FI_WAIT_UNSPEC,
-        };
-        m_ofi_call(fi_cntr_open(comm->domain, &sig_cntr_attr, &mem->ofi.signal.scntr, NULL));
-        m_ofi_call(fi_cntr_set(mem->ofi.signal.scntr, 0));
+        m_rmem_call(ofi_util_sig_reg(&mem->ofi.signal, comm));
     }
     //----------------------------------------------------------------------------------------------
     // the sync data needed for the Post-start atomic protocol
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
-        mem->ofi.sync.rtr.val = 0;
-        mem->ofi.sync.rtr.res = 0;
-        mem->ofi.sync.rtr.inc = 1;
-        m_rmem_call(ofi_util_mr_reg(
-            &mem->ofi.sync.rtr.val, sizeof(uint32_t), FI_REMOTE_READ | FI_REMOTE_WRITE, comm,
-            &mem->ofi.sync.rtr.val_mr.mr, NULL, &mem->ofi.sync.rtr.val_mr.base_list));
-        m_rmem_call(ofi_util_mr_reg(&mem->ofi.sync.rtr.inc, sizeof(uint32_t), FI_READ | FI_WRITE,
-                                    comm, &mem->ofi.sync.rtr.inc_mr.mr,
-                                    &mem->ofi.sync.rtr.inc_mr.desc, NULL));
-        m_rmem_call(ofi_util_mr_reg(&mem->ofi.sync.rtr.res, sizeof(uint32_t), FI_READ | FI_WRITE,
-                                    comm, &mem->ofi.sync.rtr.res_mr.mr,
-                                    &mem->ofi.sync.rtr.res_mr.desc, NULL));
+        m_rmem_call(ofi_util_sig_reg(&mem->ofi.sync.rtr, comm));
     }
     //---------------------------------------------------------------------------------------------
     // open shared completion and remote counter
@@ -162,15 +136,11 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
                 m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.mr.mr, NULL, comm));
             }
             if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
-                m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.signal.mr_local, NULL, comm));
-                m_rmem_call(
-                    ofi_util_mr_bind(trx[i].ep, mem->ofi.signal.mr, mem->ofi.signal.scntr, comm));
+                m_rmem_call(ofi_util_sig_bind(&mem->ofi.signal, trx[i].ep, comm));
             }
         }
         if (is_sync && comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
-            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.sync.rtr.inc_mr.mr, NULL, comm));
-            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.sync.rtr.val_mr.mr, NULL, comm));
-            m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.sync.rtr.res_mr.mr, NULL, comm));
+            m_rmem_call(ofi_util_sig_bind(&mem->ofi.sync.rtr, trx[i].ep, comm));
         }
         // is not MR_ENDPOINT, first bind and then enable the EP
         if (!(comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT)) {
@@ -192,14 +162,10 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     // first the user region's key
     m_rmem_call(ofi_util_mr_enable(mem->ofi.mr.mr, comm, &mem->ofi.mr.key_list));
     if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
-        m_rmem_call(ofi_util_mr_enable(mem->ofi.signal.mr, comm, &mem->ofi.signal.key_list));
-        m_rmem_call(ofi_util_mr_enable(mem->ofi.signal.mr_local, comm, NULL));
+        ofi_util_sig_enable(&mem->ofi.signal, comm);
     }
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
-        m_rmem_call(ofi_util_mr_enable(mem->ofi.sync.rtr.val_mr.mr, comm,
-                                       &mem->ofi.sync.rtr.val_mr.key_list));
-        m_rmem_call(ofi_util_mr_enable(mem->ofi.sync.rtr.inc_mr.mr, comm, NULL));
-        m_rmem_call(ofi_util_mr_enable(mem->ofi.sync.rtr.res_mr.mr, comm, NULL));
+        ofi_util_sig_enable(&mem->ofi.sync.rtr, comm);
     }
 
     //---------------------------------------------------------------------------------------------
@@ -236,21 +202,13 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_rmem_call(ofi_util_mr_close(mem->ofi.mr.mr));
     free(mem->ofi.mr.key_list);
     free(mem->ofi.mr.base_list);
+
+    // close the signals
     if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
-        m_rmem_call(ofi_util_mr_close(mem->ofi.signal.mr));
-        m_rmem_call(ofi_util_mr_close(mem->ofi.signal.mr_local));
-        m_ofi_call(fi_close(&mem->ofi.signal.scntr->fid));
-        free(mem->ofi.signal.key_list);
-        free(mem->ofi.signal.base_list);
-        free(mem->ofi.signal.val);
-        free(mem->ofi.signal.inc);
+        ofi_util_sig_close(&mem->ofi.signal);
     }
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
-        m_rmem_call(ofi_util_mr_close(mem->ofi.sync.rtr.val_mr.mr));
-        m_rmem_call(ofi_util_mr_close(mem->ofi.sync.rtr.inc_mr.mr));
-        m_rmem_call(ofi_util_mr_close(mem->ofi.sync.rtr.res_mr.mr));
-        free(mem->ofi.sync.rtr.val_mr.key_list);
-        free(mem->ofi.sync.rtr.val_mr.base_list);
+        ofi_util_sig_close(&mem->ofi.sync.rtr);
     }
 
     // free the Tx first, need to close them before closing the AV in the Rx
@@ -371,13 +329,13 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
             case M_OFI_SIG_ATOMIC:
                 // iovs
                 rma->ofi.sig.iov = (struct fi_ioc){
-                    .addr = mem->ofi.signal.inc,
+                    .addr = &mem->ofi.signal.inc,
                     .count = 1,
                 };
                 rma->ofi.sig.riov = (struct fi_rma_ioc){
-                    .addr = mem->ofi.signal.base_list[rma->peer] + 0,  // offset from key
+                    .addr = mem->ofi.signal.val_mr.base_list[rma->peer] + 0,  // offset from key
+                    .key = mem->ofi.signal.val_mr.key_list[rma->peer],
                     .count = 1,
-                    .key = mem->ofi.signal.key_list[rma->peer],
                 };
                 // setup cq data
                 rma->ofi.sig.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
@@ -428,7 +386,7 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
     if (rma->ofi.sig.flags) {
         struct fi_msg_atomic sigmsg = {
             .msg_iov = &rma->ofi.sig.iov,
-            .desc = &mem->ofi.signal.desc_local,
+            .desc = &mem->ofi.signal.inc_mr.desc,
             .iov_count = 1,
             .addr = rma->ofi.addr,
             .rma_iov = &rma->ofi.sig.riov,
