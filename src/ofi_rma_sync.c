@@ -335,23 +335,35 @@ int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_c
 //==================================================================================================
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("completing");
-    // send the ack
-    int ttl_data;
-    m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
+    int ttl_data = 0;
+    int ttl_sync = 0;
+    if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) {
+        // just read the number of calls to wait for and reset them to 0
+        // the other side has to wait for nothing
+        for (int i = 0; i < nrank; ++i) {
+            int issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
+            ttl_data += issued_rank;
+        }
+        ttl_sync = 0;
+    } else {
+        // send the ack if not delivery complete
+        ttl_sync = nrank;
+        m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
+    }
 
-    // get the correct threshold value
+    // get the correct threshold value depending if we have a signal or not
     uint64_t threshold;
     switch (comm->prov_mode.sig_mode) {
         case (M_OFI_SIG_NULL):
             m_assert(0, "null is not supported here");
             break;
         case (M_OFI_SIG_ATOMIC): {
-            threshold = nrank + ttl_data + m_countr_exchange(&mem->ofi.sync.isig, 0);
+            threshold = ttl_sync + ttl_data + m_countr_exchange(&mem->ofi.sync.isig, 0);
             m_verb("complete: waiting for %d syncs, %d calls and %d signals to complete", nrank,
                    ttl_data, m_countr_load(&mem->ofi.sync.isig));
         } break;
         case (M_OFI_SIG_CQ_DATA): {
-            threshold = nrank + ttl_data;
+            threshold = ttl_sync + ttl_data;
             m_verb("complete: waiting for %d syncs, %d calls (total: %llu)", nrank, ttl_data,
                    threshold);
 
@@ -359,6 +371,15 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     }
     // use complete fast to what for the threshold
     m_rmem_call(ofi_rmem_complete_fast(threshold, mem, comm));
+
+    // send the ack if delivery complete
+    if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) {
+        // as we have already used the values in icntr, it's gonna be 0.
+        // this is expected as there is no calls to wait for on the target side
+        m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
+        // make sure the ack are done
+        m_rmem_call(ofi_rmem_complete_fast(nrank, mem, comm));
+    }
     return m_success;
 }
 int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* comm) {
@@ -402,17 +423,21 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         progress.cq = mem->ofi.sync_trx->cq;
         ofi_progress(&progress);
 
-        // progress the data as well while we are at it
-        progress.cq = mem->ofi.data_trx[i].cq;
-        ofi_progress(&progress);
-
-        // update the counter to loop on the data receive trx
-        i = (i + 1) % mem->ofi.n_rx;
+        if (comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_DELIV_COMPL) {
+            // progress the data as well while we are at it
+            progress.cq = mem->ofi.data_trx[i].cq;
+            ofi_progress(&progress);
+            // update the counter to loop on the data receive trx
+            i = (i + 1) % mem->ofi.n_rx;
+        }
     }
     m_countr_fetch_add(m_rma_mepoch_cmpl(mem), -nrank);
     // TODO: this is not optimal as we add the threshold back to the atomic if needed in wait_fast
     uint64_t threshold = m_countr_exchange(m_rma_mepoch_remote(mem), 0);
+#ifndef NDEBUG
+    // sync cq must be empty now
     m_mem_check_empty_cq(mem->ofi.sync_trx->cq);
+#endif
     //----------------------------------------------------------------------------------------------
     // wait for the calls to complete
     m_verb("waitall: waiting for %llu calls to complete", threshold);
@@ -435,6 +460,11 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
     switch (comm->prov_mode.rcmpl_mode) {
         case (M_OFI_RCMPL_NULL):
             m_assert(0, "null is not supported here");
+            break;
+        case (M_OFI_RCMPL_DELIV_COMPL):
+            m_assert(ncalls == 0,
+                     "CANNOT do fast completion mechanism with non-zero (%d) calls to wait",
+                     ncalls);
             break;
         case (M_OFI_RCMPL_REMOTE_CNTR): {
             // the counter is linked to the MR so waiting on it will trigger progress
@@ -470,3 +500,5 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
 #endif
     return m_success;
 }
+
+// end of file

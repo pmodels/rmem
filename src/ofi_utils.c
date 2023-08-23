@@ -137,6 +137,8 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
                 *ofi_cap |= FI_FENCE;
                 m_assert(m_ofi_prov_has_fence(*prov_cap), "provider needs fence capabilities");
                 break;
+            case M_OFI_RCMPL_DELIV_COMPL:
+                break;
         }
     } else {
         if (m_ofi_prov_has_cq_data(*prov_cap)) {
@@ -148,7 +150,7 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
             *ofi_cap |= FI_FENCE;
             mode->rcmpl_mode = M_OFI_RCMPL_FENCE;
         } else {
-            m_assert(0, "I don't know how to handle remote completion");
+            mode->rcmpl_mode = M_OFI_RCMPL_DELIV_COMPL;
         }
     }
     //----------------------------------------------------------------------------------------------
@@ -593,7 +595,7 @@ int ofi_util_sig_wait(ofi_mem_sig_t* sig, int myrank, fi_addr_t myaddr, struct f
     int it = 0;
     while (sig->res < threshold) {
         // issue a fi_fetch
-        m_verb("issuing an atomic number %d, res = %d", it, mem->ofi.sync.rtr.res);
+        m_verb("issuing an atomic number %d, res = %d", it, sig->res);
         m_ofi_call_again(
             fi_fetch_atomicmsg(ep, &msg, &res_iov, &sig->res_mr.desc, 1, FI_TRANSMIT_COMPLETE),
             progress);
@@ -604,7 +606,7 @@ int ofi_util_sig_wait(ofi_mem_sig_t* sig, int myrank, fi_addr_t myaddr, struct f
         while (!m_countr_load(&sig->read_cqdata.rqst.busy)) {
             ofi_progress(progress);
         }
-        m_verb("atomics has completed, res = %d", mem->ofi.sync.rtr.res);
+        m_verb("atomics has completed, res = %d", sig->res);
     }
     sig->res = 0;
     return m_success;

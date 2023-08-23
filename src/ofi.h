@@ -159,6 +159,7 @@ typedef enum {
     M_OFI_RCMPL_NULL,
     M_OFI_RCMPL_FENCE,
     M_OFI_RCMPL_CQ_DATA,
+    M_OFI_RCMPL_DELIV_COMPL,
     M_OFI_RCMPL_REMOTE_CNTR,
 } ofi_rcmpl_mode_t;
 /**

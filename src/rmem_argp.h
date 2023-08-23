@@ -20,9 +20,10 @@ static char args_doc[] = "";
 
 /* The options we understand. */
 static struct argp_option options[] = {
-    {"signal", 's', "MODE", 0, "the prefered signal mechanism: atomic or cq_data",1},
+    {"signal", 's', "MODE", 0,
+        "the prefered signal mechanism: atomic or cq_data",1},
     {"remote-complete", 'c', "MODE", 0,
-     "the prefered remote completion mechanism: fence, cq_data or counter",1},
+        "the prefered remote completion mechanism: fence, cq_data, counter, or delivery",1},
     {"ready-to-receive", 'r', "MODE", 0, "the prefered ready-to-receive mechanism: atomic or msg",1},
     {0}};
 
@@ -62,6 +63,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
                 arguments->rcmpl_mode = M_OFI_RCMPL_CQ_DATA;
             } else if (0 == strcmp(arg, "counter")) {
                 arguments->rcmpl_mode = M_OFI_RCMPL_REMOTE_CNTR;
+            } else if (0 == strcmp(arg, "delivery")) {
+                arguments->rcmpl_mode = M_OFI_RCMPL_DELIV_COMPL;
             } else {
                 m_log("unknown value in remote completion argument: %s", arg);
                 argp_usage(state);

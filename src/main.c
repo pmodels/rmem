@@ -68,6 +68,9 @@ void print_info(char* foldr_name, char* prov_name, ofi_mode_t* mode) {
         case (M_OFI_RCMPL_REMOTE_CNTR):
             fprintf(file, "\t- remote completion: REMOTE COUNTER\n");
             break;
+        case (M_OFI_RCMPL_DELIV_COMPL):
+            fprintf(file, "\t- remote completion: DELIVERY COMPLETE\n");
+            break;
     };
     fprintf(file, "----------------------------------------------------------------\n");
     fclose(file);
@@ -203,7 +206,7 @@ int main(int argc, char** argv) {
             .run = &rma_fast_run_recv,
             .post = &rma_post,
         };
-        run_test(&plat_send, &plat_recv, param, &pfast_time);
+        //run_test(&plat_send, &plat_recv, param, &pfast_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT LATENCY
@@ -222,7 +225,7 @@ int main(int argc, char** argv) {
             .run = &lat_run_recv,
             .post = &rma_post,
         };
-        run_test(&plat_send, &plat_recv, param, &plat_time);
+        //run_test(&plat_send, &plat_recv, param, &plat_time);
     }
     //----------------------------------------------------------------------------------------------
     // free

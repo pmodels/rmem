@@ -270,6 +270,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
         .len = rma->count,
         .key = mem->ofi.mr.key_list[rma->peer],
     };
+    //----------------------------------------------------------------------------------------------
     // cq and progress
     // any of the cqdata entry can be used to fallback, the first one always exists
     rma->ofi.progress.cq = mem->ofi.data_trx[ctx_id].cq;
@@ -286,21 +287,36 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
             rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
         } break;
     }
+    //----------------------------------------------------------------------------------------------
     // flag
     const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
+    const bool do_delivery = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     const bool do_inject = (rma->count < comm->prov->tx_attr->inject_size) && auto_progress;
+    // force the use of delivery complete if needed
+    uint64_t flag_complete = 0x0;
+    if (do_delivery) {
+        m_verb("using FI_DELIVERY_COMPLETE");
+        flag_complete |= FI_DELIVERY_COMPLETE;
+    } else if (auto_progress) {
+        m_verb("using FI_INJECT_COMPLETE");
+        flag_complete |= FI_INJECT_COMPLETE;
+    } else {
+        m_verb("using FI_TRANSMIT_COMPLETE");
+        flag_complete |= FI_TRANSMIT_COMPLETE;
+    }
+    // fill out the falgs
     rma->ofi.msg.flags = (do_inject ? FI_INJECT : 0x0);
     switch (op) {
         case (RMA_OPT_PUT): {
-            rma->ofi.msg.flags |= (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
+            rma->ofi.msg.flags |= flag_complete;
         } break;
         case (RMA_OPT_RPUT): {
-            rma->ofi.msg.flags |= (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
+            rma->ofi.msg.flags |= flag_complete;
             rma->ofi.msg.flags |= FI_COMPLETION;
         } break;
         case (RMA_OPT_PUT_SIG): {
             if (comm->prov_mode.sig_mode == M_OFI_SIG_CQ_DATA) {
-                rma->ofi.msg.flags |= (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
+                rma->ofi.msg.flags |= flag_complete;
                 rma->ofi.msg.flags |= FI_REMOTE_CQ_DATA;
             } else if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
                 rma->ofi.msg.flags |= FI_DELIVERY_COMPLETE;
@@ -380,6 +396,7 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
            rma->ofi.msg.cq.kind & 0x0f, rma->ofi.msg.cq.kind & m_ofi_cq_inc_local, rma->ofi.ep,
            msg.data);
     m_ofi_call_again(fi_writemsg(rma->ofi.ep, &msg, flags), &rma->ofi.progress);
+    m_verb("doing it: done");
     m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
     m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
     //----------------------------------------------------------------------------------------------
@@ -396,6 +413,7 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
             .data = 0x0,  // atomics does NOT support FI_REMOTE_CQ_DATA
             .context = &rma->ofi.sig.cq.ctx,
         };
+        m_log("doing it: atomic");
         m_ofi_call_again(fi_atomicmsg(rma->ofi.ep, &sigmsg, rma->ofi.sig.flags),
                          &rma->ofi.progress);
         // if we do a signal call we need to wait for its completion BUT we don't send that
