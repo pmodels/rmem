@@ -278,9 +278,11 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     switch (op) {
         case (RMA_OPT_PUT):
         case (RMA_OPT_PUT_SIG): {
+            m_verb("using kind local and null");
             rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
         } break;
         case (RMA_OPT_RPUT): {
+            m_verb("using kind local and rqst");
             rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_rqst;
         } break;
     }
@@ -288,20 +290,23 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     // flag
     const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
     const bool do_delivery = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
-    const bool do_inject = (rma->count < comm->prov->tx_attr->inject_size) && auto_progress;
+    const bool do_inject =
+        (rma->count < comm->prov->tx_attr->inject_size) && auto_progress && (!do_delivery);
     // force the use of delivery complete if needed
     uint64_t flag_complete = 0x0;
     if (do_delivery) {
-        m_verb("using FI_DELIVERY_COMPLETE");
         flag_complete |= FI_DELIVERY_COMPLETE;
+        m_assert(!do_inject, "we cannot inject at the same time");
+        m_verb("using FI_DELIVERY_COMPLETE");
     } else if (auto_progress) {
-        m_verb("using FI_INJECT_COMPLETE");
         flag_complete |= FI_INJECT_COMPLETE;
+        m_verb("using FI_INJECT_COMPLETE");
     } else {
-        m_verb("using FI_TRANSMIT_COMPLETE");
         flag_complete |= FI_TRANSMIT_COMPLETE;
+        m_assert(!do_inject, "we cannot inject at the same time");
+        m_verb("using FI_TRANSMIT_COMPLETE");
     }
-    // fill out the falgs
+    // fill out the flags
     rma->ofi.msg.flags = (do_inject ? FI_INJECT : 0x0);
     switch (op) {
         case (RMA_OPT_PUT): {
@@ -353,8 +358,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
                 // setup cq data
                 rma->ofi.sig.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
                 // flag
-                rma->ofi.sig.flags = FI_FENCE | (do_inject ? FI_INJECT : 0x0) |
-                                     (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
+                rma->ofi.sig.flags = FI_FENCE | (do_inject ? FI_INJECT : 0x0) | flag_complete;
                 break;
         };
     } else {
@@ -430,6 +434,7 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
         m_countr_fetch_add(&rma->ofi.msg.cq.rqst.busy, -1);
     }
     //----------------------------------------------------------------------------------------------
+    m_verb("done");
     return m_success;
 }
 int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {

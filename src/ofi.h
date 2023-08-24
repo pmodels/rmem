@@ -19,31 +19,21 @@
 #include "rmem.h"
 
 
-// #define M_SYNC_ATOMIC 1
-//
-// #ifndef NO_RMA_EVENT
-// #define M_SYNC_RMA_EVENT 1
-// #else
-// #define M_SYNC_RMA_EVENT 0
-// #endif
-//
-// #ifndef NO_WRITE_DATA
-// #define M_WRITE_DATA 1
-// #else
-// #define M_WRITE_DATA 0
-// #endif
-
-// static_assert(!(!M_WRITE_DATA && !M_SYNC_RMA_EVENT),
-//               "no RMA events and no write data is not supported. Pls review compilation flags "
-//               "`-DNO_RMA_EVENT` and `-DNO_WRITE_DATA`");
-
-// #if (!M_SYNC_RMA_EVENT || M_WRITE_DATA)
 #define OFI_CQ_FORMAT FI_CQ_FORMAT_DATA
 typedef struct fi_cq_data_entry ofi_cq_entry;
-// #else
-// #define OFI_CQ_FORMAT FI_CQ_FORMAT_CONTEXT
-// typedef struct fi_cq_entry ofi_cq_entry;
-// #endif
+
+//--------------------------------------------------------------------------------------------------
+#ifndef USE_MR_LOCAL
+#define M_FORCE_MR_LOCAL 0
+#else
+#define M_FORCE_MR_LOCAL 1
+#endif
+
+#ifndef USE_ASYNC_PROGRESS
+#define M_FORCE_ASYNC_PROGRESS 0
+#else
+#define M_FORCE_ASYNC_PROGRESS 1
+#endif
 
 //--------------------------------------------------------------------------------------------------
 

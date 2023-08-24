@@ -62,7 +62,11 @@ static int ofi_prov_score(char* provname, ofi_cap_t* caps) {
         return 3;
     } else if (0 == strcmp(provname, "verbs;ofi_rxm")) {
         if (caps) {
-            *caps = M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA;
+            *caps = M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA
+#if (!M_FORCE_MR_LOCAL)
+                    | M_OFI_PROV_HAS_ATOMIC
+#endif
+                ;
         }
         return 2;
     } else if (0 == strcmp(provname, "psm3")) {
@@ -77,7 +81,11 @@ static int ofi_prov_score(char* provname, ofi_cap_t* caps) {
         return 1;
     } else if (0 == strcmp(provname, "tcp;ofi_rxm")) {
         if (caps) {
-            *caps = M_OFI_PROV_HAS_CQ_DATA;
+            *caps = M_OFI_PROV_HAS_CQ_DATA
+#if (!M_FORCE_MR_LOCAL)
+                    | M_OFI_PROV_HAS_ATOMIC
+#endif
+                ;
         }
         return 1;
     } else if (0 == strcmp(provname, "tcp")) {
@@ -228,7 +236,9 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     // MR endpoint is supported
     hints->domain_attr->mr_mode |= FI_MR_ENDPOINT;
     // optional:
+#if (M_FORCE_MR_LOCAL)
     hints->domain_attr->mr_mode |= FI_MR_LOCAL;
+#endif
     hints->domain_attr->mr_mode |= FI_MR_PROV_KEY;
     hints->domain_attr->mr_mode |= FI_MR_ALLOCATED;
     hints->domain_attr->mr_mode |= FI_MR_VIRT_ADDR;
@@ -247,8 +257,10 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     m_ofi_test_info(hints, domain_attr->resource_mgmt, FI_RM_ENABLED);
     // m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
     // request manual progress (comment when using sockets on MacOs)
+#if (M_FORCE_ASYNC_PROGRESS)
     m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
     m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
+#endif
     // no order required
     m_ofi_test_info(hints, tx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);

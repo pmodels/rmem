@@ -359,12 +359,12 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
             break;
         case (M_OFI_SIG_ATOMIC): {
             threshold = ttl_sync + ttl_data + m_countr_exchange(&mem->ofi.sync.isig, 0);
-            m_verb("complete: waiting for %d syncs, %d calls and %d signals to complete", nrank,
+            m_verb("complete: waiting for %d syncs, %d calls and %d signals to complete", ttl_sync,
                    ttl_data, m_countr_load(&mem->ofi.sync.isig));
         } break;
         case (M_OFI_SIG_CQ_DATA): {
             threshold = ttl_sync + ttl_data;
-            m_verb("complete: waiting for %d syncs, %d calls (total: %llu)", nrank, ttl_data,
+            m_verb("complete: waiting for %d syncs, %d calls (total: %llu)", ttl_sync, ttl_data,
                    threshold);
 
         } break;
@@ -383,7 +383,8 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     return m_success;
 }
 int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* comm) {
-    m_verb("completing-fast: %d calls", threshold);
+    m_verb("completing-fast: %d calls, already done: %d", threshold,
+           m_countr_load(m_rma_mepoch_local(mem)));
     //----------------------------------------------------------------------------------------------
     // rma calls generate cq entries so they need to be processed, we loop on the data_trx only
     ofi_progress_t progress = {
@@ -423,13 +424,12 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         progress.cq = mem->ofi.sync_trx->cq;
         ofi_progress(&progress);
 
-        if (comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_DELIV_COMPL) {
-            // progress the data as well while we are at it
-            progress.cq = mem->ofi.data_trx[i].cq;
-            ofi_progress(&progress);
-            // update the counter to loop on the data receive trx
-            i = (i + 1) % mem->ofi.n_rx;
-        }
+        // progress the data as well while we are at it
+        // even if we do RDMA, a software ack might be needed in the case of delivery complete
+        progress.cq = mem->ofi.data_trx[i].cq;
+        ofi_progress(&progress);
+        // update the counter to loop on the data receive trx
+        i = (i + 1) % mem->ofi.n_rx;
     }
     m_countr_fetch_add(m_rma_mepoch_cmpl(mem), -nrank);
     // TODO: this is not optimal as we add the threshold back to the atomic if needed in wait_fast
