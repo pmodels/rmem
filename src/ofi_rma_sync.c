@@ -286,23 +286,6 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
                                                mem->ofi.sync_trx->addr[comm->rank],
                                                mem->ofi.sync_trx->ep, &progress, nrank));
             mem->ofi.sync.rtr.val = 0;
-            // read the current value
-            // int it = 0;
-            // int cntr_cur = m_countr_load(m_rma_mepoch_local(mem));
-            // while (mem->ofi.sync.rtr.res < nrank) {
-            //     // issue a fi_fetch
-            //     m_verb("issuing an atomic number %d, res = %d", it, mem->ofi.sync.rtr.res);
-            //     m_rmem_call(ofi_rmem_start_fiatomic(nrank, rank, mem, comm));
-            //     // count the number of issued atomics
-            //     it++;
-            //     // wait for completion of the atomic
-            //     while (m_countr_load(m_rma_mepoch_local(mem)) < (cntr_cur + it)) {
-            //         ofi_progress(&progress);
-            //     }
-            //     m_verb("atomics has completed, res = %d", mem->ofi.sync.rtr.res);
-            // }
-            // m_countr_fetch_add(m_rma_mepoch_local(mem), -it);
-            // reset for next time
         } break;
         case (M_OFI_RTR_TMSG): {
             // post the recvs

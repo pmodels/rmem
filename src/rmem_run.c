@@ -84,8 +84,8 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                     // get the CI + the retry
                     double tavg, ci;
                     rmem_get_ci(n_measure, time, &tavg, &ci);
-                    m_verb("msg = %ld B: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d",msg_size, tavg, ci,
-                           ci / tavg, retry_threshold, *retry_ptr, retry_max);
+                    m_verb("msg = %ld B: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d",
+                           msg_size, tavg, ci, ci / tavg, retry_threshold, *retry_ptr, retry_max);
                     // store the results
                     m_assert(idx < ttl_sample, "ohoh: id = %d, ttl_sample = %ld", idx, ttl_sample);
                     timings->avg[idx] = tavg;
@@ -104,6 +104,7 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
             }
         }
     }
+    m_rmem_call(ofi_p2p_free(&p2p_retry));
     free(retry_ptr);
 }
 //==================================================================================================
