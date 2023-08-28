@@ -5,8 +5,10 @@
 //==================================================================================================
 int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("posting");
-    // prepost the recv for the wait
-    m_rmem_call(ofi_rmem_wait_fitrecv(nrank, rank, mem, comm));
+    // prepost the recv for the wait only if doing tagged msg for DTC
+    if (comm->prov_mode.dtc_mode == M_OFI_DTC_TAGGED) {
+        m_rmem_call(ofi_rmem_wait_fitrecv(nrank, rank, mem, comm));
+    }
     m_rmem_call(ofi_rmem_post_fast(nrank, rank, mem, comm));
     m_verb("posted");
     return m_success;
@@ -125,7 +127,17 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     } else {
         // send the ack if not delivery complete
         ttl_sync = nrank;
-        m_rmem_call(ofi_rmem_complete_fitsend(nrank, rank, mem, comm, &ttl_data));
+        switch (comm->prov_mode.dtc_mode) {
+            case (M_OFI_DTC_NULL):
+                m_assert(0, "should not be NULL here");
+                break;
+            case (M_OFI_DTC_TAGGED):
+                m_rmem_call(ofi_rmem_complete_fitsend(nrank, rank, mem, comm, &ttl_data));
+                break;
+            case (M_OFI_DTC_MSG):
+                m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
+                break;
+        };
     }
 
     // get the correct threshold value depending if we have a signal or not
@@ -153,7 +165,17 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) {
         // as we have already used the values in icntr, it's gonna be 0.
         // this is expected as there is no calls to wait for on the target side
-        m_rmem_call(ofi_rmem_complete_fitsend(nrank, rank, mem, comm, &ttl_data));
+        switch (comm->prov_mode.dtc_mode) {
+            case (M_OFI_DTC_NULL):
+                m_assert(0, "should not be NULL here");
+                break;
+            case (M_OFI_DTC_TAGGED):
+                m_rmem_call(ofi_rmem_complete_fitsend(nrank, rank, mem, comm, &ttl_data));
+                break;
+            case (M_OFI_DTC_MSG):
+                m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
+                break;
+        };
         // make sure the ack are done
         m_rmem_call(ofi_rmem_complete_fast(nrank, mem, comm));
     }

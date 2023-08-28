@@ -109,6 +109,7 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
                 m_assert(0, "null is not supported here");
                 break;
             case M_OFI_RTR_MSG:
+                *ofi_cap |= FI_MSG;
                 break;
             case M_OFI_RTR_ATOMIC:
                 *ofi_cap |= FI_ATOMIC;
@@ -120,16 +121,9 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
                 break;
         }
     } else {
-        if (m_ofi_prov_has_atomic(*prov_cap)) {
-            *ofi_cap |= FI_ATOMIC;
-            mode->rtr_mode = M_OFI_RTR_ATOMIC;
-            m_verb("PROV MODE - RTR: doing atomics");
-        } else {
-            // *ofi_cap |= FI_TAGGED;
-            // mode->rtr_mode = M_OFI_RTR_TAGGED;
-            m_verb("PROV MODE - RTR: doing msgs");
-            mode->rtr_mode = M_OFI_RTR_MSG;
-        }
+        *ofi_cap |= FI_MSG;
+        mode->rtr_mode = M_OFI_RTR_MSG;
+        m_verb("PROV MODE - RTR: doing msgs");
     }
     //----------------------------------------------------------------------------------------------
     // [2] remote completion
@@ -197,6 +191,25 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
         } else {
             m_assert(0, "unable to use signals");
         }
+    }
+    //----------------------------------------------------------------------------------------------
+    // [4] down-to-close
+    if (mode->dtc_mode) {
+        switch (mode->dtc_mode) {
+            case (M_OFI_RTR_NULL):
+                m_assert(0, "null is not supported here");
+                break;
+            case M_OFI_RTR_MSG:
+                *ofi_cap |= FI_MSG;
+                break;
+            case M_OFI_RTR_TAGGED:
+                *ofi_cap |= FI_TAGGED;
+                break;
+        }
+    } else {
+        *ofi_cap |= FI_MSG;
+        mode->dtc_mode = M_OFI_DTC_MSG;
+        m_verb("PROV MODE - DTC: doing msgs");
     }
     return m_success;
 }

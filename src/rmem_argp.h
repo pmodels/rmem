@@ -24,6 +24,7 @@ static struct argp_option options[] = {
     {"remote-complete", 'c', "MODE", 0,
      "remote completion mechanism: fence, cq_data, counter, or delivery", 1},
     {"ready-to-receive", 'r', "MODE", 0, "ready-to-receive mechanism: atomic, tag or am", 1},
+    {"down-to-close", 'd', "MODE", 0, "down-to-close mechanism: tag or am", 1},
     {0}};
 
 // /* Used by main to communicate with parse_opt. */
@@ -80,6 +81,18 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
                 arguments->rtr_mode = M_OFI_RTR_MSG;
             } else {
                 m_log("unknown value in ready-to-receive argument: %s", arg);
+                argp_usage(state);
+            }
+            break;
+        //------------------------------------------------------------------------------------------
+        // down to close
+        case 'd':
+            if (0 == strcmp(arg, "am")) {
+                arguments->dtc_mode = M_OFI_DTC_MSG;
+            } else if (0 == strcmp(arg, "tag")) {
+                arguments->dtc_mode = M_OFI_DTC_TAGGED;
+            } else {
+                m_log("unknown value in down-to-close argument: %s", arg);
                 argp_usage(state);
             }
             break;

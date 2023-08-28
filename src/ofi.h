@@ -21,8 +21,8 @@
 #define m_ofi_cq_entries  16
 #define m_ofi_am_max_size 64
 #define m_ofi_am_buf_num  2
-#define m_ofi_am_buf_size (1 * m_ofi_am_max_size)
-//#define m_ofi_am_buf_size (m_ofi_cq_entries * m_ofi_am_max_size)
+// #define m_ofi_am_buf_size (1 * m_ofi_am_max_size)
+#define m_ofi_am_buf_size (m_ofi_cq_entries * m_ofi_am_max_size)
 
 #define OFI_CQ_FORMAT     FI_CQ_FORMAT_DATA
 typedef struct fi_cq_data_entry ofi_cq_entry;
@@ -190,6 +190,7 @@ typedef enum {
  */
 typedef struct {
     ofi_rtr_mode_t rtr_mode;
+    ofi_dtc_mode_t dtc_mode;
     ofi_sig_mode_t sig_mode;
     ofi_rcmpl_mode_t rcmpl_mode;
 } ofi_mode_t;
