@@ -51,7 +51,10 @@ void print_info(char* foldr_name, char* prov_name, ofi_mode_t* mode) {
         case (M_OFI_RTR_ATOMIC):
             fprintf(file, "\t- ready-to-receive: ATOMIC\n");
             break;
-        case (M_OFI_RTR_TMSG):
+        case (M_OFI_RTR_MSG):
+            fprintf(file, "\t- ready-to-receive: MSG\n");
+            break;
+        case (M_OFI_RTR_TAGGED):
             fprintf(file, "\t- ready-to-receive: TAGGED MSG\n");
             break;
     };

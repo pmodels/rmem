@@ -5,8 +5,7 @@ int ofi_rmem_sig_wait(const uint32_t val, ofi_rmem_t* mem, ofi_comm_t* comm) {
     int i = 0;
     ofi_progress_t progress = {
         .cq = NULL,
-        // any cqdata will work, they all refer to the same epoch array
-        .fallback_ctx = &mem->ofi.sync.cqdata_cw->ctx,
+        .xctx.epoch_ptr = mem->ofi.sync.epch,
     };
     switch (comm->prov_mode.sig_mode) {
         case M_OFI_SIG_NULL:

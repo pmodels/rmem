@@ -53,6 +53,7 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                 .mem = param.mem,
                 .n_msg = imsg,
             };
+            m_verb("memory -----------------");
             PMI_Barrier();
             if (is_sender(comm->rank)) {
                 //---------------------------------------------------------------------------------

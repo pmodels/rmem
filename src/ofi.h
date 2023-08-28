@@ -18,8 +18,13 @@
 #include "rdma/fi_atomic.h"
 #include "rmem.h"
 
+#define m_ofi_cq_entries  16
+#define m_ofi_am_max_size 64
+#define m_ofi_am_buf_num  2
+#define m_ofi_am_buf_size (1 * m_ofi_am_max_size)
+//#define m_ofi_am_buf_size (m_ofi_cq_entries * m_ofi_am_max_size)
 
-#define OFI_CQ_FORMAT FI_CQ_FORMAT_DATA
+#define OFI_CQ_FORMAT     FI_CQ_FORMAT_DATA
 typedef struct fi_cq_data_entry ofi_cq_entry;
 
 //--------------------------------------------------------------------------------------------------
@@ -36,6 +41,8 @@ typedef struct fi_cq_data_entry ofi_cq_entry;
 #endif
 
 //--------------------------------------------------------------------------------------------------
+#define likely(x_)   __builtin_expect(!!(x_),1)
+#define unlikely(x_) __builtin_expect(!!(x_),0)
 
 //--------------------------------------------------------------------------------------------------
 #define m_ofi_call_again(func, progress)                                                  \
@@ -140,6 +147,7 @@ static inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 #define m_ofi_cq_kind_null (0x01)  // 0000 0001
 #define m_ofi_cq_kind_sync (0x02)  // 0000 0010
 #define m_ofi_cq_kind_rqst (0x04)  // 0000 0100
+#define m_ofi_cq_kind_am   (0x08)  // 0000 1000
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -153,13 +161,22 @@ typedef enum {
     M_OFI_RCMPL_REMOTE_CNTR,
 } ofi_rcmpl_mode_t;
 /**
- * @brief define ready-to-receive mode for RMA (post-start sync = exposure epoch)
+ * @brief define ready-to-receive mode for RMA (post-start sync)
  */
 typedef enum {
     M_OFI_RTR_NULL,
-    M_OFI_RTR_TMSG,
+    M_OFI_RTR_MSG,
+    M_OFI_RTR_TAGGED,
     M_OFI_RTR_ATOMIC,
 } ofi_rtr_mode_t;
+/**
+ * @brief define down-to-close mode for RMA (complete-wait sync)
+ */
+typedef enum {
+    M_OFI_DTC_NULL,
+    M_OFI_DTC_MSG,
+    M_OFI_DTC_TAGGED,
+} ofi_dtc_mode_t;
 /**
  * @brief define signal mode for RMA
  */
@@ -226,6 +243,14 @@ typedef struct {
 } ofi_remote_mr_t;
 
 /**
+ * @brief ofi active message buffer
+ */
+typedef struct {
+    void* buf;
+    ofi_local_mr_t mr;
+} ofi_am_buf_t;
+
+/**
  * @brief data-structure used in the cq when an operation has completed
  *
  * The cq entry will return the address to the context.
@@ -242,13 +267,26 @@ typedef struct {
             countr_t busy;  //!< completed if 0
         } rqst;             //!< kind == m_ofi_cq_kind_rqst
         struct {
-            // array of epochs
-            countr_t* epoch_ptr;  //!< array of counters, typically epochs
             uint64_t data;        //!< actual buffer memory
             ofi_local_mr_t mr;    //!< local memory registration
         } sync;                   // kind == m_ofi_cq_kind_sync
+        struct {
+            ofi_am_buf_t* buf;
+            struct fid_ep* srx;
+        } am;
     };
+    // array of epochs
+    countr_t* epoch_ptr;  //!< array of epochs needed when m_ofi_cq_kind_local is added to the kind
+                          //!< argument (compatible with every other kind of request)
 } ofi_cqdata_t;
+
+/**
+ * @brief special context, used in the cq when we have to handle special operations:
+ * - cq data is received: no ctx is available
+ */
+typedef struct {
+    countr_t* epoch_ptr;
+} ofi_special_cq_t;
 
 /**
  * @brief used to read the ofi_cq entry
@@ -256,11 +294,12 @@ typedef struct {
  */
 typedef struct {
     struct fid_cq* cq;  //!< cq to progress
-    /**
-     * @brief fallback context pointer, used if the ctx received is NULL, aka the entry is a
-     * REMOTE_CQ_DATA. Value cannot be null if used explicitely to progress
-     */
-    void* fallback_ctx;
+    // /**
+    //  * @brief fallback context pointer, used if the ctx received is NULL, aka the entry is a
+    //  * REMOTE_CQ_DATA. Value cannot be null if used explicitely to progress
+    //  */
+    // // void* fallback_ctx;
+    ofi_special_cq_t xctx; //!< special context pointer, used for special treatment
 } ofi_progress_t;
 
 typedef enum {
@@ -313,19 +352,8 @@ typedef struct {
     ofi_local_mr_t res_mr;
     ofi_remote_mr_t val_mr;
     ofi_cqdata_t read_cqdata; //!< cqdata used to read the value
-    // // signal counter - must be allocated to comply with FI_MR_ALLOCATE
-    // uint32_t* inc;  // increment value, always 1
-    // uint32_t* val;  // actual counter value
-    // // mr for MR_LOCAL
-    // void* desc_local;
-    // struct fid_mr* mr_local;
-    // // structs for fi_atomics
-    // uint64_t* base_list;  // list of base addresses
-    // uint64_t* key_list;   // list of remote keys
-    // struct fid_mr* mr;
-    // // remote counters for the signal, always available per the static assert above
-    // struct fid_cntr* scntr;
 } ofi_mem_sig_t;
+
 
 #define m_rma_epoch_post(e)    (e + 0)                 // posted
 #define m_rma_epoch_cmpl(e)    (e + 1)                 // completed
@@ -344,15 +372,24 @@ typedef struct {
  *
  * Note:
  * - we need different cqdata_t for PS and CW to be able to prepost the CW handshake
+ * - the cqdata_ps and cqdata_cw are used mostly to issue messages. only when using tagged messages,
+ * they are used to receive them as well. This can be an issue if the "post" step has not completed
+ * before the "start" step if a process has to do them both
  */
 typedef struct {
-    ofi_mem_sig_t rtr;       //!< remote memory signal used
-    ofi_cqdata_t* cqdata_ps;  //!< completion data for each rank Post-Start
-    ofi_cqdata_t* cqdata_cw;  //!< completion data for each rank Complete-Wait
-
-    countr_t isig;  //!< number of issued rma calls (for local completion)
     countr_t epch[m_rma_n_epoch];
     countr_t* icntr;  //!< array of fi_write counter (for each rank)
+    union {
+        struct {};             //!< tagged messaging sync
+        ofi_mem_sig_t ps_sig;  //!< atomic sync
+        struct {
+            ofi_am_buf_t* buf;     //!< active messaging buffer
+            ofi_cqdata_t* cqdata;  //!< completion data for the FI_MULTI_RECV
+        } am;
+    };
+    ofi_cqdata_t* cqdata_ps;  //!< completion data for each rank Post-Start
+    ofi_cqdata_t* cqdata_cw;  //!< completion data for each rank Complete-Wait
+    countr_t isig;            //!< number of issued signal calls (for local completion)
 } ofi_rma_sync_t;
 
 typedef struct {

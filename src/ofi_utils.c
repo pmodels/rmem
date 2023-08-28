@@ -108,12 +108,14 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
             case (M_OFI_RTR_NULL):
                 m_assert(0, "null is not supported here");
                 break;
+            case M_OFI_RTR_MSG:
+                break;
             case M_OFI_RTR_ATOMIC:
                 *ofi_cap |= FI_ATOMIC;
                 m_log("choosing atomics, available? %d",m_ofi_prov_has_atomic(*prov_cap));
                 m_assert(m_ofi_prov_has_atomic(*prov_cap), "provider needs atomics capabilities");
                 break;
-            case M_OFI_RTR_TMSG:
+            case M_OFI_RTR_TAGGED:
                 *ofi_cap |= FI_TAGGED;
                 break;
         }
@@ -121,9 +123,12 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
         if (m_ofi_prov_has_atomic(*prov_cap)) {
             *ofi_cap |= FI_ATOMIC;
             mode->rtr_mode = M_OFI_RTR_ATOMIC;
+            m_verb("PROV MODE - RTR: doing atomics");
         } else {
-            *ofi_cap |= FI_TAGGED;
-            mode->rtr_mode = M_OFI_RTR_TMSG;
+            // *ofi_cap |= FI_TAGGED;
+            // mode->rtr_mode = M_OFI_RTR_TAGGED;
+            m_verb("PROV MODE - RTR: doing msgs");
+            mode->rtr_mode = M_OFI_RTR_MSG;
         }
     }
     //----------------------------------------------------------------------------------------------
@@ -150,14 +155,18 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
         }
     } else {
         if (m_ofi_prov_has_cq_data(*prov_cap)) {
+            m_verb("PROV MODE - RCMPL: doing cq data");
             mode->rcmpl_mode = M_OFI_RCMPL_CQ_DATA;
         } else if (m_ofi_prov_has_rma_event(*prov_cap)) {
             *ofi_cap |= FI_RMA_EVENT;
+            m_verb("PROV MODE - RCMPL: doing remote counter");
             mode->rcmpl_mode = M_OFI_RCMPL_REMOTE_CNTR;
         } else if (m_ofi_prov_has_fence(*prov_cap)) {
+            m_verb("PROV MODE - RCMPL: doing fence");
             *ofi_cap |= FI_FENCE;
             mode->rcmpl_mode = M_OFI_RCMPL_FENCE;
         } else {
+            m_verb("PROV MODE - RCMPL: doing delivery complete");
             mode->rcmpl_mode = M_OFI_RCMPL_DELIV_COMPL;
         }
     }
@@ -179,8 +188,10 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
         }
     } else {
         if (m_ofi_prov_has_cq_data(*prov_cap)) {
+            m_verb("PROV MODE - SIG: doing cq data");
             mode->sig_mode = M_OFI_SIG_CQ_DATA;
         } else if (m_ofi_prov_has_atomic(*prov_cap) && m_ofi_prov_has_fence(*prov_cap)) {
+            m_verb("PROV MODE - SIG: doing atomic + fence");
             *ofi_cap |= FI_ATOMIC | FI_FENCE;
             mode->sig_mode = M_OFI_SIG_ATOMIC;
         } else {
@@ -273,6 +284,7 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_RX_CQ_DATA");
     m_assert(!((*prov)->mode & FI_ASYNC_IOV), "need to use FI_ASYNC_IOV");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_RAW), "need to use FI_MR_RAW");
+    (*prov)->domain_attr->mr_mode |= FI_MR_LOCAL;
 
     // improsing the modes must happen on (*prov), otherwise it's overwritten when done in hints
     m_verb("%s: is FI_MR_LOCAL required? %d", (*prov)->fabric_attr->prov_name,
@@ -418,6 +430,9 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     // don't register if mr_mode is not MR_LOCAL
     useless |= access & (FI_READ | FI_WRITE | FI_SEND | FI_RECV) &&
                !(comm->prov->domain_attr->mr_mode & FI_MR_LOCAL);
+    m_verb("registering %p (count = %lu): access is right?%llu MR_LOCAL? %d", buf, count,
+           access & (FI_READ | FI_WRITE | FI_SEND | FI_RECV),
+           comm->prov->domain_attr->mr_mode & FI_MR_LOCAL);
     // if it's useless, return
     if (useless) {
         m_verb("memory regitration is useless, skip it");
@@ -530,6 +545,7 @@ int ofi_util_mr_enable(struct fid_mr* mr, ofi_comm_t* comm, uint64_t** key_list)
 
 int ofi_util_mr_close(struct fid_mr* mr){
     if(mr){
+        m_verb("closing memory");
         m_ofi_call(fi_close(&mr->fid));
     }
     return m_success;

@@ -20,11 +20,10 @@ static char args_doc[] = "";
 
 /* The options we understand. */
 static struct argp_option options[] = {
-    {"signal", 's', "MODE", 0,
-        "the prefered signal mechanism: atomic or cq_data",1},
+    {"signal", 's', "MODE", 0, "signal mechanism: atomic or cq_data", 1},
     {"remote-complete", 'c', "MODE", 0,
-        "the prefered remote completion mechanism: fence, cq_data, counter, or delivery",1},
-    {"ready-to-receive", 'r', "MODE", 0, "the prefered ready-to-receive mechanism: atomic or msg",1},
+     "remote completion mechanism: fence, cq_data, counter, or delivery", 1},
+    {"ready-to-receive", 'r', "MODE", 0, "ready-to-receive mechanism: atomic, tag or am", 1},
     {0}};
 
 // /* Used by main to communicate with parse_opt. */
@@ -73,10 +72,12 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         //------------------------------------------------------------------------------------------
         // ready to receive
         case 'r':
-            if (0 == strcmp(arg, "msg")) {
-                arguments->rtr_mode = M_OFI_RTR_TMSG;
+            if (0 == strcmp(arg, "tag")) {
+                arguments->rtr_mode = M_OFI_RTR_TAGGED;
             } else if (0 == strcmp(arg, "atomic")) {
                 arguments->rtr_mode = M_OFI_RTR_ATOMIC;
+            } else if (0 == strcmp(arg, "am")) {
+                arguments->rtr_mode = M_OFI_RTR_MSG;
             } else {
                 m_log("unknown value in ready-to-receive argument: %s", arg);
                 argp_usage(state);
