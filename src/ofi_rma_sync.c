@@ -3,6 +3,13 @@
 #include "ofi_rma_sync_tools.h"
 
 //==================================================================================================
+/**
+ * @brief post open memory to the rank indicated in the list. This function sends the "Ready to
+ * Receive" ack to the origin side
+ *
+ * note:
+ * - if using tagged msgs for the "Down to Close" ack, the buffers are pre-posted
+ */
 int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("posting");
     // prepost the recv for the wait only if doing tagged msg for DTC
@@ -13,7 +20,10 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     m_verb("posted");
     return m_success;
 }
-// notify the processes in comm of memory exposure epoch
+/**
+ * @brief post fast: open memory to the rank indicated in the list when using fast completion
+ * mechanism (detailed in ofi_rmem_complete and ofi_rmem_wait).
+ */
 int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
 #ifndef NDEBUG
     // cq must be empty now unless we do AM
@@ -32,6 +42,7 @@ int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_co
             break;
         case (M_OFI_RTR_MSG):
             m_rmem_call(ofi_rmem_post_fisend(nrank, rank, mem, comm));
+            break;
         case (M_OFI_RTR_TAGGED):
             m_rmem_call(ofi_rmem_post_fitsend(nrank, rank, mem, comm));
             break;
@@ -56,7 +67,6 @@ int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_co
     return m_success;
 }
 //==================================================================================================
-// wait for the processes in comm to notify their exposure
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
 #ifndef NDEBUG
     m_verb("starting");
@@ -114,11 +124,11 @@ int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_c
 //==================================================================================================
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("completing");
+    //----------------------------------------------------------------------------------------------
     int ttl_data = 0;
     int ttl_sync = 0;
     if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) {
         // just read the number of calls to wait for and reset them to 0
-        // the other side has to wait for nothing
         for (int i = 0; i < nrank; ++i) {
             int issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
             ttl_data += issued_rank;
@@ -140,8 +150,9 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         };
     }
 
+    //----------------------------------------------------------------------------------------------
     // get the correct threshold value depending if we have a signal or not
-    uint64_t threshold;
+    uint64_t threshold = 0;
     switch (comm->prov_mode.sig_mode) {
         case (M_OFI_SIG_NULL):
             m_assert(0, "null is not supported here");
@@ -159,8 +170,10 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         } break;
     }
     // use complete fast to what for the threshold
-    m_rmem_call(ofi_rmem_complete_fast(threshold, mem, comm));
+    m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
+                                       mem->ofi.data_trx, mem->ofi.sync.epch));
 
+    //----------------------------------------------------------------------------------------------
     // send the ack if delivery complete
     if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) {
         // as we have already used the values in icntr, it's gonna be 0.
@@ -176,36 +189,31 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
                 m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
                 break;
         };
-        // make sure the ack are done
-        m_rmem_call(ofi_rmem_complete_fast(nrank, mem, comm));
+        // make sure the ack are done, progress the sync only
+        m_rmem_call(ofi_rmem_progress_wait(nrank, m_rma_mepoch_local(mem), 1, mem->ofi.sync_trx,
+                                           mem->ofi.sync.epch));
     }
-    return m_success;
-}
-int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* comm) {
-    m_verb("completing-fast: %d calls, already done: %d", threshold,
-           m_countr_load(m_rma_mepoch_local(mem)));
     //----------------------------------------------------------------------------------------------
-    // rma calls generate cq entries so they need to be processed, we loop on the data_trx only
-    ofi_progress_t progress = {
-        .cq = mem->ofi.sync_trx->cq,
-        .xctx.epoch_ptr = mem->ofi.sync.epch,
-    };
-    int i = 0;
-    // we have to complete on all the trx, sync and data
-    while (m_countr_load(m_rma_mepoch_local(mem)) < threshold) {
-        progress.cq = mem->ofi.data_trx[i].cq;
-        m_ofi_call(ofi_progress(&progress));
-        i = (i + 1) % (mem->ofi.n_tx + 1);
-    }
-    m_countr_fetch_add(m_rma_mepoch_local(mem), -threshold);
-
 #ifndef NDEBUG
-    m_verb("completed-fast");
+    m_verb("completed");
     // no need to check the last rx/tx if AM message is used
     for (int i = 0; i < (mem->ofi.n_tx + (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG)); ++i) {
         m_mem_check_empty_cq(mem->ofi.data_trx[i].cq);
     }
 #endif
+    return m_success;
+}
+/**@brief complete fast: wait for threshold calls to complete on the origin side.
+ *
+ * note: we progress all the 
+*/
+int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* comm) {
+    m_verb("completing-fast: %d calls, already done: %d", threshold,
+           m_countr_load(m_rma_mepoch_local(mem)));
+    //----------------------------------------------------------------------------------------------
+    m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx,
+                                       mem->ofi.data_trx, mem->ofi.sync.epch));
+    m_verb("completed fast");
     return m_success;
 }
 
@@ -246,6 +254,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     ofi_rmem_wait_fast(threshold, mem, comm);
 
 #ifndef NDEBUG
+    m_verb("waited-all");
     m_assert(m_countr_load(m_rma_mepoch_cmpl(mem)) == 0, "ohoh");
     m_assert(m_countr_load(m_rma_mepoch_remote(mem)) == 0, "ohoh");
     m_verb("waited");
@@ -279,29 +288,14 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
             // first bump the value of epoch[2]
             m_countr_fetch_add(m_rma_mepoch_remote(mem), ncalls);
             // wait for it to come down
-            ofi_progress_t progress = {
-                .cq = mem->ofi.sync_trx->cq,
-                .xctx.epoch_ptr = mem->ofi.sync.epch,
-            };
-            int i = 0;
-            while (m_countr_load(m_rma_mepoch_remote(mem)) > 0) {
-                progress.cq = mem->ofi.data_trx[i].cq;
-                ofi_progress(&progress);
-                // update the counter
-                i = (i + 1) % mem->ofi.n_tx;
-            }
+            m_rmem_call(ofi_rmem_progress_wait(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
+                                               mem->ofi.data_trx, mem->ofi.sync.epch));
         } break;
         case (M_OFI_RCMPL_FENCE): {
             m_assert(0, "idk what to do");
         } break;
     }
-#ifndef NDEBUG
     m_verb("waited fast");
-    // no need to check the last rx/tx if we do AM
-    for (int i = 0; i < (mem->ofi.n_tx + (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG)); ++i) {
-        m_mem_check_empty_cq(mem->ofi.data_trx[i].cq);
-    }
-#endif
     return m_success;
 }
 

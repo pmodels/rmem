@@ -28,6 +28,10 @@ int ofi_rmem_am_repost(ofi_cqdata_t* cqdata, ofi_progress_t* progress) {
 }
 
 int ofi_rmem_am_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
+    // set the min buffer unavailable size
+    size_t optlen = m_ofi_am_cq_min_size;
+    m_ofi_call(fi_setopt(&mem->ofi.sync_trx->srx->fid, FI_OPT_ENDPOINT, FI_OPT_MIN_MULTI_RECV,
+                         &optlen, sizeof(optlen)));
     // allocate the am resources
     mem->ofi.sync.am.buf = malloc(m_ofi_am_buf_num * sizeof(ofi_am_buf_t));
     mem->ofi.sync.am.cqdata = malloc(m_ofi_am_buf_num * sizeof(ofi_cqdata_t));
@@ -55,10 +59,6 @@ int ofi_rmem_am_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         // post the buffers now
         ofi_rmem_am_repost(cqdata, &progress);
     }
-    // set the min buffer unavailable size
-    size_t optlen = m_ofi_am_max_size;
-    m_ofi_call(fi_setopt(&mem->ofi.sync_trx->srx->fid, FI_OPT_ENDPOINT, FI_OPT_MIN_MULTI_RECV,
-                         &optlen, sizeof(optlen)));
     return m_success;
 }
 
@@ -328,6 +328,35 @@ int ofi_rmem_start_fiatomic(const int nrank, const int* rank, ofi_rmem_t* mem,
     m_ofi_call_again(fi_fetch_atomicmsg(mem->ofi.sync_trx->ep, &msg, &res_iov,
                                         &mem->ofi.sync.ps_sig.res_mr.desc, 1, FI_TRANSMIT_COMPLETE),
                      &progress);
+    return m_success;
+}
+//==================================================================================================
+// WAIT
+//==================================================================================================
+/** @brief progress the cq in trx until the value of cntr has reached the threshold value
+ * the epoch_ptr is used to handle special context when doing progress
+ */
+int ofi_rmem_progress_wait(const int threshold, countr_t* cntr, int n_trx, ofi_rma_trx_t* trx,
+                           countr_t* epoch_ptr) {
+    m_assert(n_trx > 0, "nothing to wait on");
+    m_assert(trx, "nothing to wait on");
+    //----------------------------------------------------------------------------------------------
+    ofi_progress_t progress = {
+        .cq = NULL,
+        .xctx.epoch_ptr = epoch_ptr,
+    };
+    // loop on the array of trx and progress them untill the local completion value is reached
+    int i = 0;
+    while (m_countr_load(cntr) < threshold) {
+        progress.cq = trx[i].cq;
+        m_ofi_call(ofi_progress(&progress));
+        i = (i + 1) % (n_trx);
+    }
+    // remove the values to the counter
+    if (threshold) {
+        m_countr_fetch_add(cntr, -threshold);
+    }
+    //----------------------------------------------------------------------------------------------
     return m_success;
 }
 

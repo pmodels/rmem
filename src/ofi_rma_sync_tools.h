@@ -41,4 +41,7 @@ int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem,
 int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
                              int* ttl_data);
 int ofi_rmem_wait_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
+//==================================================================================================
+int ofi_rmem_progress_wait(const int threshold, countr_t* cntr, int n_trx, ofi_rma_trx_t* trx,
+                           countr_t* epoch_ptr);
 #endif

@@ -104,7 +104,7 @@ int ofi_progress(ofi_progress_t* progress) {
                     m_verb("am entry completed");
                     // we might have received a msg or the buffer is expired (or both)
                     if (event[i].flags & FI_RECV) {
-                    m_verb("am recv completed");
+                        m_verb("am recv completed");
                         m_assert(event[i].len == sizeof(uint64_t), "The size here should be 64");
                         countr_t** epoch = (countr_t**)(op_ctx + m_ofi_cq_offset(epoch_ptr));
                         uint64_t* data = (uint64_t*)(event[i].buf);
