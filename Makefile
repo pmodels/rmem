@@ -54,8 +54,8 @@ ARGP_LIBNAME ?= -largp
 
 #---------------------------------------------------------------------------------------------------
 # includes
-INC += -I$(PMI_INC)
 INC += -I$(OFI_INC)
+INC += -I$(PMI_INC)
 # pthread 
 INC += -pthread
 # gcc need this special define to handle time measurement
@@ -65,10 +65,8 @@ endif
 
 # add the link options
 LIB += -lpthread -lm
-LIB += -L$(PMI_LIB) $(PMI_LIBNAME)
-LIB += -L$(OFI_LIB) $(OFI_LIBNAME)
-LIB += -Wl,-rpath,$(PMI_LIB)
-LIB += -Wl,-rpath,$(OFI_LIB)
+LIB += -L$(OFI_LIB) $(OFI_LIBNAME) -Wl,-rpath,$(OFI_LIB)
+LIB += -L$(PMI_LIB) $(PMI_LIBNAME) -Wl,-rpath,$(PMI_LIB)
 
 # if not gcc, add argp lib
 ifeq (,$(findstring gcc,$(CC)))
