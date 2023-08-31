@@ -39,6 +39,10 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     /* Get the input argument from argp_parse, which we
        know is a pointer to our arguments structure. */
     ofi_mode_t *arguments = state->input;
+    arguments->sig_mode = M_OFI_SIG_NULL;
+    arguments->rtr_mode = M_OFI_RTR_NULL;
+    arguments->dtc_mode = M_OFI_DTC_NULL;
+    arguments->rcmpl_mode = M_OFI_RCMPL_NULL;
 
     switch (key) {
         //------------------------------------------------------------------------------------------
