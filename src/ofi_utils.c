@@ -21,7 +21,7 @@
             fi_getinfo(fi_version(), NULL, NULL, 0ULL, hint, &test_prov); \
             if (!test_prov) {                                             \
                 m_log("imposible to set" #field " to " #value "> ooops"); \
-                hints->field &= ~(value);                                 \
+                hint->field &= ~(value);                                  \
             } else {                                                      \
                 fi_freeinfo(test_prov);                                   \
                 m_verb("successfully set " #field " to " #value);         \
@@ -42,10 +42,10 @@
                 m_assert(0, "imposible to set" #field " to " #value);     \
             } else {                                                      \
                 fi_freeinfo(test_prov);                                   \
-                m_verb("successfully set " #field " to " #value);          \
+                m_verb("successfully set " #field " to " #value);         \
             }                                                             \
         } else {                                                          \
-            m_verb(#field " already has " #value);                         \
+            m_verb(#field " already has " #value);                        \
         }                                                                 \
     } while (0)
 
@@ -267,13 +267,13 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     hints->domain_attr->mr_mode |= FI_MR_ALLOCATED;
     hints->domain_attr->mr_mode |= FI_MR_VIRT_ADDR;
 
+    // Reliable DatagraM (RDM)
+    hints->ep_attr->type = FI_EP_RDM;
     // make sure the provider has that
     m_ofi_fatal_info(hints, caps, mycap);
 
     //----------------------------------------------------------------------------------------------
-    // try to get more specific behavior
-    // Reliable Datagram
-    m_ofi_test_info(hints, ep_attr->type, FI_EP_RDM);
+    // optional
     // try to use shared context (reduces the memory)
     m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
     m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
