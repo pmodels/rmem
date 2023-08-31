@@ -152,7 +152,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
 
     //----------------------------------------------------------------------------------------------
     // get the correct threshold value depending if we have a signal or not
-    uint64_t threshold = 0;
+    int threshold = 0;
     switch (comm->prov_mode.sig_mode) {
         case (M_OFI_SIG_NULL):
             m_assert(0, "null is not supported here");
@@ -247,7 +247,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     }
 #endif
     // TODO: this is not optimal as we add the threshold back to the atomic if needed in wait_fast
-    uint64_t threshold = m_countr_exchange(m_rma_mepoch_remote(mem), 0);
+    int threshold = m_countr_exchange(m_rma_mepoch_remote(mem), 0);
     //----------------------------------------------------------------------------------------------
     // wait for the calls to complete
     m_verb("waitall: waiting for %llu calls to complete", threshold);
@@ -255,8 +255,10 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
 
 #ifndef NDEBUG
     m_verb("waited-all");
-    m_assert(m_countr_load(m_rma_mepoch_cmpl(mem)) == 0, "ohoh");
-    m_assert(m_countr_load(m_rma_mepoch_remote(mem)) == 0, "ohoh");
+    m_assert(m_countr_load(m_rma_mepoch_cmpl(mem)) == 0, "ohoh value is not 0: %d",
+             m_countr_load(m_rma_mepoch_cmpl(mem)));
+    m_assert(m_countr_load(m_rma_mepoch_remote(mem)) == 0, "ohoh value is not 0: %d",
+             m_countr_load(m_rma_mepoch_remote(mem)));
     m_verb("waited");
     // no need to check the last rx/tx if we do AM
     for (int i = 0; i < (mem->ofi.n_tx + (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG)); ++i) {

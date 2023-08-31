@@ -28,7 +28,7 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
     uint32_t nops = m_ofi_data_get_nops(*data);
     if (cmpl > 0) {
         m_assert(cmpl <= 1, "post must be <=1");
-        m_countr_fetch_add(m_rma_epoch_remote(epoch), nops);
+        m_countr_fetch_add(m_rma_epoch_remote(epoch),-nops);
         m_countr_fetch_add(m_rma_epoch_cmpl(epoch), cmpl);
         m_verb("sync: counter +%d, now = %d",nops,m_countr_load(m_rma_epoch_remote(epoch)));
         // if we get a complete, we do not need to handle something else
@@ -36,9 +36,9 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
     }
     uint32_t rcqd = m_ofi_data_get_rcq(*data);
     if (rcqd > 0) {
-        // if we receive a remote cq data then we remove -1 to the epoch[2]
+        // if we receive a remote cq data then we add +1 to the epoch[2]
         m_assert(rcqd <= 1, "post must be <=1");
-        m_countr_fetch_add(m_rma_epoch_remote(epoch), -1);
+        m_countr_fetch_add(m_rma_epoch_remote(epoch), +1);
         m_verb("remote data: counter -1, now = %d",m_countr_load(m_rma_epoch_remote(epoch)));
     }
     uint32_t sig = m_ofi_data_get_sig(*data);
