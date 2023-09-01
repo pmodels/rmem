@@ -103,16 +103,15 @@ int main(int argc, char** argv) {
     // run parameter
     run_param_t param = {
         .msg_size = 1 << 22,
-        .n_msg = 2, 
+        .n_msg = 64, 
         .comm = &comm, 
         .mem = &rma_mem
     };
 
     // allocate the shared mem for the receiver
     if (!is_sender(ofi_get_rank(&comm))) {
-        size_t ttl_len = m_msg_size(param.n_msg, param.msg_size, int);
-        m_log("registering %ld bytes",ttl_len);
-        PMI_Abort(0,NULL);
+        size_t ttl_len = m_msg_size(param.n_msg, param.msg_size, int) * param.n_msg;
+        m_verb("sender memory is %lu", ttl_len);
         // receiver needs the remote buffer
         rma_mem = (ofi_rmem_t){
             .buf = calloc(ttl_len, sizeof(int)),

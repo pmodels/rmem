@@ -64,6 +64,7 @@ int ofi_rmem_am_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 
 int ofi_rmem_am_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_assert(mem->ofi.sync.cqdata_ps, "cqdata_ps must be allocated here");
+    m_verb("canceling the requests");
     for (int i = 0; i < m_ofi_am_buf_num; ++i) {
         ofi_cqdata_t* cqdata = mem->ofi.sync.am.cqdata + i;
         m_ofi_call(fi_cancel(&mem->ofi.sync_trx->srx->fid, &cqdata->ctx));

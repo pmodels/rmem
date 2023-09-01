@@ -39,7 +39,7 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
         ofi_send_init(&p2p_retry, 0, comm);
     }
     //----------------------------------------------------------------------------------------------
-    for (int imsg = 256; imsg <= param.n_msg; imsg *= 2) {
+    for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
         const int idx_msg = log10(imsg) / log10(2.0);
         const size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
         for (size_t msg_size = 1; msg_size <= max_msg_size; msg_size *= 2) {
@@ -51,7 +51,7 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                 .mem = param.mem,
                 .n_msg = imsg,
             };
-            m_verb("memory -----------------");
+            m_verb("memory %lu -----------------",msg_size);
             PMI_Barrier();
             if (is_sender(comm->rank)) {
                 //---------------------------------------------------------------------------------

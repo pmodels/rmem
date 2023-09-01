@@ -124,6 +124,7 @@ int ofi_progress(ofi_progress_t* progress) {
                 }
             }
         }
+        return m_success;
     } else if (ret == (-FI_EAGAIN)) {
         //------------------------------------------------------------------------------------------
         // no entry
@@ -144,6 +145,9 @@ int ofi_progress(ofi_progress_t* progress) {
                 case (FI_ETRUNC):
                     m_log("OFI-CQ ERROR: truncated message %lu could not fit in AM buffers",
                           err.olen);
+                    break;
+                case (FI_ECANCELED):
+                    m_log("OFI-CQ ERROR: operation has been successfully canceled: ctx = %p",err.op_context);
                     break;
                 default: {
                     char prov_err[m_ofi_cq_err_len];

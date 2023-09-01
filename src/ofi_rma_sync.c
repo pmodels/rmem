@@ -178,6 +178,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
                 m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
                 break;
         };
+        m_verb("completing the delivery complete ack: %d", nrank);
         // make sure the ack are done, progress the sync only
         m_rmem_call(ofi_rmem_progress_wait(nrank, m_rma_mepoch_local(mem), 1, mem->ofi.sync_trx,
                                            mem->ofi.sync.epch));

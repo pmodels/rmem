@@ -17,6 +17,14 @@ PMI_DIR=${HOME}/lib-PMI-4.1.1
 OFI_DIR=/opt/cray/libfabric/1.15.2.0
 OFI_LIB=/opt/cray/libfabric/1.15.2.0/lib64
 #---------------------------------------------------------------------------------------------------
+# MELUXINA
+else ifneq (,$(findstring mel,$(HOSTNAME)))
+CC=gcc
+CXX=g++
+PMI_DIR=${HOME}/lib-OFI-1.18.1-CUDA-11.7.0
+#OFI_DIR=${HOME}/libfabric/_inst
+OFI_DIR=${HOME}/lib-OFI-1.18.1-CUDA-11.7.0
+#---------------------------------------------------------------------------------------------------
 else
 CC=clang
 PMI_DIR=/Users/tgillis/dbs_lib/lib_OFI-1.18.1-dbg

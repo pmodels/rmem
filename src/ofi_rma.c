@@ -420,9 +420,9 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
         m_assert(!curr, "the busy value is not 0: %d", curr);
     }
     // do the comm
-    m_verb("doing it: write msg with kind =%d (inc local? %d) to ep %p: cqdata = %llu",
+    m_verb("doing it: write msg with kind =%d (inc local? %d) to ep %p: cqdata = %llu, ctx = %p",
            rma->ofi.msg.cq.kind & 0x0f, rma->ofi.msg.cq.kind & m_ofi_cq_inc_local, rma->ofi.ep,
-           msg.data);
+           msg.data,msg.context);
     m_ofi_call_again(fi_writemsg(rma->ofi.ep, &msg, flags), &rma->ofi.progress);
     m_verb("doing it: done");
     m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
