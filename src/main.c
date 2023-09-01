@@ -107,7 +107,8 @@ int main(int argc, char** argv) {
 
     // allocate the shared mem for the receiver
     if (!is_sender(ofi_get_rank(&comm))) {
-        const size_t ttl_len = param.msg_size * param.n_msg;
+        const size_t ttl_len =
+            m_min(param.msg_size * param.n_msg * sizeof(int), m_max_size) / sizeof(int);
         // receiver needs the remote buffer
         rma_mem = (ofi_rmem_t){
             .buf = calloc(ttl_len, sizeof(int)),
