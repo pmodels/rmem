@@ -53,6 +53,7 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
             };
             m_verb("memory %lu -----------------",msg_size);
             PMI_Barrier();
+            double time[n_measure];
             if (is_sender(comm->rank)) {
                 //---------------------------------------------------------------------------------
                 //- SENDER
@@ -62,8 +63,15 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                 *retry_ptr = 1;
                 while (*retry_ptr) {
                     for (int it = -n_warmup; it < n_measure; ++it) {
-                        sender->run(&cparam, sender->data);
+                        time[(it >= 0) ? it : 0] = sender->run(&cparam, sender->data);
                     }
+                    // post process time
+                    double tavg, ci;
+                    rmem_get_ci(n_measure, time, &tavg, &ci);
+                    m_assert(idx < ttl_sample, "ohoh: id = %d, ttl_sample = %ld", idx, ttl_sample);
+                    timings->avg[idx] = tavg;
+                    timings->ci[idx] = ci;
+                    // get if we retry
                     ofi_p2p_start(&p2p_retry);
                     ofi_p2p_wait(&p2p_retry);
                 }
@@ -76,7 +84,6 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                 // profile stuff
                 *retry_ptr = 1;
                 while (*retry_ptr) {
-                    double time[n_measure];
                     for (int it = -n_warmup; it < n_measure; ++it) {
                         time[(it >= 0) ? it : 0] = recver->run(&cparam, recver->data);
                     }
@@ -173,15 +180,20 @@ double p2p_run_send(run_param_t* param, void* data) {
     ofi_p2p_t* p2p = d->p2p;
     const int n_msg = param->n_msg;
 
+    double time;
+    rmem_prof_t prof = {.name = "send"};
+
     PMI_Barrier();
     // start exposure
-    for (int j = 0; j < n_msg; ++j) {
-        ofi_p2p_start(p2p + j);
+    m_rmem_prof(prof, time) {
+        for (int j = 0; j < n_msg; ++j) {
+            ofi_p2p_start(p2p + j);
+        }
+        for (int j = 0; j < n_msg; ++j) {
+            ofi_p2p_wait(p2p + j);
+        }
     }
-    for (int j = 0; j < n_msg; ++j) {
-        ofi_p2p_wait(p2p + j);
-    }
-    return 0.0;
+    return time;
 }
 double p2p_run_recv(run_param_t* param, void* data) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
@@ -217,10 +229,7 @@ double p2p_run_recv(run_param_t* param, void* data) {
     }
     return time;
 }
-double p2p_fast_run_send(run_param_t* param, void* data) {
-    p2p_run_send(param, data);
-    return 0.0;
-}
+double p2p_fast_run_send(run_param_t* param, void* data) { return p2p_run_send(param, data); }
 double p2p_fast_run_recv(run_param_t* param, void* data) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
     ofi_p2p_t* p2p = d->p2p;
@@ -347,13 +356,18 @@ double rma_run_send(run_param_t* param, void* data) {
     const size_t ttl_len = n_msg * msg_size;
     const int buddy = peer(param->comm->rank, param->comm->size);
 
+    double time;
+    rmem_prof_t prof = {.name = "send"};
+    //------------------------------------------------
     PMI_Barrier();  // start exposure
-    ofi_rmem_start(1, &buddy, param->mem, param->comm);
-    for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_start(param->mem, d->rma + j);
+    m_rmem_prof(prof, time) {
+        ofi_rmem_start(1, &buddy, param->mem, param->comm);
+        for (int j = 0; j < n_msg; ++j) {
+            ofi_rma_start(param->mem, d->rma + j);
+        }
+        ofi_rmem_complete(1, &buddy, param->mem, param->comm);
     }
-    ofi_rmem_complete(1, &buddy, param->mem, param->comm);
-    return 0.0;
+    return time;
 }
 double rma_fast_run_send(run_param_t* param, void* data) {
     run_rma_data_t* d = (run_rma_data_t*)data;
@@ -362,13 +376,18 @@ double rma_fast_run_send(run_param_t* param, void* data) {
     const size_t ttl_len = n_msg * msg_size;
     const int buddy = peer(param->comm->rank, param->comm->size);
 
+    double time;
+    rmem_prof_t prof = {.name = "send"};
+    //------------------------------------------------
     PMI_Barrier();  // start exposure
-    ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
-    for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_start(param->mem, d->rma + j);
+    m_rmem_prof(prof, time) {
+        ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
+        for (int j = 0; j < n_msg; ++j) {
+            ofi_rma_start(param->mem, d->rma + j);
+        }
+        ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
     }
-    ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
-    return 0.0;
+    return time;
 }
 double lat_run_send(run_param_t* param, void* data) {
     run_rma_data_t* d = (run_rma_data_t*)data;
@@ -377,13 +396,18 @@ double lat_run_send(run_param_t* param, void* data) {
     const size_t ttl_len = n_msg * msg_size;
     const int buddy = peer(param->comm->rank, param->comm->size);
 
+    double time;
+    rmem_prof_t prof = {.name = "send"};
+    //------------------------------------------------
     ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
     PMI_Barrier();  // start exposure
-    for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_start(param->mem, d->rma + j);
+    m_rmem_prof(prof, time) {
+        for (int j = 0; j < n_msg; ++j) {
+            ofi_rma_start(param->mem, d->rma + j);
+        }
+        ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
     }
-    ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
-    return 0.0;
+    return time;
 }
 
 //--------------------------------------------------------------------------------------------------

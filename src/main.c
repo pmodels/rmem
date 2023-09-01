@@ -156,7 +156,7 @@ int main(int argc, char** argv) {
             .run = &p2p_fast_run_recv,
             .post = &p2p_post_recv,
         };
-        run_test(&p2pf_send, &p2pf_recv, param, &p2pf_time);
+        //run_test(&p2pf_send, &p2pf_recv, param, &p2pf_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT
@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
             .run = &rma_fast_run_recv,
             .post = &rma_post,
         };
-        //run_test(&plat_send, &plat_recv, param, &pfast_time);
+        run_test(&plat_send, &plat_recv, param, &pfast_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT LATENCY
@@ -240,53 +240,78 @@ int main(int argc, char** argv) {
     free(rma_mem.buf);
 
     //----------------------------------------------------------------------------------------------
+    // get a unique folder for the results
+    char fullname[128];
+    char foldr_name[64];
+    int fid_cntr = -1;
+    ofi_p2p_t p2p_fid_cntr = {
+        .peer = peer(comm.rank, comm.size),
+        .buf = &fid_cntr,
+        .count = sizeof(int),
+        .tag = param.n_msg + 2,
+    };
     if (!is_sender(comm.rank)) {
-        // get a unique folder for the results
-        char fullname[128];
-        char foldr_name[64];
         struct stat st = {0};
-        int fid_cntr = 0;
         do {
-            sprintf(foldr_name, "data_%d", fid_cntr++);
+            sprintf(foldr_name, "data_%d", ++fid_cntr);
         } while (!stat(foldr_name, &st));
         mkdir(foldr_name, 0770);
-        m_verb("found folder: %s",foldr_name);
+        m_verb("found folder: %s", foldr_name);
 
         // get some 101 info
-        print_info(foldr_name, ofi_name(&comm),&comm.prov_mode);
+        print_info(foldr_name, ofi_name(&comm), &comm.prov_mode);
+        // send the info to the other rank
+        ofi_send_init(&p2p_fid_cntr, 0, &comm);
+        ofi_p2p_start(&p2p_fid_cntr);
+        ofi_p2p_wait(&p2p_fid_cntr);
+        ofi_p2p_free(&p2p_fid_cntr);
 
-        //------------------------------------------------------------------------------------------
-        // save the results per msg size
-        const int n_size = log10(param.msg_size) / log10(2.0) + 1;
-        const int n_msg = log10(param.n_msg) / log10(2.0) + 1;
-        for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
-            const int idx_msg = log10(imsg) / log10(2.0);
-            char fullname[128];
-            snprintf(fullname, 128, "%s/msg%d_%s.txt", foldr_name, imsg, ofi_name(&comm));
-            // get a unique FID for the results
-            FILE* file = fopen(fullname, "w+");
-            m_assert(file, "cannot open %s", fullname);
+    } else {
+        ofi_recv_init(&p2p_fid_cntr, 0, &comm);
+        ofi_p2p_start(&p2p_fid_cntr);
+        ofi_p2p_wait(&p2p_fid_cntr);
+        ofi_p2p_free(&p2p_fid_cntr);
+        sprintf(foldr_name, "data_%d", fid_cntr);
+    }
+    PMI_Barrier();
+    //------------------------------------------------------------------------------------------
+    // save the results per msg size
+    const int n_size = log10(param.msg_size) / log10(2.0) + 1;
+    const int n_msg = log10(param.n_msg) / log10(2.0) + 1;
+    for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
+        const int idx_msg = log10(imsg) / log10(2.0);
+        char fullname[128];
+        snprintf(fullname, 128, "%s/r%d_msg%d_%s.txt", foldr_name, comm.rank, imsg,
+                 ofi_name(&comm));
 
-            m_log("--------------- %d MSGs ---------------",imsg);
-            // for each message size
-            size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
-            for (size_t msg_size = 1; msg_size <= max_msg_size; msg_size *= 2) {
-                const int idx_size = log10(msg_size) / log10(2.0);
-                // get the idx
-                int idx = idx_msg * n_size + idx_size;
-                // load the results
-                const double ti_p2p = m_run_time(p2p_time.avg);
-                const double ci_p2p = m_run_time(p2p_time.ci);
-                const double ti_put = m_run_time(put_time.avg);
-                const double ci_put = m_run_time(put_time.ci);
-                const double ti_p2pf = m_run_time(p2pf_time.avg);
-                const double ci_p2pf = m_run_time(p2pf_time.ci);
-                const double ti_psig = m_run_time(psig_time.avg);
-                const double ci_psig = m_run_time(psig_time.ci);
-                const double ti_plat = m_run_time(plat_time.avg);
-                const double ci_plat = m_run_time(plat_time.ci);
-                const double ti_fast = m_run_time(pfast_time.avg);
-                const double ci_fast = m_run_time(pfast_time.ci);
+        m_verb("filename is %s", fullname);
+        // get a unique FID for the results
+        FILE* file = fopen(fullname, "w+");
+        m_assert(file, "cannot open %s", fullname);
+
+        if (!is_sender(comm.rank)) {
+            m_log("--------------- %d MSGs ---------------", imsg);
+        }
+        // for each message size
+        size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
+        for (size_t msg_size = 1; msg_size <= max_msg_size; msg_size *= 2) {
+            const int idx_size = log10(msg_size) / log10(2.0);
+            // get the idx
+            int idx = idx_msg * n_size + idx_size;
+            // load the results
+            const double ti_p2p = m_run_time(p2p_time.avg);
+            const double ci_p2p = m_run_time(p2p_time.ci);
+            const double ti_put = m_run_time(put_time.avg);
+            const double ci_put = m_run_time(put_time.ci);
+            const double ti_p2pf = m_run_time(p2pf_time.avg);
+            const double ci_p2pf = m_run_time(p2pf_time.ci);
+            const double ti_psig = m_run_time(psig_time.avg);
+            const double ci_psig = m_run_time(psig_time.ci);
+            const double ti_plat = m_run_time(plat_time.avg);
+            const double ci_plat = m_run_time(plat_time.ci);
+            const double ti_fast = m_run_time(pfast_time.avg);
+            const double ci_fast = m_run_time(pfast_time.ci);
+            if (!is_sender(comm.rank)) {
                 m_log(
                     "time/msg (%ld B/msg - %d msgs):\n"
                     "\tP2P       = %f +-[%f]\n"
@@ -298,56 +323,56 @@ int main(int argc, char** argv) {
                     msg_size * sizeof(int), imsg, ti_p2p, ci_p2p, ti_put, ci_put, ti_put / ti_p2p,
                     ti_fast, ci_fast, ti_fast / ti_p2p, ti_psig, ci_psig, ti_psig / ti_p2p, ti_plat,
                     ci_plat, ti_plat / ti_p2p, ti_p2pf, ci_p2pf, ti_p2pf / ti_p2p);
-                // write to csv
-                fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int),
-                        ti_p2p, ti_put, ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast,
-                        ci_psig, ci_plat, ci_p2pf);
-                // bump the index
-                idx++;
             }
-            fclose(file);
+            // write to csv
+            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int),
+                    ti_p2p, ti_put, ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast,
+                    ci_psig, ci_plat, ci_p2pf);
+            // bump the index
+            idx++;
         }
-        //------------------------------------------------------------------------------------------
-        // save the results per number of msgs
-        for (size_t msg_size = 1; msg_size <= param.msg_size; msg_size *= 2) {
-            const int idx_size = log10(msg_size) / log10(2.0);
-            char fullname[128];
-            snprintf(fullname, 128, "%s/size%ld_%s.txt", foldr_name, msg_size, ofi_name(&comm));
-            // get a unique FID for the results
-            FILE* file = fopen(fullname, "w+");
-            m_assert(file, "cannot open %s", fullname);
+        fclose(file);
+    }
+    //------------------------------------------------------------------------------------------
+    // save the results per number of msgs
+    for (size_t msg_size = 1; msg_size <= param.msg_size; msg_size *= 2) {
+        const int idx_size = log10(msg_size) / log10(2.0);
+        char fullname[128];
+        snprintf(fullname, 128, "%s/r%d_size%ld_%s.txt", foldr_name, comm.rank, msg_size,
+                 ofi_name(&comm));
+        // get a unique FID for the results
+        FILE* file = fopen(fullname, "w+");
+        m_assert(file, "cannot open %s", fullname);
 
-            // for each message size
-            for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
-                size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
-                if (imsg * msg_size * sizeof(int) > max_msg_size) {
-                    break;
-                }
-                const int idx_msg = log10(imsg) / log10(2.0);
-                // get the idx
-                int idx = idx_msg * n_size + idx_size;
-                // load the results
-                const double ti_p2p = m_run_time(p2p_time.avg);
-                const double ci_p2p = m_run_time(p2p_time.ci);
-                const double ti_put = m_run_time(put_time.avg);
-                const double ci_put = m_run_time(put_time.ci);
-                const double ti_p2pf = m_run_time(p2pf_time.avg);
-                const double ci_p2pf = m_run_time(p2pf_time.ci);
-                const double ti_psig = m_run_time(psig_time.avg);
-                const double ci_psig = m_run_time(psig_time.ci);
-                const double ti_plat = m_run_time(plat_time.avg);
-                const double ci_plat = m_run_time(plat_time.ci);
-                const double ti_fast = m_run_time(pfast_time.avg);
-                const double ci_fast = m_run_time(pfast_time.ci);
-                // write to csv
-                fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put,
-                        ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast, ci_psig,
-                        ci_plat, ci_p2pf);
-                // bump the index
-                idx++;
+        // for each message size
+        for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
+            size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
+            if (imsg * msg_size * sizeof(int) > max_msg_size) {
+                break;
             }
-            fclose(file);
+            const int idx_msg = log10(imsg) / log10(2.0);
+            // get the idx
+            int idx = idx_msg * n_size + idx_size;
+            // load the results
+            const double ti_p2p = m_run_time(p2p_time.avg);
+            const double ci_p2p = m_run_time(p2p_time.ci);
+            const double ti_put = m_run_time(put_time.avg);
+            const double ci_put = m_run_time(put_time.ci);
+            const double ti_p2pf = m_run_time(p2pf_time.avg);
+            const double ci_p2pf = m_run_time(p2pf_time.ci);
+            const double ti_psig = m_run_time(psig_time.avg);
+            const double ci_psig = m_run_time(psig_time.ci);
+            const double ti_plat = m_run_time(plat_time.avg);
+            const double ci_plat = m_run_time(plat_time.ci);
+            const double ti_fast = m_run_time(pfast_time.avg);
+            const double ci_fast = m_run_time(pfast_time.ci);
+            // write to csv
+            fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put, ti_fast,
+                    ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast, ci_psig, ci_plat, ci_p2pf);
+            // bump the index
+            idx++;
         }
+        fclose(file);
     }
     if (p2p_time.avg) free(p2p_time.avg);
     if (p2p_time.ci) free(p2p_time.ci);
