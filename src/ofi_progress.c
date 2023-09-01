@@ -142,15 +142,18 @@ int ofi_progress(ofi_progress_t* progress) {
         } else {
             switch (err.err) {
                 case (FI_ETRUNC):
-                    m_log("truncated message");
+                    m_log("OFI-CQ ERROR: truncated message %lu could not fit in AM buffers",
+                          err.olen);
                     break;
                 default: {
                     char prov_err[m_ofi_cq_err_len];
                     fi_cq_strerror(cq, err.prov_errno, err_data, prov_err, m_ofi_cq_err_len);
-                    m_log("OFI-CQ ERROR: %s, provider says %s", fi_strerror(err.err), prov_err);
+                    m_log("OFI-CQ ERROR: %s, provider says: %s", fi_strerror(err.err), prov_err);
                 }
             }
         }
+        PrintBackTrace();
+        PMI_Abort(EXIT_FAILURE, NULL);
         return m_failure;
     }
     return m_success;
