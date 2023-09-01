@@ -85,9 +85,12 @@ int main(int argc, char** argv) {
     // create a communicator with as many context as threads
     const int nth = 1;  // omp_get_max_threads();
     ofi_comm_t comm;
+
     // parse arguments
-    argp_parse(&argp, argc, argv, 0, 0, &comm.prov_mode);
+    argp_rmem_t arg_rmem = {0};
+    argp_parse(&argp, argc, argv, 0, 0, &arg_rmem);
     // init the comm
+    comm.prov_mode = arg_rmem.mode;
     comm.n_ctx = nth;
     m_rmem_call(ofi_init(&comm));
 
