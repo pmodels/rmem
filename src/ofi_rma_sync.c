@@ -152,23 +152,12 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
 
     //----------------------------------------------------------------------------------------------
     // get the correct threshold value depending if we have a signal or not
-    int threshold = 0;
-    switch (comm->prov_mode.sig_mode) {
-        case (M_OFI_SIG_NULL):
-            m_assert(0, "null is not supported here");
-            break;
-        case (M_OFI_SIG_ATOMIC): {
-            threshold = ttl_sync + ttl_data + m_countr_exchange(&mem->ofi.sync.isig, 0);
-            m_verb("complete: waiting for %d syncs, %d calls and %d signals to complete", ttl_sync,
-                   ttl_data, m_countr_load(&mem->ofi.sync.isig));
-        } break;
-        case (M_OFI_SIG_CQ_DATA): {
-            threshold = ttl_sync + ttl_data;
-            m_verb("complete: waiting for %d syncs, %d calls (total: %llu)", ttl_sync, ttl_data,
-                   threshold);
-
-        } break;
+    int threshold = ttl_sync + ttl_data;
+    if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
+        threshold += m_countr_exchange(&mem->ofi.sync.isig, 0);
     }
+    m_verb("complete: waiting for %d syncs and %d calls, total %d to complete", ttl_sync, ttl_data,
+           threshold);
     // use complete fast to what for the threshold
     m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
                                        mem->ofi.data_trx, mem->ofi.sync.epch));
@@ -250,7 +239,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
     int threshold = m_countr_exchange(m_rma_mepoch_remote(mem), 0);
     //----------------------------------------------------------------------------------------------
     // wait for the calls to complete
-    m_verb("waitall: waiting for %llu calls to complete", threshold);
+    m_verb("waitall: waiting for %d calls to complete", threshold);
     ofi_rmem_wait_fast(threshold, mem, comm);
 
 #ifndef NDEBUG
