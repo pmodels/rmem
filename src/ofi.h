@@ -18,11 +18,10 @@
 #include "rdma/fi_atomic.h"
 #include "rmem.h"
 
-#define m_ofi_cq_entries  16
-#define m_ofi_am_max_size 8 // uint64_t
-#define m_ofi_am_buf_num  2
-// #define m_ofi_am_buf_size (1 * m_ofi_am_max_size)
-#define m_ofi_am_buf_size (m_ofi_cq_entries * m_ofi_am_max_size)
+#define m_ofi_cq_entries     16
+#define m_ofi_am_max_size    8  // uint64_t
+#define m_ofi_am_buf_num     2
+#define m_ofi_am_buf_size    (m_ofi_cq_entries * m_ofi_am_max_size)
 #define m_ofi_am_cq_min_size m_ofi_am_max_size
 
 #define OFI_CQ_FORMAT     FI_CQ_FORMAT_DATA

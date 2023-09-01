@@ -25,10 +25,10 @@ typedef struct {
 } run_time_t;
 
 typedef struct {
+    int n_msg;        // number of messages
+    size_t msg_size;  // size of a message
     ofi_rmem_t* mem;
     ofi_comm_t* comm;
-    int n_msg;     // number of messages
-    int msg_size;  // size of a message
 } run_param_t;
 
 typedef struct {
