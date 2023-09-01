@@ -110,8 +110,9 @@ int main(int argc, char** argv) {
 
     // allocate the shared mem for the receiver
     if (!is_sender(ofi_get_rank(&comm))) {
-        const size_t ttl_len =
-            m_min(param.msg_size * param.n_msg * sizeof(int), m_max_size) / sizeof(int);
+        size_t ttl_len = m_msg_size(param.n_msg, param.msg_size, int);
+        m_log("registering %ld bytes",ttl_len);
+        PMI_Abort(0,NULL);
         // receiver needs the remote buffer
         rma_mem = (ofi_rmem_t){
             .buf = calloc(ttl_len, sizeof(int)),
@@ -269,10 +270,8 @@ int main(int argc, char** argv) {
 
             m_log("--------------- %d MSGs ---------------",imsg);
             // for each message size
-            for (size_t msg_size = 1; msg_size <= param.msg_size; msg_size *= 2) {
-                if (imsg * msg_size * sizeof(int) > m_max_size) {
-                    break;
-                }
+            size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
+            for (size_t msg_size = 1; msg_size <= max_msg_size; msg_size *= 2) {
                 const int idx_size = log10(msg_size) / log10(2.0);
                 // get the idx
                 int idx = idx_msg * n_size + idx_size;
@@ -321,7 +320,8 @@ int main(int argc, char** argv) {
 
             // for each message size
             for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
-                if (imsg * msg_size * sizeof(int) > m_max_size) {
+                size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
+                if (imsg * msg_size * sizeof(int) > max_msg_size) {
                     break;
                 }
                 const int idx_msg = log10(imsg) / log10(2.0);

@@ -39,13 +39,11 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
         ofi_send_init(&p2p_retry, 0, comm);
     }
     //----------------------------------------------------------------------------------------------
-    for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
+    for (int imsg = 256; imsg <= param.n_msg; imsg *= 2) {
         const int idx_msg = log10(imsg) / log10(2.0);
-        for (size_t msg_size = 1; msg_size <= param.msg_size; msg_size *= 2) {
+        const size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
+        for (size_t msg_size = 1; msg_size <= max_msg_size; msg_size *= 2) {
             const int idx_size = log10(msg_size) / log10(2.0);
-            if (imsg * msg_size * sizeof(int) > m_max_size) {
-                break;
-            }
             int idx = idx_msg * n_size + idx_size;
             run_param_t cparam = {
                 .msg_size = msg_size,

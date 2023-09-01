@@ -5,7 +5,14 @@
 #ifndef RMEM_RUN_H_
 #define RMEM_RUN_H_
 
-#define m_max_size (1<<24)
+#define m_max_ttl_size (1<<24)
+#define m_min_msg_size (1<<20)
+
+#define m_msg_size(n, size, type)                                            \
+    ({                                                                       \
+        size_t n_msg_size_limit = m_max(m_max_ttl_size, m_min_msg_size * n); \
+        m_min(n* size * sizeof(type), n_msg_size_limit) / sizeof(type);      \
+    })
 
 #include "ofi.h"
 
