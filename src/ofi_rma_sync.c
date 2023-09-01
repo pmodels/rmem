@@ -236,13 +236,33 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         m_mem_check_empty_cq(mem->ofi.sync_trx->cq);
     }
 #endif
-    // TODO: this is not optimal as we add the threshold back to the atomic if needed in wait_fast
-    int threshold = m_countr_exchange(m_rma_mepoch_remote(mem), 0);
     //----------------------------------------------------------------------------------------------
     // wait for the calls to complete
-    m_verb("waitall: waiting for %d calls to complete", threshold);
-    ofi_rmem_wait_fast(threshold, mem, comm);
-
+    switch (comm->prov_mode.rcmpl_mode) {
+        case (M_OFI_RCMPL_NULL):
+            m_assert(0, "null is not supported here");
+            break;
+        case (M_OFI_RCMPL_DELIV_COMPL):
+            // nothing to do
+            break;
+        case (M_OFI_RCMPL_REMOTE_CNTR): {
+            // zero the remote counter and wait for completion
+            int threshold = m_countr_exchange(m_rma_mepoch_remote(mem), 0);
+            // the counter is linked to the MR so waiting on it will trigger progress
+            m_ofi_call(fi_cntr_wait(mem->ofi.rcntr, threshold, -1));
+            m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
+        } break;
+        case (M_OFI_RCMPL_CQ_DATA): {
+            // WARNING: every put comes with data that will add 1 to the epoch[2] value
+            // wait for it to go back up to 0
+            m_rmem_call(ofi_rmem_progress_wait(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
+                                               mem->ofi.data_trx, mem->ofi.sync.epch));
+        } break;
+        case (M_OFI_RCMPL_FENCE): {
+            m_assert(0, "idk what to do");
+        } break;
+    };
+    //----------------------------------------------------------------------------------------------
 #ifndef NDEBUG
     m_verb("waited-all");
     m_assert(m_countr_load(m_rma_mepoch_cmpl(mem)) == 0, "ohoh value is not 0: %d",
@@ -267,7 +287,8 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
             break;
         case (M_OFI_RCMPL_DELIV_COMPL):
             m_assert(ncalls == 0,
-                     "CANNOT do fast completion mechanism with non-zero (%d) calls to wait",
+                     "CANNOT do fast completion mechanism with non-zero (%d) calls to wait when "
+                     "using delivery complete",
                      ncalls);
             break;
         case (M_OFI_RCMPL_REMOTE_CNTR): {
@@ -276,9 +297,10 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
             m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
         } break;
         case (M_OFI_RCMPL_CQ_DATA): {
-            // every put comes with data that will substract 1 to the epoch[2] value
-            // first bump the value of epoch[2]
-            m_countr_fetch_add(m_rma_mepoch_remote(mem), ncalls);
+            // WARNING: every put comes with data that will add 1 to the epoch[2] value
+            // to make sure the value is always bellow the threshold (0 here), we need to substract
+            // the number of calls to wait for
+            m_countr_fetch_add(m_rma_mepoch_remote(mem), -ncalls);
             // wait for it to come down
             m_rmem_call(ofi_rmem_progress_wait(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
                                                mem->ofi.data_trx, mem->ofi.sync.epch));
