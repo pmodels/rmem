@@ -5,8 +5,8 @@
 #ifndef RMEM_RUN_H_
 #define RMEM_RUN_H_
 
-#define m_max_ttl_size (1<<24)
-#define m_min_msg_size (1<<20)
+#define m_max_ttl_size (1<<22)
+#define m_min_msg_size (1<<15)
 
 #define m_msg_size(n, size, type)                                            \
     ({                                                                       \

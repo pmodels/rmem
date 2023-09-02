@@ -1,6 +1,6 @@
 #!/bin/bash -l
 #SBATCH --partition=gpu
-#SBATCH --time=0:30:00
+#SBATCH --time=0:10:00
 #SBATCH --ntasks=4
 #SBATCH --nodes=2
 #SBATCH --account=p200210

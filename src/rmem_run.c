@@ -12,7 +12,7 @@
 #define n_measure       50
 #define n_warmup        5
 #define retry_threshold 0.05
-#define retry_max       2
+#define retry_max       5
 #define bar_max         50
 
 //==================================================================================================
@@ -40,6 +40,9 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
     }
     //----------------------------------------------------------------------------------------------
     for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
+        if (is_sender(comm->rank)) {
+            m_log("-> doing now %d msgs ",imsg);
+        }
         const int idx_msg = log10(imsg) / log10(2.0);
         const size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
         for (size_t msg_size = 1; msg_size <= max_msg_size; msg_size *= 2) {

@@ -214,7 +214,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     free(mem->ofi.sync.cqdata_ps);
     free(mem->ofi.sync.cqdata_cw);
     // free the MRs
-    m_log("closing user memory");
+    m_verb("closing user memory");
     m_rmem_call(ofi_util_mr_close(mem->ofi.mr.mr));
     free(mem->ofi.mr.key_list);
     free(mem->ofi.mr.base_list);
