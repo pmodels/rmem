@@ -41,7 +41,7 @@ typedef struct {
 typedef struct {
     void* data;
     void (*pre)(run_param_t* param, void*);
-    double (*run)(run_param_t* param, void*);
+    double (*run)(run_param_t* param, void*,void*);
     void (*post)(run_param_t* param, void*);
 } run_t;
 
@@ -63,10 +63,10 @@ void p2p_pre_send(run_param_t* param, void* data);
 void p2p_pre_recv(run_param_t* param, void* data);
 void p2p_post_send(run_param_t* param, void* data);
 void p2p_post_recv(run_param_t* param, void* data);
-double p2p_run_send(run_param_t* param, void* data);
-double p2p_run_recv(run_param_t* param, void* data);
-double p2p_fast_run_send(run_param_t* param, void* data);
-double p2p_fast_run_recv(run_param_t* param, void* data);
+double p2p_run_send(run_param_t* param, void* data, void* ack);
+double p2p_run_recv(run_param_t* param, void* data, void* ack);
+double p2p_fast_run_send(run_param_t* param, void* data, void* ack);
+double p2p_fast_run_recv(run_param_t* param, void* data, void* ack);
 
 //--------------------------------------------------------------------------------------------------
 // PRE
@@ -86,13 +86,13 @@ void rma_post(run_param_t* param, void* data);
 // RUN
 //----------------
 // send
-double rma_run_send(run_param_t* param, void* data);
-double rma_fast_run_send(run_param_t* param, void* data);
-double lat_run_send(run_param_t* param, void* data);
+double rma_run_send(run_param_t* param, void* data, void* ack);
+double rma_fast_run_send(run_param_t* param, void* data, void* ack);
+double lat_run_send(run_param_t* param, void* data, void* ack);
 // recv
-double rma_run_recv(run_param_t* param, void* data);
-double rma_fast_run_recv(run_param_t* param, void* data);
-double sig_run_recv(run_param_t* param, void* data);
-double lat_run_recv(run_param_t* param, void* data);
+double rma_run_recv(run_param_t* param, void* data, void* ack);
+double rma_fast_run_recv(run_param_t* param, void* data, void* ack);
+double sig_run_recv(run_param_t* param, void* data, void* ack);
+double lat_run_recv(run_param_t* param, void* data, void* ack);
 
 #endif

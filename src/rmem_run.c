@@ -13,8 +13,106 @@
 #define n_warmup        5
 #define retry_threshold 0.05
 #define retry_max       5
-#define bar_max         50
+#define n_repeat_offset 5
 
+//==================================================================================================
+typedef struct {
+    union {
+        double val;
+        struct timespec time;
+    } tmp;
+    ofi_p2p_t send;
+    ofi_p2p_t recv;
+} ack_t;
+static void ack_init(ack_t* ack, ofi_comm_t* comm) {
+    ack->tmp.val = 0;
+    ack->send = (ofi_p2p_t){
+        .buf = &ack->tmp,
+        .count = sizeof(ack->tmp),
+        .tag = 0xffffffff,
+        .peer = (comm->rank + 1) % comm->size,
+    };
+    ack->recv = (ofi_p2p_t)ack->send;
+    ofi_send_init(&ack->send, 0, comm);
+    ofi_recv_init(&ack->recv, 0, comm);
+}
+static void ack_send(ack_t* ack) {
+    ofi_p2p_start(&ack->send);
+    ofi_p2p_wait(&ack->send);
+}
+static void ack_wait(ack_t* ack) {
+    ofi_p2p_start(&ack->recv);
+    ofi_p2p_wait(&ack->recv);
+}
+static void ack_send_withval(ack_t* ack, double val) {
+    ack->tmp.val = val;
+    ofi_p2p_start(&ack->send);
+    ofi_p2p_wait(&ack->send);
+}
+static double ack_wait_withval(ack_t* ack) {
+    ofi_p2p_start(&ack->recv);
+    ofi_p2p_wait(&ack->recv);
+    return ack->tmp.val;
+}
+static void ack_send_withtime(ack_t* ack, struct timespec* t) {
+    ack->tmp.time.tv_sec = t->tv_sec;
+    ack->tmp.time.tv_nsec = t->tv_nsec;
+    ofi_p2p_start(&ack->send);
+    ofi_p2p_wait(&ack->send);
+}
+static void ack_wait_withtime(ack_t* ack, struct timespec* t) {
+    ofi_p2p_start(&ack->recv);
+    ofi_p2p_wait(&ack->recv);
+    t->tv_sec = ack->tmp.time.tv_sec;
+    t->tv_nsec = ack->tmp.time.tv_nsec;
+}
+static void ack_free(ack_t* ack) {
+    ofi_p2p_free(&ack->send);
+    ofi_p2p_free(&ack->recv);
+}
+
+static void ack_offset_sender(ack_t* ack) {
+    // start with exposure epoch with the reference time
+    ack_send(ack);
+    for (int i = 0; i < n_repeat_offset; ++i) {
+        // wait to recv t1
+        ack_wait(ack);
+        // obtain t2 and send it
+        struct timespec t2;
+        m_gettime(&t2);
+        ack_send_withtime(ack, &t2);
+    }
+    // wait for recv side completion
+    ack_wait(ack);
+}
+static double ack_offset_recver(ack_t* ack) {
+    struct timespec t1, t2, t3;
+    struct timespec tseed;
+    double offset = 0.0;
+    m_gettime(&tseed);
+    // wait for the sender side to be ready
+    ack_wait(ack);
+    for (int i = 0; i < n_repeat_offset; ++i) {
+        m_gettime(&t1);
+        ack_send(ack);
+        // receive T2 and get t3
+        ack_wait_withtime(ack, &t2);
+        m_gettime(&t3);
+        // d = latency, o = offset: T_sender = T_receiver + o
+        // T2 - (T1 + o) = d
+        // (T3 + o) - T2 = d
+        // (T3 + o - T2) - (T2 - T1 - o) = o => o = (T3+T1)/2 - T2
+        // note: we take the diff with the seed first to avoid overflow
+        double wt1 = m_get_wtimes(tseed, t1);
+        double wt2 = m_get_wtimes(tseed, t2);
+        double wt3 = m_get_wtimes(tseed, t3);
+        offset += (0.5 * (wt1 + wt3) - wt2) / n_repeat_offset;
+    }
+    // notify completion
+    ack_send(ack);
+    m_log("average offset = %f",offset);
+    return offset;
+}
 //==================================================================================================
 void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timings) {
     // retrieve useful parameters
@@ -38,6 +136,9 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
     } else {
         ofi_send_init(&p2p_retry, 0, comm);
     }
+    //----------------------------------------------------------------------------------------------
+    ack_t ack;
+    ack_init(&ack, param.comm);
     //----------------------------------------------------------------------------------------------
     for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
         if (is_sender(comm->rank)) {
@@ -66,7 +167,7 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                 *retry_ptr = 1;
                 while (*retry_ptr) {
                     for (int it = -n_warmup; it < n_measure; ++it) {
-                        time[(it >= 0) ? it : 0] = sender->run(&cparam, sender->data);
+                        time[(it >= 0) ? it : 0] = sender->run(&cparam, sender->data, &ack);
                     }
                     // post process time
                     double tavg, ci;
@@ -88,7 +189,7 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                 *retry_ptr = 1;
                 while (*retry_ptr) {
                     for (int it = -n_warmup; it < n_measure; ++it) {
-                        time[(it >= 0) ? it : 0] = recver->run(&cparam, recver->data);
+                        time[(it >= 0) ? it : 0] = recver->run(&cparam, recver->data, &ack);
                     }
                     // get the CI + the retry
                     double tavg, ci;
@@ -113,6 +214,7 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
             }
         }
     }
+    ack_free(&ack);
     m_rmem_call(ofi_p2p_free(&p2p_retry));
     free(retry_ptr);
 }
@@ -178,15 +280,17 @@ void p2p_post_send(run_param_t* param, void* data) {
 void p2p_post_recv(run_param_t* param, void* data) {
     p2p_dealloc(param,data);
 }
-double p2p_run_send(run_param_t* param, void* data) {
+double p2p_run_send(run_param_t* param, void* data, void* ack_ptr) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
+    ack_t* ack = (ack_t*)ack_ptr;
     ofi_p2p_t* p2p = d->p2p;
     const int n_msg = param->n_msg;
 
     double time;
     rmem_prof_t prof = {.name = "send"};
 
-    PMI_Barrier();
+    //------------------------------------------------
+    ack_offset_sender(ack);
     // start exposure
     m_rmem_prof(prof, time) {
         for (int j = 0; j < n_msg; ++j) {
@@ -196,10 +300,13 @@ double p2p_run_send(run_param_t* param, void* data) {
             ofi_p2p_wait(p2p + j);
         }
     }
+    // send the starting time from the profiler
+    ack_send_withtime(ack, &prof.t0);
     return time;
 }
-double p2p_run_recv(run_param_t* param, void* data) {
+double p2p_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
+    ack_t* ack = (ack_t*)ack_ptr;
     ofi_p2p_t* p2p = d->p2p;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
@@ -208,7 +315,7 @@ double p2p_run_recv(run_param_t* param, void* data) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    PMI_Barrier();
+    const double offset = ack_offset_recver(ack);
     m_rmem_prof(prof, time) {
         for (int j = 0; j < n_msg; ++j) {
             ofi_p2p_start(p2p + j);
@@ -217,6 +324,14 @@ double p2p_run_recv(run_param_t* param, void* data) {
             ofi_p2p_wait(p2p + j);
         }
     }
+    // T sender = t recver + offset => T recver = T sender - offset
+    // time elapsed = (T recver -  (T sender - offset))
+    struct timespec tsend;
+    ack_wait_withtime(ack,&tsend);
+    double sync_time = m_get_wtimes(tsend, prof.t1) + offset;
+    m_verb("estimated time of comms = %f vs previously measured one %f, offset is %f", sync_time,
+           time, offset);
+
     //------------------------------------------------
     // check the result
     for (int i = 0; i < ttl_len; ++i) {
@@ -230,11 +345,14 @@ double p2p_run_recv(run_param_t* param, void* data) {
 #endif
         d->buf[i] = 0;
     }
-    return time;
+    return sync_time;
 }
-double p2p_fast_run_send(run_param_t* param, void* data) { return p2p_run_send(param, data); }
-double p2p_fast_run_recv(run_param_t* param, void* data) {
+double p2p_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_send(param, data, ack_ptr);
+}
+double p2p_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
+    ack_t* ack = (ack_t*)ack_ptr;
     ofi_p2p_t* p2p = d->p2p;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
@@ -352,8 +470,9 @@ void rma_post(run_param_t* param, void* data) {
 }
 
 //--------------------------------------------------------------------------------------------------
-double rma_run_send(run_param_t* param, void* data) {
+double rma_run_send(run_param_t* param, void* data,void* ack_ptr) {
     run_rma_data_t* d = (run_rma_data_t*)data;
+    ack_t* ack = (ack_t*) ack_ptr;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
     const size_t ttl_len = n_msg * msg_size;
@@ -362,9 +481,12 @@ double rma_run_send(run_param_t* param, void* data) {
     double time;
     rmem_prof_t prof = {.name = "send"};
     //------------------------------------------------
-    PMI_Barrier();  // start exposure
+    // send a readiness signal
+    ack_send(ack);
+    // start the request
+    ofi_rmem_start(1, &buddy, param->mem, param->comm);
+    // injection can only be measure on the time to put the msgs and complete
     m_rmem_prof(prof, time) {
-        ofi_rmem_start(1, &buddy, param->mem, param->comm);
         for (int j = 0; j < n_msg; ++j) {
             ofi_rma_start(param->mem, d->rma + j);
         }
@@ -372,8 +494,9 @@ double rma_run_send(run_param_t* param, void* data) {
     }
     return time;
 }
-double rma_fast_run_send(run_param_t* param, void* data) {
+double rma_fast_run_send(run_param_t* param, void* data,void* ack_ptr) {
     run_rma_data_t* d = (run_rma_data_t*)data;
+    ack_t* ack = (ack_t*) ack_ptr;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
     const size_t ttl_len = n_msg * msg_size;
@@ -382,9 +505,10 @@ double rma_fast_run_send(run_param_t* param, void* data) {
     double time;
     rmem_prof_t prof = {.name = "send"};
     //------------------------------------------------
-    PMI_Barrier();  // start exposure
+    // send a readiness signal
+    ack_send(ack);
+    ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
     m_rmem_prof(prof, time) {
-        ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
         for (int j = 0; j < n_msg; ++j) {
             ofi_rma_start(param->mem, d->rma + j);
         }
@@ -392,8 +516,9 @@ double rma_fast_run_send(run_param_t* param, void* data) {
     }
     return time;
 }
-double lat_run_send(run_param_t* param, void* data) {
+double lat_run_send(run_param_t* param, void* data,void* ack_ptr) {
     run_rma_data_t* d = (run_rma_data_t*)data;
+    ack_t* ack = (ack_t*) ack_ptr;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
     const size_t ttl_len = n_msg * msg_size;
@@ -403,7 +528,7 @@ double lat_run_send(run_param_t* param, void* data) {
     rmem_prof_t prof = {.name = "send"};
     //------------------------------------------------
     ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
-    PMI_Barrier();  // start exposure
+    ack_send(ack);
     m_rmem_prof(prof, time) {
         for (int j = 0; j < n_msg; ++j) {
             ofi_rma_start(param->mem, d->rma + j);
@@ -414,8 +539,9 @@ double lat_run_send(run_param_t* param, void* data) {
 }
 
 //--------------------------------------------------------------------------------------------------
-double rma_run_recv(run_param_t* param, void* data) {
+double rma_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     run_rma_data_t* d = (run_rma_data_t*)data;
+    ack_t* ack = (ack_t*) ack_ptr;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
     const size_t ttl_len = n_msg * msg_size;
@@ -424,7 +550,8 @@ double rma_run_recv(run_param_t* param, void* data) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    PMI_Barrier();
+    // wait for the readiness signal
+    ack_wait(ack);
     m_rmem_prof(prof, time) {
         ofi_rmem_post(1, &buddy, param->mem, param->comm);
         ofi_rmem_wait(1, &buddy, param->mem, param->comm);
@@ -445,8 +572,9 @@ double rma_run_recv(run_param_t* param, void* data) {
     }
     return time;
 }
-double rma_fast_run_recv(run_param_t* param, void* data) {
+double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     run_rma_data_t* d = (run_rma_data_t*)data;
+    ack_t* ack = (ack_t*) ack_ptr;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
     const size_t ttl_len = n_msg * msg_size;
@@ -455,7 +583,7 @@ double rma_fast_run_recv(run_param_t* param, void* data) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    PMI_Barrier();
+    ack_wait(ack);
     m_rmem_prof(prof, time) {
         ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
         ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
@@ -477,8 +605,9 @@ double rma_fast_run_recv(run_param_t* param, void* data) {
     return time;
 }
 
-double sig_run_recv(run_param_t* param, void* data) {
+double sig_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     run_rma_data_t* d = (run_rma_data_t*)data;
+    ack_t* ack = (ack_t*) ack_ptr;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
     const size_t ttl_len = n_msg * msg_size;
@@ -487,7 +616,7 @@ double sig_run_recv(run_param_t* param, void* data) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    PMI_Barrier();
+    ack_wait(ack);
     m_rmem_prof(prof, time) {
         ofi_rmem_post(1, &buddy, param->mem, param->comm);
         ofi_rmem_sig_wait(n_msg, param->mem, param->comm);
@@ -509,8 +638,9 @@ double sig_run_recv(run_param_t* param, void* data) {
     }
     return time;
 }
-double lat_run_recv(run_param_t* param, void* data) {
+double lat_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     run_rma_data_t* d = (run_rma_data_t*)data;
+    ack_t* ack = (ack_t*) ack_ptr;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
     const size_t ttl_len = n_msg * msg_size;
@@ -520,7 +650,7 @@ double lat_run_recv(run_param_t* param, void* data) {
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
     ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
-    PMI_Barrier();
+    ack_wait(ack);
     m_rmem_prof(prof, time) { ofi_rmem_wait_fast(n_msg, param->mem, param->comm); }
     //------------------------------------------------
     // check the result
