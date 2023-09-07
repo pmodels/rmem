@@ -101,16 +101,17 @@ static double ack_offset_recver(ack_t* ack) {
         // d = latency, o = offset: T_sender = T_receiver + o
         // T2 - (T1 + o) = d
         // (T3 + o) - T2 = d
-        // (T3 + o - T2) - (T2 - T1 - o) = o => o = (T3+T1)/2 - T2
+        // (T3 + o - T2) - (T2 - T1 - o) = 0
+        // <=> T3 + T1 - 2 T2 + 2 o = 0
+        // <=> o = T2 - 1/2 (T3 + T1)
         // note: we take the diff with the seed first to avoid overflow
         double wt1 = m_get_wtimes(tseed, t1);
         double wt2 = m_get_wtimes(tseed, t2);
         double wt3 = m_get_wtimes(tseed, t3);
-        offset += (0.5 * (wt1 + wt3) - wt2) / n_repeat_offset;
+        offset += (wt2 - 0.5 * (wt1 + wt3)) / n_repeat_offset;
     }
     // notify completion
     ack_send(ack);
-    m_log("average offset = %f",offset);
     return offset;
 }
 //==================================================================================================
