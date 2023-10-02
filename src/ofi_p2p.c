@@ -19,7 +19,7 @@ static int ofi_p2p_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, cons
     };
     p2p->ofi.msg = (struct fi_msg_tagged){
         .msg_iov = &p2p->ofi.iov,
-        .desc = &p2p->ofi.desc_local,
+        .desc = &p2p->ofi.mr.desc,
         .iov_count = 1,
         .addr = ctx->p2p_addr[p2p->peer],
         .tag = ofi_set_tag(ctx_id, p2p->tag),
@@ -36,7 +36,7 @@ static int ofi_p2p_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, cons
     }
     // set the progress param
     p2p->ofi.progress.cq = ctx->p2p_cq;
-    p2p->ofi.progress.fallback_ctx = NULL;
+    p2p->ofi.progress.xctx.epoch_ptr = NULL;
     // flag
     // we can use the inject (or FI_INJECT_COMPLETE) only if autoprogress cap is ON. Otherwise, not
     // reading the cq will lead to no progress, see issue https://github.com/pmodels/rmem/issues/4
@@ -46,10 +46,10 @@ static int ofi_p2p_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, cons
     p2p->ofi.flags |= do_inject ? FI_INJECT : 0x0;
     p2p->ofi.flags |= (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
     //----------------------------------------------------------------------------------------------
-    m_rmem_call(ofi_util_mr_reg(p2p->buf, p2p->count, FI_SEND | FI_RECV, comm, &p2p->ofi.mr_local,
-                                &p2p->ofi.desc_local, NULL));
-    m_rmem_call(ofi_util_mr_bind(ctx->p2p_ep, p2p->ofi.mr_local, NULL, comm));
-    m_rmem_call(ofi_util_mr_enable(p2p->ofi.mr_local, comm, NULL));
+    m_rmem_call(ofi_util_mr_reg(p2p->buf, p2p->count, FI_SEND | FI_RECV, comm, &p2p->ofi.mr.mr,
+                                &p2p->ofi.mr.desc, NULL));
+    m_rmem_call(ofi_util_mr_bind(ctx->p2p_ep, p2p->ofi.mr.mr, NULL, comm));
+    m_rmem_call(ofi_util_mr_enable(p2p->ofi.mr.mr, comm, NULL));
 
     return m_success;
 }
@@ -86,6 +86,6 @@ int ofi_p2p_start(ofi_p2p_t* p2p) {
 
 
 int ofi_p2p_free(ofi_p2p_t* p2p) {
-    m_rmem_call(ofi_util_mr_close(p2p->ofi.mr_local));
+    m_rmem_call(ofi_util_mr_close(p2p->ofi.mr.mr));
     return m_success;
 }

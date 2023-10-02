@@ -46,10 +46,16 @@ OFI_INC ?= $(OFI_DIR)/include
 OFI_LIB ?= $(OFI_DIR)/lib
 OFI_LIBNAME ?= -lfabric
 
+# ARGP
+ARGP_DIR ?= /usr
+ARGP_INC ?= $(ARGP_DIR)/include
+ARGP_LIB ?= $(ARGP_DIR)/lib
+ARGP_LIBNAME ?= -largp
+
 #---------------------------------------------------------------------------------------------------
 # includes
-INC += -I$(PMI_INC)
 INC += -I$(OFI_INC)
+INC += -I$(PMI_INC)
 # pthread 
 INC += -pthread
 # gcc need this special define to handle time measurement
@@ -58,16 +64,24 @@ INC += -D_POSIX_C_SOURCE=199309L
 endif
 
 # add the link options
+LIB =
 LIB += -lpthread -lm
-LIB += -L$(PMI_LIB) $(PMI_LIBNAME)
 LIB += -L$(OFI_LIB) $(OFI_LIBNAME)
+LIB += -L$(PMI_LIB) $(PMI_LIBNAME)
 # different way of doing rpath
 ifeq ($(USE_CUDA),1)
-LIB += -rpath=$(PMI_LIB)
 LIB += -rpath=$(OFI_LIB)
+LIB += -rpath=$(PMI_LIB)
 else
-LIB += -Wl,-rpath,$(PMI_LIB)
 LIB += -Wl,-rpath,$(OFI_LIB)
+LIB += -Wl,-rpath,$(PMI_LIB)
+endif
+
+# if not gcc, add argp lib
+ifeq (,$(findstring gcc,$(CC)))
+INC += -I$(ARGP_INC)
+LIB += -L$(ARGP_LIB) $(ARGP_LIBNAME)
+LIB += -Wl,-rpath,$(ARGP_LIB)
 endif
 
 #---------------------------------------------------------------------------------------------------
@@ -91,7 +105,7 @@ endif
 ################################################################################
 # mandatory flags
 CCFLAGS ?=
-CCFLAGS += -Wno-deprecated-declarations
+CCFLAGS += -Wno-deprecated-declarations -Wshadow
 ifneq (,$(GIT_COMMIT))
 CCFLAGS += -DGIT_COMMIT=\"$(GIT_COMMIT)\"   
 endif

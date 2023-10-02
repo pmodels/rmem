@@ -21,7 +21,6 @@
 #define M_BACKTRACE 1
 #endif
 
-
 #define m_success EXIT_SUCCESS
 #define m_failure EXIT_FAILURE
 
@@ -32,27 +31,27 @@ void PrintBackTrace();
 
 //==============================================================================
 #define m_max(a, b)                                      \
-    do {                                                 \
+    ({                                                   \
         __typeof__(a) m_max_a_ = (a);                    \
         __typeof__(b) m_max_b_ = (b);                    \
         (m_max_a_ > m_max_b_) ? (m_max_a_) : (m_max_b_); \
-    } while (0)
+    })
 
 //------------------------------------------------------------------------------
 #define m_min(a, b)                                      \
-    do {                                                 \
+    ({                                                   \
         __typeof__(a) m_min_a_ = (a);                    \
         __typeof__(b) m_min_b_ = (b);                    \
         (m_min_a_ < m_min_b_) ? (m_min_a_) : (m_min_b_); \
-    } while (0)
+    })
 
 //------------------------------------------------------------------------------
 #define m_sign(a)                                                \
-    do {                                                         \
+    ({                                                           \
         __typeof__(a) m_sign_a_ = (a);                           \
         __typeof__(a) m_sign_zero_ = 0;                          \
         (m_sign_zero_ < m_sign_a_) - (m_sign_a_ < m_sign_zero_); \
-    } while (0)
+    })
 
 //==============================================================================
 // LOGGING
@@ -64,12 +63,10 @@ void PrintBackTrace();
  *
  */
 #ifndef LOG_MUTE
-#define m_log_def(header_name, format, ...)                        \
-    do {                                                           \
-        char m_log_def_msg_[1024];                                 \
-        sprintf(m_log_def_msg_, format, ##__VA_ARGS__);            \
-        fprintf(stdout, "[%s] %s\n", header_name, m_log_def_msg_); \
-        fflush(stdout);                                            \
+#define m_log_def(header_name, format, ...)                               \
+    do {                                                                  \
+        fprintf(stdout, "[" header_name "] " format "\n", ##__VA_ARGS__); \
+        fflush(stdout);                                                   \
     } while (0)
 #else  // LOG_MUTE
 #define m_log_def(header_name, format, ...) \
@@ -84,11 +81,9 @@ void PrintBackTrace();
  *
  */
 #ifdef VERBOSE
-#define m_verb_def(header_name, format, ...)                        \
-    do {                                                            \
-        char m_verb_def_msg_[1024];                                 \
-        sprintf(m_verb_def_msg_, format, ##__VA_ARGS__);            \
-        fprintf(stdout, "[%s] %s\n", header_name, m_verb_def_msg_); \
+#define m_verb_def(header_name, format, ...)                              \
+    do {                                                                  \
+        fprintf(stdout, "[" header_name "] " format "\n", ##__VA_ARGS__); \
     } while (0)
 #else  // VERBOSE
 #define m_verb_def(header_name, format, ...) \
@@ -124,30 +119,27 @@ void PrintBackTrace();
 #define m_assert(cond, ...) m_assert_def("rmem", cond, ##__VA_ARGS__)
 
 //------------------------------------------------------------------------------
-#define m_error_def(header_name, format, ...)                      \
-    do {                                                           \
-        char m_log_def_msg_[1024];                                 \
-        sprintf(m_log_def_msg_, format, ##__VA_ARGS__);            \
-        fprintf(stderr, "[%s] %s\n", header_name, m_log_def_msg_); \
-        fflush(stderr);                                            \
-        return m_failure;                                          \
+#define m_error_def(header_name, format, ...)                             \
+    do {                                                                  \
+        fprintf(stderr, "[" header_name "] " format "\n", ##__VA_ARGS__); \
+        fflush(stderr);                                                   \
+        return m_failure;                                                 \
     } while (0)
 
 #define m_error(cond, ...) m_error_def("rmem", cond, ##__VA_ARGS__)
 
 //------------------------------------------------------------------------------
 #ifndef NDEBUG
-#define m_rmem_call(func)                                                          \
-    do {                                                                          \
-        int m_pmi_call_res = func;                                                \
+#define m_rmem_call(func)                                                       \
+    do {                                                                        \
+        int m_pmi_call_res = func;                                              \
         m_assert(m_pmi_call_res == m_success, "PMI ERROR: %d", m_pmi_call_res); \
     } while (0)
 #else
-#define m_rmem_call(func)                                                          \
-    do {                 \
-        func;            \
+#define m_rmem_call(func) \
+    do {                  \
+        func;             \
     } while (0)
 #endif
-
 
 #endif

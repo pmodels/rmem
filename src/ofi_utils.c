@@ -21,7 +21,7 @@
             fi_getinfo(fi_version(), NULL, NULL, 0ULL, hint, &test_prov); \
             if (!test_prov) {                                             \
                 m_log("imposible to set" #field " to " #value "> ooops"); \
-                hints->field &= ~(value);                                 \
+                hint->field &= ~(value);                                  \
             } else {                                                      \
                 fi_freeinfo(test_prov);                                   \
                 m_verb("successfully set " #field " to " #value);         \
@@ -42,10 +42,10 @@
                 m_assert(0, "imposible to set" #field " to " #value);     \
             } else {                                                      \
                 fi_freeinfo(test_prov);                                   \
-                m_verb("successfully set " #field " to " #value);          \
+                m_verb("successfully set " #field " to " #value);         \
             }                                                             \
         } else {                                                          \
-            m_verb(#field " already has " #value);                         \
+            m_verb(#field " already has " #value);                        \
         }                                                                 \
     } while (0)
 
@@ -54,38 +54,177 @@ typedef enum {
     M_OFI_EP_KIND_SHARED,
 } ofi_ep_kind_t;
 
-int ofi_prov_score(char* provname) {
+static int ofi_prov_score(char* provname, ofi_cap_t* caps) {
     if (0 == strcmp(provname, "cxi")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_RMA_EVENT | M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_FENCE;
+        }
         return 3;
-    } else if (0 == strcmp(provname, "psm3")) {
+    } else if (0 == strcmp(provname, "verbs;ofi_rxm")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA
+#if (!M_FORCE_MR_LOCAL)
+                    | M_OFI_PROV_HAS_ATOMIC
+#endif
+                ;
+        }
         return 2;
+    } else if (0 == strcmp(provname, "psm3")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_RMA_EVENT | M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA;
+        }
+        return 1;
     } else if (0 == strcmp(provname, "sockets")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA;
+        }
+        return 1;
+    } else if (0 == strcmp(provname, "tcp;ofi_rxm")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_CQ_DATA
+#if (!M_FORCE_MR_LOCAL)
+                    | M_OFI_PROV_HAS_ATOMIC
+#endif
+                ;
+        }
+        return 1;
+    } else if (0 == strcmp(provname, "tcp")) {
+        if (caps) {
+            *caps = M_OFI_PROV_HAS_CQ_DATA;
+        }
         return 1;
     }
     return 0;
 }
 
-#if (M_WRITE_DATA)
-#define ofi_sig_cap 0x0
-#else
-#define ofi_sig_cap FI_FENCE | FI_ATOMIC
-#endif
-#if (M_SYNC_RMA_EVENT)
-#define ofi_syn_cap FI_RMA_EVENT
-#else
-#define ofi_syn_cap 0x0
-#endif
-#define ofi_cap FI_MSG | FI_TAGGED | FI_RMA | FI_DIRECTED_RECV | ofi_sig_cap | ofi_syn_cap
-// #define ofi_cap_ops_tx   FI_READ | FI_WRITE | FI_SEND | FI_ATOMIC
-// #if (M_SYNC_RMA_EVENT)
-// #define ofi_cap_ops_rx \
-//     FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_RMA_EVENT | FI_DIRECTED_RECV
-// #else
-// #define ofi_cap_ops_rx \
-//     FI_ATOMIC | FI_REMOTE_READ | FI_REMOTE_WRITE | FI_RECV | FI_REMOTE_CQ_DATA | FI_DIRECTED_RECV
-// #endif
+/**
+ * @brief given a provider's capability set, determine the best modes to use
+ */
+static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_cap) {
+    //----------------------------------------------------------------------------------------------
+    // [1] ready-to-receive
+    if (mode->rtr_mode) {
+        switch (mode->rtr_mode) {
+            case (M_OFI_RTR_NULL):
+                m_assert(0, "null is not supported here");
+                break;
+            case M_OFI_RTR_MSG:
+                m_verb("PROV MODE - RTR: doing msgs");
+                *ofi_cap |= FI_MSG;
+                break;
+            case M_OFI_RTR_ATOMIC:
+                m_verb("PROV MODE - RTR: doing atomic");
+                *ofi_cap |= FI_ATOMIC;
+                m_assert(m_ofi_prov_has_atomic(*prov_cap), "provider needs atomics capabilities");
+                break;
+            case M_OFI_RTR_TAGGED:
+                m_verb("PROV MODE - RTR: doing tagged");
+                *ofi_cap |= FI_TAGGED;
+                break;
+        }
+    } else {
+        *ofi_cap |= FI_MSG;
+        mode->rtr_mode = M_OFI_RTR_MSG;
+        m_verb("PROV MODE - RTR: doing msgs");
+    }
+    //----------------------------------------------------------------------------------------------
+    // [4] down-to-close
+    if (mode->dtc_mode) {
+        switch (mode->dtc_mode) {
+            case (M_OFI_RTR_NULL):
+                m_assert(0, "null is not supported here");
+                break;
+            case M_OFI_RTR_MSG:
+                m_verb("PROV MODE - DTC: doing msgs");
+                *ofi_cap |= FI_MSG;
+                break;
+            case M_OFI_RTR_TAGGED:
+                m_verb("PROV MODE - DTC: doing tagged");
+                *ofi_cap |= FI_TAGGED;
+                break;
+        }
+    } else {
+        *ofi_cap |= FI_MSG;
+        mode->dtc_mode = M_OFI_DTC_MSG;
+        m_verb("PROV MODE - DTC: doing msgs");
+    }
+    //----------------------------------------------------------------------------------------------
+    // [2] remote completion
+    if (mode->rcmpl_mode) {
+        switch (mode->rcmpl_mode) {
+            case (M_OFI_RCMPL_NULL):
+                m_assert(0, "null is not supported here");
+                break;
+            case M_OFI_RCMPL_CQ_DATA:
+                m_verb("PROV MODE - RCMPL: doing cq data");
+                m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
+                break;
+            case M_OFI_RCMPL_REMOTE_CNTR:
+                m_verb("PROV MODE - RCMPL: doing remote counter");
+                *ofi_cap |= FI_RMA_EVENT;
+                m_assert(m_ofi_prov_has_rma_event(*prov_cap),
+                         "provider needs rma event capabilities");
+                break;
+            case M_OFI_RCMPL_FENCE:
+                m_verb("PROV MODE - RCMPL: doing fence");
+                *ofi_cap |= FI_FENCE;
+                m_assert(m_ofi_prov_has_fence(*prov_cap), "provider needs fence capabilities");
+                break;
+            case M_OFI_RCMPL_DELIV_COMPL:
+                m_verb("PROV MODE - RCMPL: doing delivery complete");
+                break;
+        }
+    } else {
+        if (m_ofi_prov_has_cq_data(*prov_cap)) {
+            m_verb("PROV MODE - RCMPL: doing cq data");
+            mode->rcmpl_mode = M_OFI_RCMPL_CQ_DATA;
+        } else if (m_ofi_prov_has_rma_event(*prov_cap)) {
+            *ofi_cap |= FI_RMA_EVENT;
+            m_verb("PROV MODE - RCMPL: doing remote counter");
+            mode->rcmpl_mode = M_OFI_RCMPL_REMOTE_CNTR;
+        } else if (m_ofi_prov_has_fence(*prov_cap)) {
+            m_verb("PROV MODE - RCMPL: doing fence");
+            *ofi_cap |= FI_FENCE;
+            mode->rcmpl_mode = M_OFI_RCMPL_FENCE;
+        } else {
+            m_verb("PROV MODE - RCMPL: doing delivery complete");
+            mode->rcmpl_mode = M_OFI_RCMPL_DELIV_COMPL;
+        }
+    }
+    //----------------------------------------------------------------------------------------------
+    // [3] signal mode
+    if (mode->sig_mode) {
+        switch (mode->sig_mode) {
+            case (M_OFI_SIG_NULL):
+                m_assert(0, "null is not supported here");
+                break;
+            case M_OFI_SIG_CQ_DATA:
+                m_verb("PROV MODE - SIG: doing cq data");
+                m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
+                break;
+            case M_OFI_SIG_ATOMIC:
+                m_verb("PROV MODE - SIG: doing atomic + fence");
+                *ofi_cap |= FI_ATOMIC | FI_FENCE;
+                m_assert(m_ofi_prov_has_atomic(*prov_cap), "provider needs atomics capabilities");
+                m_assert(m_ofi_prov_has_fence(*prov_cap), "provider needs fencing capabilities");
+                break;
+        }
+    } else {
+        if (m_ofi_prov_has_cq_data(*prov_cap)) {
+            m_verb("PROV MODE - SIG: doing cq data");
+            mode->sig_mode = M_OFI_SIG_CQ_DATA;
+        } else if (m_ofi_prov_has_atomic(*prov_cap) && m_ofi_prov_has_fence(*prov_cap)) {
+            m_verb("PROV MODE - SIG: doing atomic + fence");
+            *ofi_cap |= FI_ATOMIC | FI_FENCE;
+            mode->sig_mode = M_OFI_SIG_ATOMIC;
+        } else {
+            m_assert(0, "unable to use signals");
+        }
+    }
+    return m_success;
+}
 
-int ofi_util_get_prov(struct fi_info** prov) {
+int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     // get the list of available providers and select the best one
     int ofi_ver = fi_version();
     int best_score = -1;
@@ -93,12 +232,16 @@ int ofi_util_get_prov(struct fi_info** prov) {
     struct fi_info* prov_list = NULL;
     m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, NULL, &prov_list));
     for (struct fi_info* cprov = prov_list; cprov; cprov = cprov->next) {
-        int score = ofi_prov_score(cprov->fabric_attr->prov_name);
+        int score = ofi_prov_score(cprov->fabric_attr->prov_name,NULL);
         if (score > best_score) {
             best_score = score;
             best_prov = cprov;
         }
     }
+    // get the set of capabilities
+    uint8_t prov_cap = 0x00;
+    best_score = ofi_prov_score(best_prov->fabric_attr->prov_name, &prov_cap);
+    m_assert(prov_cap, "we need at least a few capabilities (cannot be %d)", prov_cap);
     char* prov_name = best_prov->fabric_attr->prov_name;
     m_verb("best provider is %s", prov_name);
 
@@ -107,11 +250,11 @@ int ofi_util_get_prov(struct fi_info** prov) {
     hints->fabric_attr->prov_name = malloc(strlen(prov_name) + 1);
     strcpy(hints->fabric_attr->prov_name, prov_name);
     fi_freeinfo(prov_list);  // no need of prov_list anymore
-    
-    // set the mode bits to 1, not doing this leads to provider selection failure
- //    hints->mode = ~0;
-	// hints->domain_attr->mode = ~0;
-	// hints->domain_attr->mr_mode = ~(FI_MR_BASIC | FI_MR_SCALABLE);
+
+    //----------------------------------------------------------------------------------------------
+    // get the operational modes
+    uint64_t mycap = FI_MSG | FI_TAGGED | FI_RMA | FI_DIRECTED_RECV;
+    m_rmem_call(ofi_prov_mode(&prov_cap, prov_mode, &mycap));
 
     //----------------------------------------------------------------------------------------------
     // basic requirement are the modes and the caps
@@ -123,39 +266,24 @@ int ofi_util_get_prov(struct fi_info** prov) {
     hints->mode |= FI_CONTEXT;
     // do not bind under the same cq/counter different capabilities endpoints
     hints->mode |= FI_RESTRICTED_COMP;
-    hints->domain_attr->mode |= FI_RESTRICTED_COMP; 
+    hints->domain_attr->mode |= FI_RESTRICTED_COMP;
     // MR endpoint is supported
     hints->domain_attr->mr_mode |= FI_MR_ENDPOINT;
     // optional:
-    //hints->domain_attr->mr_mode |= FI_MR_LOCAL;
+#if (M_FORCE_MR_LOCAL)
+    hints->domain_attr->mr_mode |= FI_MR_LOCAL;
+#endif
     hints->domain_attr->mr_mode |= FI_MR_PROV_KEY;
     hints->domain_attr->mr_mode |= FI_MR_ALLOCATED;
     hints->domain_attr->mr_mode |= FI_MR_VIRT_ADDR;
 
-    // enable GPU memory if needed and try to get those modes with the minimum caps
-#if (M_HAVE_CUDA)
-    hints->domain_attr->mr_mode |= FI_MR_HMEM;
-    m_ofi_fatal_info(hints, caps, ofi_cap | FI_HMEM);
-#else
-    m_ofi_fatal_info(hints, caps, ofi_cap);  // implies SEND/RECV
-#endif
-
-
-    // improve the selection if required in case of specific usage
-#if (M_SYNC_RMA_EVENT)
-    // request support for MR_RMA_EVENT
-    hints->domain_attr->mr_mode |= FI_MR_RMA_EVENT;
-    m_ofi_fatal_info(hints, caps, FI_RMA_EVENT | FI_REMOTE_READ | FI_REMOTE_WRITE);
-#endif
-#if (!M_WRITE_DATA)
-    m_ofi_fatal_info(hints, caps, FI_ATOMIC | FI_FENCE);  // implies (REMOTE_)READ/WRITE
-#endif
-    m_ofi_fatal_info(hints, caps, FI_ATOMIC);  // implies (REMOTE_)READ/WRITE
+    // Reliable DatagraM (RDM)
+    hints->ep_attr->type = FI_EP_RDM;
+    // make sure the provider has that
+    m_ofi_fatal_info(hints, caps, mycap);
 
     //----------------------------------------------------------------------------------------------
-    // try to get more specific behavior
-    // Reliable Datagram
-    m_ofi_test_info(hints, ep_attr->type, FI_EP_RDM);
+    // optional
     // try to use shared context (reduces the memory)
     m_ofi_test_info(hints, ep_attr->tx_ctx_cnt, FI_SHARED_CONTEXT);
     m_ofi_test_info(hints, ep_attr->rx_ctx_cnt, FI_SHARED_CONTEXT);
@@ -168,8 +296,10 @@ int ofi_util_get_prov(struct fi_info** prov) {
     m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
     // m_ofi_test_info(hints, rx_attr->total_buffered_recv, 0);
     // request manual progress (comment when using sockets on MacOs)
+#if (M_FORCE_ASYNC_PROGRESS)
     m_ofi_test_info(hints, domain_attr->data_progress, FI_PROGRESS_MANUAL);
     m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
+#endif
     // no order required
     m_ofi_test_info(hints, tx_attr->msg_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);
@@ -182,6 +312,7 @@ int ofi_util_get_prov(struct fi_info** prov) {
     m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_RX_CQ_DATA");
     m_assert(!((*prov)->mode & FI_ASYNC_IOV), "need to use FI_ASYNC_IOV");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_RAW), "need to use FI_MR_RAW");
+    (*prov)->domain_attr->mr_mode |= FI_MR_LOCAL;
 
     // improsing the modes must happen on (*prov), otherwise it's overwritten when done in hints
     m_verb("%s: is FI_MR_LOCAL required? %d", (*prov)->fabric_attr->prov_name,
@@ -245,13 +376,13 @@ int ofi_util_new_ep(const bool new_ctx, struct fi_info* prov, struct fid_domain*
             m_verb("creating new STX/SRX");
             // create the shared receive and transmit context
             struct fi_tx_attr tx_attr = {
-                .caps = ofi_cap,
+                .caps = prov->caps,
                 .msg_order = FI_ORDER_NONE,
                 .comp_order = FI_ORDER_NONE,
             };
             m_ofi_call(fi_stx_context(dom, &tx_attr, stx, NULL));
             struct fi_rx_attr rx_attr = {
-                .caps = ofi_cap,
+                .caps = prov->caps,
                 .msg_order = FI_ORDER_NONE,
                 .comp_order = FI_ORDER_NONE,
             };
@@ -324,12 +455,13 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
     bool useless = false;
     // don't register if the buffer is NULL or the count is 0
     useless |= (!buf || count == 0);
-    m_verb("memory regitration for %p is useless? %d",buf,useless);
+    m_verb("memory regitration for %p is useless? %d", buf, useless);
     // don't register if mr_mode is not MR_LOCAL or FI_HMEM is enabled
     useless |= access & (FI_READ | FI_WRITE | FI_SEND | FI_RECV) &&
                !(comm->prov->domain_attr->mr_mode & (FI_MR_LOCAL | FI_MR_HMEM));
-    m_verb("memory regitration for %p is useless? %d",buf,useless);
-    // don't dd
+    m_verb("registering %p (count = %lu): access is right?%llu MR_LOCAL? %d", buf, count,
+           access & (FI_READ | FI_WRITE | FI_SEND | FI_RECV),
+           comm->prov->domain_attr->mr_mode & (FI_MR_LOCAL | FI_MR_HMEM));
     // if it's useless, return
     if (useless) {
         m_verb("memory regitration for %p is useless, skip it",buf);
@@ -346,13 +478,12 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
 #else
         uint64_t flags = 0x0;
 #endif
-#if (M_SYNC_RMA_EVENT)
-        if (access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
+        if ((comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_REMOTE_CNTR) &&
+            access & (FI_REMOTE_READ | FI_REMOTE_WRITE)) {
             m_verb("using FI_RMA_EVENT to register the MR");
             m_assert(comm->prov->caps & FI_RMA_EVENT, "the provider must have FI_RMA_EVENT");
             flags |= FI_RMA_EVENT;
         }
-#endif
         // get device and iface
 #if (M_HAVE_CUDA)
         int device;
@@ -498,8 +629,100 @@ int ofi_util_mr_enable(struct fid_mr* mr, ofi_comm_t* comm, uint64_t** key_list)
 
 int ofi_util_mr_close(struct fid_mr* mr){
     if(mr){
+        m_verb("closing memory");
         m_ofi_call(fi_close(&mr->fid));
     }
+    return m_success;
+}
+
+//--------------------------------------------------------------------------------------------------
+int ofi_util_sig_reg(ofi_mem_sig_t* sig, ofi_comm_t* comm) {
+    sig->val = 0;
+    sig->res = 0;
+    sig->inc = 1;
+    m_rmem_call(ofi_util_mr_reg(&sig->val, sizeof(uint32_t), FI_REMOTE_READ | FI_REMOTE_WRITE, comm,
+                                &sig->val_mr.mr, NULL, &sig->val_mr.base_list));
+    m_rmem_call(ofi_util_mr_reg(&sig->inc, sizeof(uint32_t), FI_READ | FI_WRITE, comm,
+                                &sig->inc_mr.mr, &sig->inc_mr.desc, NULL));
+    m_rmem_call(ofi_util_mr_reg(&sig->res, sizeof(uint32_t), FI_READ | FI_WRITE, comm,
+                                &sig->res_mr.mr, &sig->res_mr.desc, NULL));
+    return m_success;
+}
+int ofi_util_sig_bind(ofi_mem_sig_t* sig, struct fid_ep* ep, ofi_comm_t* comm) {
+    m_rmem_call(ofi_util_mr_bind(ep, sig->inc_mr.mr, NULL, comm));
+    m_rmem_call(ofi_util_mr_bind(ep, sig->val_mr.mr, NULL, comm));
+    m_rmem_call(ofi_util_mr_bind(ep, sig->res_mr.mr, NULL, comm));
+    return m_success;
+}
+int ofi_util_sig_enable(ofi_mem_sig_t* sig, ofi_comm_t* comm) {
+    m_rmem_call(ofi_util_mr_enable(sig->val_mr.mr, comm, &sig->val_mr.key_list));
+    m_rmem_call(ofi_util_mr_enable(sig->inc_mr.mr, comm, NULL));
+    m_rmem_call(ofi_util_mr_enable(sig->res_mr.mr, comm, NULL));
+    return m_success;
+}
+int ofi_util_sig_close(ofi_mem_sig_t* sig) {
+    m_rmem_call(ofi_util_mr_close(sig->val_mr.mr));
+    m_rmem_call(ofi_util_mr_close(sig->inc_mr.mr));
+    m_rmem_call(ofi_util_mr_close(sig->res_mr.mr));
+    free(sig->val_mr.key_list);
+    free(sig->val_mr.base_list);
+    return m_success;
+}
+/**
+ * @brief progress till the value exposed in sig has reached the desired threshold
+ *
+ * WARNING: the rank, addr, EP, and CQ in progress MUST be compatible
+*/
+int ofi_util_sig_wait(ofi_mem_sig_t* sig, int myrank, fi_addr_t myaddr, struct fid_ep* ep,
+                           ofi_progress_t* progress, uint32_t threshold) {
+    // setup the data structures
+    ofi_cqdata_t* cqdata = &sig->read_cqdata;
+    cqdata->kind = m_ofi_cq_kind_rqst;
+    m_countr_store(&cqdata->rqst.busy, 0);
+    // even if we read it, we need to provide a source buffer
+    struct fi_ioc iov = {
+        .addr = &sig->inc,
+        .count = 1,
+    };
+    struct fi_ioc res_iov = {
+        .addr = &sig->res,
+        .count = 1,
+    };
+    struct fi_rma_ioc rma_iov = {
+        .count = 1,
+        .addr = sig->val_mr.base_list[myrank] + 0,
+        .key = sig->val_mr.key_list[myrank],
+    };
+    struct fi_msg_atomic msg = {
+        .msg_iov = &iov,
+        .desc = &sig->inc_mr.desc,
+        .iov_count = 1,  // 1,
+        .addr = myaddr,  // myself
+        .rma_iov = &rma_iov,
+        .rma_iov_count = 1,
+        .datatype = FI_INT32,
+        .op = FI_ATOMIC_READ,
+        .data = 0x0,
+        .context = &cqdata->ctx,
+    };
+    int it = 0;
+    while (sig->res < threshold) {
+        // issue a fi_fetch
+        m_verb("issuing an atomic number %d, res = %d", it, sig->res);
+        int curr = m_countr_exchange(&sig->read_cqdata.rqst.busy, 1);
+        m_assert(!curr, "current value should be 0 and not %d", curr);
+        m_ofi_call_again(
+            fi_fetch_atomicmsg(ep, &msg, &res_iov, &sig->res_mr.desc, 1, FI_TRANSMIT_COMPLETE),
+            progress);
+        // count the number of issued atomics
+        it++;
+        // wait for completion of the atomic
+        while (m_countr_load(&sig->read_cqdata.rqst.busy)) {
+            ofi_progress(progress);
+        }
+        m_verb("atomics has completed, res = %d, busy = %d", sig->res,m_countr_load(&sig->read_cqdata.rqst.busy));
+    }
+    sig->res = 0;
     return m_success;
 }
 
