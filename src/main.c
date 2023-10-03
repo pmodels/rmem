@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
             .run = &p2p_run_recv,
             .post = &p2p_post_recv,
         };
-        //run_test(&p2p_send, &p2p_recv, param, &p2p_time);
+        run_test(&p2p_send, &p2p_recv, param, &p2p_time);
     }
     //----------------------------------------------------------------------------------------------
     // P2P FAST
