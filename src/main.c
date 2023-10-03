@@ -242,7 +242,7 @@ int main(int argc, char** argv) {
             .run = &rma_fast_run_recv,
             .post = &rma_post,
         };
-        run_test(&plat_send, &plat_recv, param, &pfast_time);
+        //run_test(&plat_send, &plat_recv, param, &pfast_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT LATENCY
