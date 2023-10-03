@@ -232,6 +232,13 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     return m_success;
 }
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
+    //----------------------------------------------------------------------------------------------
+    // cancel the thread first to avoid issues
+    void* retval;
+    m_pthread_call(pthread_cancel(mem->ofi.progress));
+    m_pthread_call(pthread_join(mem->ofi.progress, &retval));
+    m_verb("thread exited with %s", retval);
+    //----------------------------------------------------------------------------------------------
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG) {
         ofi_rmem_am_free(mem, comm);
     }
