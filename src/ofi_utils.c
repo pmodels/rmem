@@ -279,6 +279,12 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
 
     // Reliable DatagraM (RDM)
     hints->ep_attr->type = FI_EP_RDM;
+
+    // add the HMEM related caps
+#if (M_HAVE_CUDA)
+    mycap |= FI_HMEM;
+    hints->domain_attr->mr_mode |= FI_MR_HMEM;
+#endif
     // make sure the provider has that
     m_ofi_fatal_info(hints, caps, mycap);
 

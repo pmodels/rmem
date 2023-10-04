@@ -23,6 +23,7 @@ typedef cudaStream_t rmem_stream_t;
     } while (0)
 #endif
 
+#define CUDA_DEFAULT_STREAM 0
 
 //--------------------------------------------------------------------------------------------------
 #else

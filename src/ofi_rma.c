@@ -450,9 +450,9 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     m_cuda_call(cudaMalloc((void**)&rma->ofi.drma, sizeof(struct ofi_device_rma_t)));
     m_cuda_call(cudaHostRegister((void*)h_ready_ptr, sizeof(int), cudaHostRegisterMapped));
     m_cuda_call(cudaHostGetDevicePointer((void**)&d_ready_ptr, (void*)h_ready_ptr, 0));
-    m_cuda_call(cudaMemcpy((void*)&rma->ofi.drma->ready, (void*)&d_ready_ptr, sizeof(int*),
-                           cudaMemcpyHostToDevice));
-
+    m_cuda_call(cudaMemcpyAsync((void*)&rma->ofi.drma->ready, (void*)&d_ready_ptr, sizeof(int*),
+                           cudaMemcpyHostToDevice,CUDA_DEFAULT_STREAM));
+    m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
     // store the stream
     rma->ofi.stream = &mem->ofi.data_trx[ctx_id].stream;
 #else

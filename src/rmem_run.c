@@ -25,7 +25,9 @@ static void run_test_check(const size_t ttl_len, int* buf) {
     // check the result
 #if (M_HAVE_CUDA)
     int* tmp = calloc(ttl_len, sizeof(int));
-    m_cuda_call(cudaMemcpy(tmp, buf, ttl_len * sizeof(int), cudaMemcpyDeviceToHost));
+    m_cuda_call(cudaMemcpyAsync(tmp, buf, ttl_len * sizeof(int), cudaMemcpyDeviceToHost,
+                                CUDA_DEFAULT_STREAM));
+    m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
 #else
     int* tmp = buf;
 #endif
@@ -42,7 +44,9 @@ static void run_test_check(const size_t ttl_len, int* buf) {
     }
 #if (M_HAVE_CUDA)
     // copies all the zeros back
-    m_cuda_call(cudaMemcpy(buf, tmp, ttl_len * sizeof(int), cudaMemcpyHostToDevice));
+    m_cuda_call(cudaMemcpyAsync(buf, tmp, ttl_len * sizeof(int), cudaMemcpyHostToDevice,
+                                CUDA_DEFAULT_STREAM));
+    m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
     free(tmp);
 #endif
 }
@@ -274,8 +278,10 @@ static void p2p_pre_alloc(run_param_t* param, void* data) {
         tmp[i] = i + 1;
     }
 #if (M_HAVE_CUDA)
-    m_cuda_call(cudaMalloc((void**)&d->buf,ttl_len*sizeof(int)));
-    m_cuda_call(cudaMemcpy(d->buf,tmp,ttl_len*sizeof(int),cudaMemcpyHostToDevice));
+    m_cuda_call(cudaMalloc((void**)&d->buf, ttl_len * sizeof(int)));
+    m_cuda_call(cudaMemcpyAsync(d->buf, tmp, ttl_len * sizeof(int), cudaMemcpyHostToDevice,
+                                CUDA_DEFAULT_STREAM));
+    m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
     free(tmp);
 #else
     d->buf = tmp;
@@ -433,7 +439,8 @@ void rma_alloc(run_param_t* param, void* data) {
         }
 #if (M_HAVE_CUDA)
         m_cuda_call(cudaMalloc((void**)&d->buf, ttl_len * sizeof(int)));
-        m_cuda_call(cudaMemcpy(d->buf, tmp, ttl_len * sizeof(int), cudaMemcpyHostToDevice));
+        m_cuda_call(cudaMemcpyAsync(d->buf, tmp, ttl_len * sizeof(int), cudaMemcpyHostToDevice,CUDA_DEFAULT_STREAM));
+        m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
         free(tmp);
 #else
         d->buf = tmp;
