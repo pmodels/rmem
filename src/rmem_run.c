@@ -85,6 +85,11 @@ static void ack_offset_sender(ack_t* ack) {
     // wait for recv side completion
     ack_wait(ack);
 }
+/**
+ * @brief compute the offset in clocks for the receiver
+ *
+ * offset is defined as T_sender = T_receiver + o
+ */
 static double ack_offset_recver(ack_t* ack) {
     struct timespec t1, t2, t3;
     struct timespec tseed;
@@ -101,9 +106,10 @@ static double ack_offset_recver(ack_t* ack) {
         // d = latency, o = offset: T_sender = T_receiver + o
         // T2 - (T1 + o) = d
         // (T3 + o) - T2 = d
-        // (T3 + o - T2) - (T2 - T1 - o) = 0
-        // <=> T3 + T1 - 2 T2 + 2 o = 0
-        // <=> o = T2 - 1/2 (T3 + T1)
+        // (T3 + o - T2) - (T2 - T1 - o) = o
+        // <=> T3 + 2 o - 2 T2 + T1 = 0
+        // <=> T3 + 2 o - 2 T2 + T1 = 0
+        // => o = T2 - (T3+T1)/2
         // note: we take the diff with the seed first to avoid overflow
         double wt1 = m_get_wtimes(tseed, t1);
         double wt2 = m_get_wtimes(tseed, t2);
@@ -112,6 +118,7 @@ static double ack_offset_recver(ack_t* ack) {
     }
     // notify completion
     ack_send(ack);
+    m_verb("average offset = %f", offset);
     return offset;
 }
 //==================================================================================================
@@ -328,7 +335,7 @@ double p2p_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     // T sender = t recver + offset => T recver = T sender - offset
     // time elapsed = (T recver -  (T sender - offset))
     struct timespec tsend;
-    ack_wait_withtime(ack,&tsend);
+    ack_wait_withtime(ack, &tsend);
     double sync_time = m_get_wtimes(tsend, prof.t1) + offset;
     m_verb("estimated time of comms = %f vs previously measured one %f, offset is %f", sync_time,
            time, offset);
