@@ -379,11 +379,11 @@ double p2p_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
+    for (int j = 0; j < n_msg; ++j) {
+        ofi_p2p_start(p2p + j);
+    }
     const double offset = ack_offset_recver(ack);
     m_rmem_prof(prof, time) {
-        for (int j = 0; j < n_msg; ++j) {
-            ofi_p2p_start(p2p + j);
-        }
         for (int j = 0; j < n_msg; ++j) {
             ofi_p2p_wait(p2p + j);
         }
