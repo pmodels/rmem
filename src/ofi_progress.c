@@ -28,8 +28,10 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
     uint32_t nops = m_ofi_data_get_nops(*data);
     if (cmpl > 0) {
         m_assert(cmpl <= 1, "post must be <=1");
-        m_countr_fetch_add(m_rma_epoch_remote(epoch),-nops);
         m_countr_fetch_add(m_rma_epoch_cmpl(epoch), cmpl);
+        if (nops > 0) {
+            m_countr_fetch_add(m_rma_epoch_remote(epoch), -nops);
+        }
         m_verb("sync: counter +%d, now = %d",nops,m_countr_load(m_rma_epoch_remote(epoch)));
         // if we get a complete, we do not need to handle something else
         return;

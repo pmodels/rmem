@@ -100,18 +100,25 @@ int ofi_rmem_post_fisend(const int nrank, const int* rank, ofi_rmem_t* mem,
 }
 int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
                              int* ttl_data) {
+    // get the remote completion mode
+    const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
+    const bool is_dcmpl = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     // count the number of calls issued for each of the ranks and notify them
     *ttl_data = 0;
-    uint64_t tag = m_ofi_tag_set_cw;
-    uint64_t flag =
-        (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
+    const uint64_t tag = m_ofi_tag_set_cw;
+    const uint64_t flag = (is_fence) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
     };
     for (int i = 0; i < nrank; ++i) {
-        int issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
-        *ttl_data += issued_rank;
+        int issued_rank = 0;
+        // if we are delivery complete, this is no needed and saves an atomic operation
+        if (!is_dcmpl) {
+            int icntr = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
+            *ttl_data += icntr;
+            issued_rank = (!is_fence) ? icntr : 0;
+        }
         // notify
         ofi_rma_trx_t* trx = mem->ofi.sync_trx;
         ofi_cqdata_t* cqd = mem->ofi.sync.cqdata_cw + i;
@@ -198,18 +205,25 @@ int ofi_rmem_start_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
 
 int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
                               int* ttl_data) {
+    // get the remote completion mode
+    const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
+    const bool is_dcmpl = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     // count the number of calls issued for each of the ranks and notify them
     *ttl_data = 0;
-    uint64_t tag = m_ofi_tag_set_cw;
-    uint64_t flag =
-        (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
+    const uint64_t tag = m_ofi_tag_set_cw;
+    const uint64_t flag = (is_fence) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
     };
     for (int i = 0; i < nrank; ++i) {
-        int issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
-        *ttl_data += issued_rank;
+        int issued_rank = 0;
+        // if we are delivery complete, this is no needed and saves an atomic operation
+        if (!is_dcmpl) {
+            int icntr = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
+            *ttl_data += icntr;
+            issued_rank = (!is_fence) ? icntr : 0;
+        }
         // notify
         ofi_rma_trx_t* trx = mem->ofi.sync_trx;
         ofi_cqdata_t* cqd = mem->ofi.sync.cqdata_cw + i;
