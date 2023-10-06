@@ -275,7 +275,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
         }
         m_gpu_call(gpuStreamDestroy(trx->stream));
     }
-    if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
+    if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_REMOTE_CNTR) {
         m_ofi_call(fi_close(&mem->ofi.rcntr->fid));
     }
     free(mem->ofi.data_trx);
