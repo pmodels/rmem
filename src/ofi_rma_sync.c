@@ -261,8 +261,11 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
             break;
         case (M_OFI_RCMPL_REMOTE_CNTR): {
             // zero the remote counter and wait for completion
-            int threshold = m_countr_exchange(m_rma_mepoch_remote(mem), 0);
+            // when not using remote counters, every put coming will add 1 to the value of
+            // remote(mem), so the value will always be negative here.
+            int threshold = -1 * m_countr_exchange(m_rma_mepoch_remote(mem), 0);
             // the counter is linked to the MR so waiting on it will trigger progress
+            m_assert(threshold >=0,"the threshold = %d must be >=0",threshold);
             m_ofi_call(fi_cntr_wait(mem->ofi.rcntr, threshold, -1));
             m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
         } break;
@@ -311,6 +314,7 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
             break;
         case (M_OFI_RCMPL_REMOTE_CNTR): {
             // the counter is linked to the MR so waiting on it will trigger progress
+            m_assert(ncalls >=0,"the threshold = %d must be >=0",ncalls);
             m_ofi_call(fi_cntr_wait(mem->ofi.rcntr, ncalls, -1));
             m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
         } break;

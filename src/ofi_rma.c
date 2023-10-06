@@ -36,6 +36,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("registering user memory");
     m_rmem_call(ofi_util_mr_reg(mem->buf, mem->count, FI_REMOTE_READ | FI_REMOTE_WRITE, comm,
                                 &mem->ofi.mr.mr, NULL, &mem->ofi.mr.base_list));
+    m_verb("registered memory -> %p",mem->ofi.mr.mr);
 
     //----------------------------------------------------------------------------------------------
     // register the signal then
