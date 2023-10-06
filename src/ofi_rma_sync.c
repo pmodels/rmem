@@ -135,7 +135,8 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         }
         ttl_sync = 0;
     } else {
-        // send the ack if not delivery complete
+        // send the ack if not delivery complete, if a fence is needed, it's added to the flag
+        // directly in the call to (t)send
         ttl_sync = nrank;
         switch (comm->prov_mode.dtc_mode) {
             case (M_OFI_DTC_NULL):
@@ -242,8 +243,13 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         case (M_OFI_RCMPL_NULL):
             m_assert(0, "null is not supported here");
             break;
+        case (M_OFI_RCMPL_FENCE):
         case (M_OFI_RCMPL_DELIV_COMPL):
-            // nothing to do
+            // nothing to do:
+            // - delivery complete: the ack is sent once completion is satisfied
+            // - fence: the completion of the ack indicates completion of the RMA with the ack
+            // completion semantics: see TARGET COMPLETION SEMANTICS at
+            // https://ofiwg.github.io/libfabric/main/man/fi_cq.3.html
             break;
         case (M_OFI_RCMPL_REMOTE_CNTR): {
             // zero the remote counter and wait for completion
@@ -257,9 +263,6 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
             // wait for it to go back up to 0
             m_rmem_call(ofi_rmem_progress_wait(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
                                                mem->ofi.data_trx, mem->ofi.sync.epch));
-        } break;
-        case (M_OFI_RCMPL_FENCE): {
-            m_assert(0, "idk what to do");
         } break;
     };
     //----------------------------------------------------------------------------------------------
@@ -285,6 +288,7 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
         case (M_OFI_RCMPL_NULL):
             m_assert(0, "null is not supported here");
             break;
+        case (M_OFI_RCMPL_FENCE):
         case (M_OFI_RCMPL_DELIV_COMPL):
             m_assert(ncalls == 0,
                      "CANNOT do fast completion mechanism with non-zero (%d) calls to wait when "
@@ -304,9 +308,6 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
             // wait for it to come down
             m_rmem_call(ofi_rmem_progress_wait(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
                                                mem->ofi.data_trx, mem->ofi.sync.epch));
-        } break;
-        case (M_OFI_RCMPL_FENCE): {
-            m_assert(0, "idk what to do");
         } break;
     }
     m_verb("waited fast");

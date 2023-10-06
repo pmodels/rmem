@@ -98,11 +98,13 @@ int ofi_rmem_post_fisend(const int nrank, const int* rank, ofi_rmem_t* mem,
     }
     return m_success;
 }
- int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem,
-                                    ofi_comm_t* comm, int* ttl_data) {
+int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
+                             int* ttl_data) {
     // count the number of calls issued for each of the ranks and notify them
     *ttl_data = 0;
     uint64_t tag = m_ofi_tag_set_cw;
+    uint64_t flag =
+        (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
@@ -116,13 +118,26 @@ int ofi_rmem_post_fisend(const int nrank, const int* rank, ofi_rmem_t* mem,
         cqd->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
         cqd->sync.data = m_ofi_data_set_cmpl | m_ofi_data_set_nops(issued_rank);
         cqd->epoch_ptr = mem->ofi.sync.epch;
+        struct iovec iov = {
+            .iov_base = &cqd->sync.data,
+            .iov_len = sizeof(uint64_t),
+        };
+        struct fi_msg msg = {
+            .msg_iov = &iov,
+            .desc = &cqd->sync.mr.desc,
+            .iov_count = 1,
+            .addr = trx->addr[rank[i]],
+            .context = &cqd->ctx,
+            .data = 0x0,
+        };
         m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqd->ctx,
                cqd->kind & m_ofi_cq_inc_local, cqd->epoch_ptr);
         m_verb("complete_fisend: I have done %d write to %d, value sent = %llu", issued_rank, i,
                cqd->sync.data);
-        m_ofi_call_again(fi_send(trx->ep, &cqd->sync.data, sizeof(uint64_t), cqd->sync.mr.desc,
-                                 trx->addr[rank[i]], &cqd->ctx),
-                         &progress);
+        m_ofi_call_again(fi_sendmsg(trx->ep, &msg, flag), &progress);
+        // m_ofi_call_again(fi_send(trx->ep, &cqd->sync.data, sizeof(uint64_t), cqd->sync.mr.desc,
+        //                          trx->addr[rank[i]], &cqd->ctx),
+        //                  &progress);
     }
     return m_success;
 }
@@ -181,11 +196,13 @@ int ofi_rmem_start_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
     return m_success;
 }
 
- int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem,
-                                    ofi_comm_t* comm, int* ttl_data) {
+int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
+                              int* ttl_data) {
     // count the number of calls issued for each of the ranks and notify them
     *ttl_data = 0;
     uint64_t tag = m_ofi_tag_set_cw;
+    uint64_t flag =
+        (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
@@ -199,11 +216,28 @@ int ofi_rmem_start_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
         cqd->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
         cqd->sync.data = m_ofi_data_set_cmpl | m_ofi_data_set_nops(issued_rank);
         cqd->epoch_ptr = mem->ofi.sync.epch;
-        m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p",&cqd->ctx,cqd->kind & m_ofi_cq_inc_local,cqd->epoch_ptr);
-        m_verb("complete_fisend: I have done %d write to %d, value sent = %llu",issued_rank,i,cqd->sync.data);
-        m_ofi_call_again(fi_tsend(trx->ep, &cqd->sync.data, sizeof(uint64_t), cqd->sync.mr.desc,
-                                  trx->addr[rank[i]], tag, &cqd->ctx),
-                         &progress);
+        struct iovec iov = {
+            .iov_base = &cqd->sync.data,
+            .iov_len = sizeof(uint64_t),
+        };
+        struct fi_msg_tagged msg = {
+            .msg_iov = &iov,
+            .desc = &cqd->sync.mr.desc,
+            .iov_count = 1,
+            .addr = trx->addr[rank[i]],
+            .tag = tag,
+            .ignore = 0x0,
+            .context = &cqd->ctx,
+            .data = 0x0,
+        };
+        m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqd->ctx,
+               cqd->kind & m_ofi_cq_inc_local, cqd->epoch_ptr);
+        m_verb("complete_fisend: I have done %d write to %d, value sent = %llu", issued_rank, i,
+               cqd->sync.data);
+        m_ofi_call_again(fi_tsendmsg(trx->ep, &msg, flag), &progress);
+        // m_ofi_call_again(fi_tsend(trx->ep, &cqd->sync.data, sizeof(uint64_t), cqd->sync.mr.desc,
+        //                           trx->addr[rank[i]], tag, &cqd->ctx),
+        //                  &progress);
     }
     return m_success;
 }
