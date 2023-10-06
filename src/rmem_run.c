@@ -11,9 +11,9 @@
 
 #define n_measure       50
 #define n_warmup        5
-#define retry_threshold 0.05
-#define retry_max       5
-#define n_repeat_offset 5
+#define retry_threshold 0.025
+#define retry_max       10
+#define n_repeat_offset 10
 
 #define m_min_msg        1
 #define m_min_size       1
@@ -23,14 +23,13 @@
 static void run_test_check(const size_t ttl_len, int* buf) {
     //------------------------------------------------
     // check the result
-#if (M_HAVE_CUDA)
-    int* tmp = calloc(ttl_len, sizeof(int));
-    m_cuda_call(cudaMemcpyAsync(tmp, buf, ttl_len * sizeof(int), cudaMemcpyDeviceToHost,
-                                CUDA_DEFAULT_STREAM));
-    m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
-#else
-    int* tmp = buf;
-#endif
+    int* tmp;
+    if (M_HAVE_GPU) {
+        tmp = calloc(ttl_len, sizeof(int));
+        m_gpu_call(gpuMemcpySync(tmp, buf, ttl_len * sizeof(int), gpuMemcpyDeviceToHost));
+    } else {
+        tmp = buf;
+    }
     for (int i = 0; i < ttl_len; ++i) {
         int res = i + 1;
 #ifndef NDEBUG
@@ -42,13 +41,11 @@ static void run_test_check(const size_t ttl_len, int* buf) {
 #endif
         tmp[i] = 0;
     }
-#if (M_HAVE_CUDA)
-    // copies all the zeros back
-    m_cuda_call(cudaMemcpyAsync(buf, tmp, ttl_len * sizeof(int), cudaMemcpyHostToDevice,
-                                CUDA_DEFAULT_STREAM));
-    m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
-    free(tmp);
-#endif
+    if (M_HAVE_GPU) {
+        // copies all the zeros back
+        m_gpu_call(gpuMemcpySync(buf, tmp, ttl_len * sizeof(int), gpuMemcpyHostToDevice));
+        free(tmp);
+    }
 }
 //==================================================================================================
 typedef struct {
@@ -285,15 +282,14 @@ static void p2p_pre_alloc(run_param_t* param, void* data) {
     for (int i = 0; i < ttl_len; ++i) {
         tmp[i] = i + 1;
     }
-#if (M_HAVE_CUDA)
-    m_cuda_call(cudaMalloc((void**)&d->buf, ttl_len * sizeof(int)));
-    m_cuda_call(cudaMemcpyAsync(d->buf, tmp, ttl_len * sizeof(int), cudaMemcpyHostToDevice,
-                                CUDA_DEFAULT_STREAM));
-    m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
-    free(tmp);
-#else
-    d->buf = tmp;
-#endif
+
+    if (M_HAVE_GPU) {
+        m_gpu_call(gpuMalloc((void**)&d->buf, ttl_len * sizeof(int)));
+        m_gpu_call(gpuMemcpySync(d->buf, tmp, ttl_len * sizeof(int), gpuMemcpyHostToDevice));
+        free(tmp);
+    } else {
+        d->buf = tmp;
+    }
     // allocate the objects
     d->p2p = calloc(param->n_msg, sizeof(ofi_p2p_t));
     for (int i = 0; i < param->n_msg; ++i) {
@@ -332,11 +328,11 @@ static void p2p_dealloc(run_param_t* param, void* data) {
         ofi_p2p_free(d->p2p + i);
     }
     free(d->p2p);
-#if (M_HAVE_CUDA)
-    m_cuda_call(cudaFree(d->buf));
-#else
-    free(d->buf);
-#endif
+    if (M_HAVE_GPU) {
+        m_gpu_call(gpuFree(d->buf));
+    } else {
+        free(d->buf);
+    }
 }
 void p2p_post_send(run_param_t* param, void* data) {
     p2p_dealloc(param,data);
@@ -445,24 +441,23 @@ void rma_alloc(run_param_t* param, void* data) {
         for (int i = 0; i < ttl_len; ++i) {
             tmp[i] = i + 1;
         }
-#if (M_HAVE_CUDA)
-        m_cuda_call(cudaMalloc((void**)&d->buf, ttl_len * sizeof(int)));
-        m_cuda_call(cudaMemcpyAsync(d->buf, tmp, ttl_len * sizeof(int), cudaMemcpyHostToDevice,CUDA_DEFAULT_STREAM));
-        m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
-        free(tmp);
-#else
-        d->buf = tmp;
-#endif
+        if (M_HAVE_GPU) {
+            m_gpu_call(gpuMalloc((void**)&d->buf, ttl_len * sizeof(int)));
+            m_gpu_call(gpuMemcpySync(d->buf, tmp, ttl_len * sizeof(int), gpuMemcpyHostToDevice));
+            free(tmp);
+        } else {
+            d->buf = tmp;
+        }
     }
 }
 void rma_dealloc(run_param_t* param, void* data) {
     run_rma_data_t* d = (run_rma_data_t*)data;
     if (is_sender(param->comm->rank)) {
-#if (M_HAVE_CUDA)
-    m_cuda_call(cudaFree(d->buf));
-#else
-    free(d->buf);
-#endif
+        if (M_HAVE_GPU) {
+            m_gpu_call(gpuFree(d->buf));
+        } else {
+            free(d->buf);
+        }
     }
 }
 
@@ -561,7 +556,7 @@ double rma_run_send_device(run_param_t* param, void* data, void* ack_ptr, rmem_d
     return time;
 }
 double rma_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_run_send_device(param, data, ack_ptr, RMEM_DEVICE);
+    return rma_run_send_device(param, data, ack_ptr, RMEM_GPU);
 }
 double rma_run_send(run_param_t* param, void* data, void* ack_ptr) {
     return rma_run_send_device(param, data, ack_ptr, RMEM_HOST);
@@ -593,7 +588,7 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     return time;
 }
 double rma_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_run_send_device(param, data, ack_ptr, RMEM_DEVICE);
+    return rma_run_send_device(param, data, ack_ptr, RMEM_GPU);
 }
 double rma_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
     return rma_run_send_device(param, data, ack_ptr, RMEM_HOST);

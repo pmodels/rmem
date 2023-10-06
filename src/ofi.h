@@ -18,8 +18,8 @@
 
 #include "rmem.h"
 
-// cuda specific
-#include "dofi.h"
+// gpu specific
+#include "gpu.h"
 
 #define m_ofi_cq_entries     16
 #define m_ofi_am_max_size    8  // uint64_t
@@ -346,7 +346,7 @@ typedef struct {
     struct fid_ep* srx;  //!< receive endpoint
     struct fid_cq* cq;   //!< completion queue for RECEIVE and REMOTE_DATA
     struct fid_av* av;   //!< address vector
-    rmem_stream_t stream;
+    gpuStream_t stream;
 } ofi_rma_trx_t;
 
 typedef struct {
@@ -432,7 +432,7 @@ typedef struct {
         fi_addr_t addr;
         struct fid_ep* ep;
         ofi_drma_t drma;
-        rmem_stream_t* stream;
+        gpuStream_t* stream;
     } ofi;
 } ofi_rma_t;
 

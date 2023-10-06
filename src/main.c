@@ -102,8 +102,8 @@ int main(int argc, char** argv) {
 
     // run parameter
     run_param_t param = {
-        .msg_size = 1 << 10,
-        .n_msg = 4, 
+        .msg_size = 1 << 20,
+        .n_msg = 64, 
         .comm = &comm, 
         .mem = &rma_mem
     };
@@ -112,13 +112,13 @@ int main(int argc, char** argv) {
     if (!is_sender(ofi_get_rank(&comm))) {
         const size_t ttl_len = m_msg_size(param.n_msg, param.msg_size, int) * param.n_msg;
         m_verb("sender memory is %lu", ttl_len);
-#if (M_HAVE_CUDA)
+#if (M_HAVE_GPU)
         // receiver needs the remote buffer
         rma_mem = (ofi_rmem_t){
             .buf = NULL,
             .count = ttl_len * sizeof(int),
         };
-        m_cuda_call(cudaMalloc((void**)&rma_mem.buf, ttl_len * sizeof(int)));
+        m_gpu_call(gpuMalloc((void**)&rma_mem.buf, ttl_len * sizeof(int)));
 #else
         // receiver needs the remote buffer
         rma_mem = (ofi_rmem_t){
@@ -266,8 +266,8 @@ int main(int argc, char** argv) {
     //----------------------------------------------------------------------------------------------
     // free
     ofi_rmem_free(&rma_mem, param.comm);
-#if (M_HAVE_CUDA)
-    m_cuda_call(cudaFree(rma_mem.buf));
+#if (M_HAVE_GPU)
+    m_gpu_call(gpuFree(rma_mem.buf));
 #else
     free(rma_mem.buf);
 #endif

@@ -281,7 +281,7 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     hints->ep_attr->type = FI_EP_RDM;
 
     // add the HMEM related caps
-#if (M_HAVE_CUDA)
+#if (M_HAVE_GPU)
     mycap |= FI_HMEM;
     hints->domain_attr->mr_mode |= FI_MR_HMEM;
 #endif
@@ -479,7 +479,7 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
         //------------------------------------------------------------------------------------------
         // actually register the memory
         // get the flag
-#if (M_HAVE_CUDA)
+#if (M_HAVE_GPU)
         uint64_t flags = FI_HMEM;
 #else
         uint64_t flags = 0x0;
@@ -491,36 +491,25 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
             flags |= FI_RMA_EVENT;
         }
         // get device and iface
-#if (M_HAVE_CUDA)
-        int device;
+        int device = 0; // always 0, we don't support multiple GPUs under the same rank
         enum fi_hmem_iface iface;
-        struct cudaPointerAttributes cu_attr;
-        m_cuda_call(cudaPointerGetAttributes(&cu_attr, buf));
-        switch (cu_attr.type) {
-            case (cudaMemoryTypeUnregistered):
-                device = 0;
+        gpuMemoryType_t mtype = gpuMemoryType(buf);
+        switch (mtype) {
+            case (gpuMemoryTypeSystem):
                 iface = FI_HMEM_SYSTEM;
                 break;
-            case (cudaMemoryTypeHost):
-                device = cu_attr.device;
-                iface = FI_HMEM_CUDA;
+            case (gpuMemoryTypeHost):
+                iface = FI_HMEM_GPU;
+                flags |= FI_HMEM_HOST_ALLOC;
                 break;
-            case (cudaMemoryTypeDevice):
-                device = cu_attr.device;
-                iface = FI_HMEM_CUDA;
+            case (gpuMemoryTypeDevice):
+                iface = FI_HMEM_GPU;
+                flags |= FI_HMEM_DEVICE_ONLY;
                 break;
-            case (cudaMemoryTypeManaged):
-                device = cu_attr.device;
-                iface = FI_HMEM_CUDA;
-                break;
-            default:
-                m_assert(0,"unrecognized memory %d",cu_attr.type);
+            case (gpuMemoryTypeManaged):
+                iface = FI_HMEM_GPU;
                 break;
         };
-#else
-        int device = 0;
-        enum fi_hmem_iface iface = FI_HMEM_SYSTEM;
-#endif
         // register
         uint64_t rkey = 0;
         if (!(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY)) {

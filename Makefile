@@ -146,7 +146,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cu
 # CUDA
 ifeq ($(USE_CUDA),1)
 # we use cuda to link
-LD := $(NVCC) $(GENCODE)
+LD := $(NVCC) -lcuda $(GENCODE)
 REAL_LD_FLAGS := -Xlinker $(subst $(space),$(comma),$(strip $(LDFLAGS) $(LIB)))
 # pass the opts to the compiler first
 ifneq (,$(OPTS))

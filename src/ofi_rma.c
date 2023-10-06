@@ -14,10 +14,6 @@
 #include "rdma/fi_domain.h"
 #include "rdma/fi_endpoint.h"
 #include "rdma/fi_rma.h"
-#if (M_HAVE_CUDA)
-#include <cuda.h>
-#include <cuda_runtime.h>
-#endif
 
 #define m_get_rx(i, mem) (i % mem->ofi.n_rx)
 
@@ -158,10 +154,8 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
             m_rmem_call(ofi_util_av(comm->size, trx[i].ep, trx[i].av, &trx[i].addr));
         }
         //------------------------------------------------------------------------------------------
-        // cuda specific
-#if (M_HAVE_CUDA)
-        m_cuda_call(cudaStreamCreate(&trx[i].stream));
-#endif
+        // gpu specific
+        m_gpu_call(gpuStreamCreate(&trx[i].stream));
         m_verb("done with EP # %d", i);
         m_verb("-----------------");
     }
@@ -218,15 +212,12 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_pthread_call(pthread_attr_destroy(&pthread_attr));
     //---------------------------------------------------------------------------------------------
     // GPU
-    // int device_count;
-    // m_cuda_call(cudaGetDeviceCount(&device_count));
-    // m_log("I have %d devices", device_count);
-    // m_cuda_call(cudaSetDevice(0));
-    // m_log("malloc of size %zu",sizeof(ofi_drma_t));
-    // PMI_Barrier();
-    // size_t free, ttl;
-    // m_cuda_call(cudaMemGetInfo(&free,&ttl));
-    // m_log("free mem = %zu, ttl mem = %zu",free,ttl);
+#ifndef NDEBUG
+    int device_count;
+    m_gpu_call(gpuGetDeviceCount(&device_count));
+    m_assert(device_count == 1, "more than one GPU per rank is not supported");
+    m_gpu_call(gpuSetDevice(0));
+#endif
 
     //----------------------------------------------------------------------------------------------
     return m_success;
@@ -282,9 +273,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
             m_ofi_call(fi_close(&trx->av->fid));
             free(trx->addr);
         }
-#if (M_HAVE_CUDA)
-        m_cuda_call(cudaStreamDestroy(trx->stream));
-#endif
+        m_gpu_call(gpuStreamDestroy(trx->stream));
     }
     if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
         m_ofi_call(fi_close(&mem->ofi.rcntr->fid));
@@ -434,30 +423,22 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
         rma->ofi.sig.cq.epoch_ptr = NULL;
     }
     //---------------------------------------------------------------------------------------------
-#if (M_HAVE_CUDA)
-    int attr;
-    int device;
-    struct cudaDeviceProp device_prop;
-    m_cuda_call(cudaGetDevice(&device));
-    m_cuda_call(cudaGetDeviceProperties(&device_prop, device));
-    m_assert(device_prop.canMapHostMemory, "device cannot map host memory");
-    // m_assert(device_prop.canUseHostPointerForRegisteredMem,"device cannot use host registered
-    // memory");
-
     // GPU request - allocated to the GPU
     int* d_ready_ptr;
     volatile int* h_ready_ptr = &rma->ofi.qnode.ready;
-    m_cuda_call(cudaMalloc((void**)&rma->ofi.drma, sizeof(struct ofi_device_rma_t)));
-    m_cuda_call(cudaHostRegister((void*)h_ready_ptr, sizeof(int), cudaHostRegisterMapped));
-    m_cuda_call(cudaHostGetDevicePointer((void**)&d_ready_ptr, (void*)h_ready_ptr, 0));
-    m_cuda_call(cudaMemcpyAsync((void*)&rma->ofi.drma->ready, (void*)&d_ready_ptr, sizeof(int*),
-                           cudaMemcpyHostToDevice,CUDA_DEFAULT_STREAM));
-    m_cuda_call(cudaStreamSynchronize(CUDA_DEFAULT_STREAM));
-    // store the stream
-    rma->ofi.stream = &mem->ofi.data_trx[ctx_id].stream;
-#else
-    rma->ofi.stream = NULL;
-#endif
+    if (M_HAVE_GPU) {
+        m_gpu_call(gpuMalloc((void**)&rma->ofi.drma, sizeof(struct ofi_gpu_rma_t)));
+        m_gpu_call(gpuHostRegister((void*)h_ready_ptr, sizeof(int), gpuHostRegisterMapped));
+        m_gpu_call(gpuHostGetDevicePointer((void**)&d_ready_ptr, (void*)h_ready_ptr, 0));
+        m_gpu_call(gpuMemcpySync((void*)&rma->ofi.drma->ready, (void*)&d_ready_ptr, sizeof(int*),
+                                 gpuMemcpyHostToDevice));
+        // store the stream
+        rma->ofi.stream = &mem->ofi.data_trx[ctx_id].stream;
+    } else {
+        rma->ofi.stream = NULL;
+        rma->ofi.drma = malloc(sizeof(struct ofi_gpu_rma_t));
+        rma->ofi.drma->ready = h_ready_ptr;
+    }
     //----------------------------------------------------------------------------------------------
     m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
     return m_success;
@@ -471,67 +452,6 @@ int ofi_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t
 int ofi_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
     return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
 }
-
-// <<<<<<< HEAD
-// =======
-// int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
-//     //----------------------------------------------------------------------------------------------
-//     uint64_t flags = rma->ofi.msg.flags;
-//     struct fi_msg_rma msg = {
-//         .msg_iov = &rma->ofi.msg.iov,
-//         .desc = &rma->ofi.msg.mr.desc,
-//         .iov_count = 1,
-//         .addr = rma->ofi.addr,
-//         .rma_iov = &rma->ofi.msg.riov,
-//         .rma_iov_count = 1,
-//         .data = rma->ofi.msg.data | rma->ofi.sig.data,
-//         .context = &rma->ofi.msg.cq.ctx,
-//     };
-//     //----------------------------------------------------------------------------------------------
-//     // reset the busy value
-//     if (rma->ofi.msg.cq.kind == m_ofi_cq_kind_rqst) {
-//         int curr = m_countr_exchange(&rma->ofi.msg.cq.rqst.busy, 1);
-//         m_assert(!curr, "the busy value is not 0: %d", curr);
-//     }
-//     // do the comm
-//     m_verb("doing it: write msg with kind =%d (inc local? %d) to ep %p: cqdata = %llu, ctx = %p",
-//            rma->ofi.msg.cq.kind & 0x0f, rma->ofi.msg.cq.kind & m_ofi_cq_inc_local, rma->ofi.ep,
-//            msg.data,msg.context);
-//     m_ofi_call_again(fi_writemsg(rma->ofi.ep, &msg, flags), &rma->ofi.progress);
-//     m_verb("doing it: done");
-//     m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
-//     m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
-//     //----------------------------------------------------------------------------------------------
-//     if (rma->ofi.sig.flags) {
-//         struct fi_msg_atomic sigmsg = {
-//             .msg_iov = &rma->ofi.sig.iov,
-//             .desc = &mem->ofi.signal.inc_mr.desc,
-//             .iov_count = 1,
-//             .addr = rma->ofi.addr,
-//             .rma_iov = &rma->ofi.sig.riov,
-//             .rma_iov_count = 1,
-//             .datatype = FI_INT32,
-//             .op = FI_SUM,
-//             .data = 0x0,  // atomics does NOT support FI_REMOTE_CQ_DATA
-//             .context = &rma->ofi.sig.cq.ctx,
-//         };
-//         m_log("doing it: atomic");
-//         m_ofi_call_again(fi_atomicmsg(rma->ofi.ep, &sigmsg, rma->ofi.sig.flags),
-//                          &rma->ofi.progress);
-//         // if we do a signal call we need to wait for its completion BUT we don't send that
-//         // information to the target
-//         m_countr_fetch_add(&mem->ofi.sync.isig, 1);
-//     }
-//     //----------------------------------------------------------------------------------------------
-//     // if we had to get a cq entry and the inject, mark is as done
-//     if (flags & FI_INJECT && rma->ofi.msg.cq.kind == m_ofi_cq_kind_rqst) {
-//         m_countr_fetch_add(&rma->ofi.msg.cq.rqst.busy, -1);
-//     }
-//     //----------------------------------------------------------------------------------------------
-//     m_verb("done");
-//     return m_success;
-// }
-// >>>>>>> dev-latency
 int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
     return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT);
 }
@@ -557,25 +477,23 @@ int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma) {
 int ofi_rma_start(ofi_rma_t* rma, rmem_device_t dev) {
     m_assert(rma->ofi.qnode.ready == 0, "the ready value must be 0 and not %d",
              rma->ofi.qnode.ready);
-#if (M_HAVE_CUDA)
-    if (dev == RMEM_DEVICE) {
-        ofi_rma_start_device(rma->ofi.stream, rma->ofi.drma);
+    if (dev == RMEM_GPU) {
+        ofi_rma_start_gpu(rma->ofi.stream, rma->ofi.drma);
     } else {
         rma->ofi.qnode.ready++;
     }
-#else
-    rma->ofi.qnode.ready++;
-#endif
     return m_success;
 }
 
 int ofi_rma_free(ofi_rma_t* rma) {
     m_verb("closing memory origin");
     m_rmem_call(ofi_util_mr_close(rma->ofi.msg.mr.mr));
-#if (M_HAVE_CUDA)
-    m_cuda_call(cudaHostUnregister((void*)&rma->ofi.qnode.ready));
-    m_cuda_call(cudaFree((void*)rma->ofi.drma));
-#endif
+    m_gpu_call(gpuHostUnregister((void*)&rma->ofi.qnode.ready));
+    if (M_HAVE_GPU) {
+        m_gpu_call(gpuFree((void*)rma->ofi.drma));
+    } else {
+        free(rma->ofi.drma);
+    }
     return m_success;
 }
 
