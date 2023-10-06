@@ -2,6 +2,118 @@
 #include "ofi_utils.h"
 
 //==================================================================================================
+// COMMON TAGGEG and AM MSG
+//==================================================================================================
+typedef enum {
+    M_RMEM_ACK_TAGGED,
+    M_RMEM_ACK_AM,
+} rmem_ack_t;
+static int ofi_rmem_post_send(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
+                              rmem_ack_t ack) {
+    // notify readiness to the rank list
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .xctx.epoch_ptr = mem->ofi.sync.epch,
+    };
+    for (int i = 0; i < nrank; ++i) {
+        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata_ps + i;
+        cqdata->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
+        cqdata->sync.data = m_ofi_data_set_post;
+        m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqdata->ctx,
+               cqdata->kind & m_ofi_cq_inc_local, cqdata->epoch_ptr);
+        switch (ack) {
+            case (M_RMEM_ACK_AM): {
+                m_ofi_call_again(
+                    fi_send(mem->ofi.sync_trx->ep, &cqdata->sync.data, sizeof(uint64_t),
+                            cqdata->sync.mr.desc, mem->ofi.sync_trx->addr[rank[i]], &cqdata->ctx),
+                    &progress);
+            } break;
+            case (M_RMEM_ACK_TAGGED): {
+                uint64_t tag = m_ofi_tag_set_ps;
+                m_ofi_call_again(fi_tsend(mem->ofi.sync_trx->ep, &cqdata->sync.data,
+                                          sizeof(uint64_t), cqdata->sync.mr.desc,
+                                          mem->ofi.sync_trx->addr[rank[i]], tag, &cqdata->ctx),
+                                 &progress);
+            } break;
+        }
+    }
+    return m_success;
+}
+static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* mem,
+                                  ofi_comm_t* comm, int* ttl_data, rmem_ack_t ack) {
+    // get the remote completion mode
+    const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
+    const bool is_dcmpl = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
+    // count the number of calls issued for each of the ranks and notify them
+    *ttl_data = 0;
+    const uint64_t flag = (is_fence) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .xctx.epoch_ptr = mem->ofi.sync.epch,
+    };
+    for (int i = 0; i < nrank; ++i) {
+        int issued_rank = 0;
+        // if we are delivery complete, this is no needed and saves an atomic operation
+        if (!is_dcmpl) {
+            int icntr = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
+            *ttl_data += icntr;
+            issued_rank = (is_fence) ? 0 : icntr;
+        }
+
+        // if using fence, we need to fence ALL of the data_trx, if not we only issue on the sync
+        // to avoid duplication of all the resources we forbid the user to use more than one data
+        // trx when using the fence
+        m_assert(!(is_fence && mem->ofi.n_tx > 1), "you cannot fence with more than 1 data TRX");
+        m_assert(!(is_fence && comm->prov_mode.dtc_mode == M_OFI_DTC_MSG),
+                 "you cannot fence when using MSG as a down-to-close (DTC) mode");
+        ofi_rma_trx_t* trx = (is_fence) ? mem->ofi.data_trx : mem->ofi.sync_trx;
+
+        // notify
+        ofi_cqdata_t* cqd = mem->ofi.sync.cqdata_cw + i;
+        cqd->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
+        cqd->sync.data = m_ofi_data_set_cmpl | m_ofi_data_set_nops(issued_rank);
+        cqd->epoch_ptr = mem->ofi.sync.epch;
+        m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqd->ctx,
+               cqd->kind & m_ofi_cq_inc_local, cqd->epoch_ptr);
+        m_verb("complete_fisend: I have done %d write to %d, value sent = %llu", issued_rank, i,
+               cqd->sync.data);
+        struct iovec iov = {
+            .iov_base = &cqd->sync.data,
+            .iov_len = sizeof(uint64_t),
+        };
+        switch (ack) {
+            case (M_RMEM_ACK_AM): {
+                struct fi_msg msg = {
+                    .msg_iov = &iov,
+                    .desc = &cqd->sync.mr.desc,
+                    .iov_count = 1,
+                    .addr = trx->addr[rank[i]],
+                    .context = &cqd->ctx,
+                    .data = 0x0,
+                };
+                m_ofi_call_again(fi_sendmsg(trx->ep, &msg, flag), &progress);
+
+            } break;
+            case (M_RMEM_ACK_TAGGED): {
+                const uint64_t tag = m_ofi_tag_set_cw;
+                struct fi_msg_tagged msg = {
+                    .msg_iov = &iov,
+                    .desc = &cqd->sync.mr.desc,
+                    .iov_count = 1,
+                    .addr = trx->addr[rank[i]],
+                    .tag = tag,
+                    .ignore = 0x0,
+                    .context = &cqd->ctx,
+                    .data = 0x0,
+                };
+                m_ofi_call_again(fi_tsendmsg(trx->ep, &msg, flag), &progress);
+            } break;
+        }
+    }
+    return m_success;
+}
+
+//==================================================================================================
 // AM 
 //==================================================================================================
 int ofi_rmem_am_repost(ofi_cqdata_t* cqdata, ofi_progress_t* progress) {
@@ -76,101 +188,25 @@ int ofi_rmem_am_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     free(mem->ofi.sync.am.buf);
     return m_success;
 }
-
-int ofi_rmem_post_fisend(const int nrank, const int* rank, ofi_rmem_t* mem,
-                                ofi_comm_t* comm) {
-    // notify readiness to the rank list
-    ofi_progress_t progress = {
-        .cq = mem->ofi.sync_trx->cq,
-        .xctx.epoch_ptr = mem->ofi.sync.epch,
-    };
-    for (int i = 0; i < nrank; ++i) {
-        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata_ps + i;
-        cqdata->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
-        cqdata->sync.data = m_ofi_data_set_post;
-        uint64_t tag = m_ofi_tag_set_ps;
-        m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqdata->ctx,
-               cqdata->kind & m_ofi_cq_inc_local, cqdata->epoch_ptr);
-        m_ofi_call_again(
-            fi_send(mem->ofi.sync_trx->ep, &cqdata->sync.data, sizeof(uint64_t),
-                    cqdata->sync.mr.desc, mem->ofi.sync_trx->addr[rank[i]], &cqdata->ctx),
-            &progress);
-    }
-    return m_success;
+int ofi_rmem_post_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
+    return ofi_rmem_post_send(nrank, rank, mem, comm, M_RMEM_ACK_AM);
 }
 int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
                              int* ttl_data) {
-    // get the remote completion mode
-    const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
-    const bool is_dcmpl = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
-    // count the number of calls issued for each of the ranks and notify them
-    *ttl_data = 0;
-    const uint64_t tag = m_ofi_tag_set_cw;
-    const uint64_t flag = (is_fence) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
-    ofi_progress_t progress = {
-        .cq = mem->ofi.sync_trx->cq,
-        .xctx.epoch_ptr = mem->ofi.sync.epch,
-    };
-    for (int i = 0; i < nrank; ++i) {
-        int issued_rank = 0;
-        // if we are delivery complete, this is no needed and saves an atomic operation
-        if (!is_dcmpl) {
-            int icntr = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
-            *ttl_data += icntr;
-            issued_rank = (!is_fence) ? icntr : 0;
-        }
-        // notify
-        ofi_rma_trx_t* trx = mem->ofi.sync_trx;
-        ofi_cqdata_t* cqd = mem->ofi.sync.cqdata_cw + i;
-        cqd->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
-        cqd->sync.data = m_ofi_data_set_cmpl | m_ofi_data_set_nops(issued_rank);
-        cqd->epoch_ptr = mem->ofi.sync.epch;
-        struct iovec iov = {
-            .iov_base = &cqd->sync.data,
-            .iov_len = sizeof(uint64_t),
-        };
-        struct fi_msg msg = {
-            .msg_iov = &iov,
-            .desc = &cqd->sync.mr.desc,
-            .iov_count = 1,
-            .addr = trx->addr[rank[i]],
-            .context = &cqd->ctx,
-            .data = 0x0,
-        };
-        m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqd->ctx,
-               cqd->kind & m_ofi_cq_inc_local, cqd->epoch_ptr);
-        m_verb("complete_fisend: I have done %d write to %d, value sent = %llu", issued_rank, i,
-               cqd->sync.data);
-        m_ofi_call_again(fi_sendmsg(trx->ep, &msg, flag), &progress);
-        // m_ofi_call_again(fi_send(trx->ep, &cqd->sync.data, sizeof(uint64_t), cqd->sync.mr.desc,
-        //                          trx->addr[rank[i]], &cqd->ctx),
-        //                  &progress);
-    }
-    return m_success;
+    m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_FENCE,
+             "we cannot used MSG to close a FENCE completion tracking mode");
+    return ofi_rmem_complete_send(nrank, rank, mem, comm, ttl_data, M_RMEM_ACK_AM);
 }
 
 //==================================================================================================
 // TAGGED MSG
 //==================================================================================================
 int ofi_rmem_post_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
-    // notify readiness to the rank list
-    ofi_progress_t progress = {
-        .cq = mem->ofi.sync_trx->cq,
-        .xctx.epoch_ptr = mem->ofi.sync.epch,
-    };
-    for (int i = 0; i < nrank; ++i) {
-        ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata_ps + i;
-        cqdata->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
-        cqdata->sync.data = m_ofi_data_set_post;
-        uint64_t tag = m_ofi_tag_set_ps;
-        m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqdata->ctx,
-               cqdata->kind & m_ofi_cq_inc_local, cqdata->epoch_ptr);
-        m_ofi_call_again(
-            fi_tsend(mem->ofi.sync_trx->ep, &cqdata->sync.data, sizeof(uint64_t),
-                     cqdata->sync.mr.desc, mem->ofi.sync_trx->addr[rank[i]], tag, &cqdata->ctx),
-            &progress);
-    }
-    return m_success;
+    return ofi_rmem_post_send(nrank, rank, mem, comm, M_RMEM_ACK_TAGGED);
+}
+int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
+                              int* ttl_data) {
+    return ofi_rmem_complete_send(nrank, rank, mem, comm, ttl_data, M_RMEM_ACK_TAGGED);
 }
 int ofi_rmem_start_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
                                  ofi_comm_t* comm) {
@@ -203,61 +239,10 @@ int ofi_rmem_start_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
     return m_success;
 }
 
-int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
-                              int* ttl_data) {
-    // get the remote completion mode
-    const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
-    const bool is_dcmpl = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
-    // count the number of calls issued for each of the ranks and notify them
-    *ttl_data = 0;
-    const uint64_t tag = m_ofi_tag_set_cw;
-    const uint64_t flag = (is_fence) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
-    ofi_progress_t progress = {
-        .cq = mem->ofi.sync_trx->cq,
-        .xctx.epoch_ptr = mem->ofi.sync.epch,
-    };
-    for (int i = 0; i < nrank; ++i) {
-        int issued_rank = 0;
-        // if we are delivery complete, this is no needed and saves an atomic operation
-        if (!is_dcmpl) {
-            int icntr = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
-            *ttl_data += icntr;
-            issued_rank = (!is_fence) ? icntr : 0;
-        }
-        // notify
-        ofi_rma_trx_t* trx = mem->ofi.sync_trx;
-        ofi_cqdata_t* cqd = mem->ofi.sync.cqdata_cw + i;
-        cqd->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
-        cqd->sync.data = m_ofi_data_set_cmpl | m_ofi_data_set_nops(issued_rank);
-        cqd->epoch_ptr = mem->ofi.sync.epch;
-        struct iovec iov = {
-            .iov_base = &cqd->sync.data,
-            .iov_len = sizeof(uint64_t),
-        };
-        struct fi_msg_tagged msg = {
-            .msg_iov = &iov,
-            .desc = &cqd->sync.mr.desc,
-            .iov_count = 1,
-            .addr = trx->addr[rank[i]],
-            .tag = tag,
-            .ignore = 0x0,
-            .context = &cqd->ctx,
-            .data = 0x0,
-        };
-        m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqd->ctx,
-               cqd->kind & m_ofi_cq_inc_local, cqd->epoch_ptr);
-        m_verb("complete_fisend: I have done %d write to %d, value sent = %llu", issued_rank, i,
-               cqd->sync.data);
-        m_ofi_call_again(fi_tsendmsg(trx->ep, &msg, flag), &progress);
-        // m_ofi_call_again(fi_tsend(trx->ep, &cqd->sync.data, sizeof(uint64_t), cqd->sync.mr.desc,
-        //                           trx->addr[rank[i]], tag, &cqd->ctx),
-        //                  &progress);
-    }
-    return m_success;
-}
 
 int ofi_rmem_wait_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
                                 ofi_comm_t* comm) {
+    const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     // ideally we can pre-post them, but then the fast completion would have to cancel them
     struct iovec iov = {
         .iov_len = sizeof(uint64_t),
@@ -274,6 +259,12 @@ int ofi_rmem_wait_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
     };
     uint64_t flags = FI_COMPLETION;
+
+    // if we use the fence, we need to close ALL the data_trx
+    m_assert(!(is_fence && mem->ofi.n_tx > 1), "you cannot fence with more than 1 data TRX");
+    m_assert(!(is_fence && comm->prov_mode.dtc_mode == M_OFI_DTC_MSG),
+             "you cannot fence when using MSG as a down-to-close (DTC) mode");
+    ofi_rma_trx_t* trx = (is_fence) ? mem->ofi.data_trx : mem->ofi.sync_trx;
     for (int i = 0; i < nrank; ++i) {
         ofi_cqdata_t* cqdata = mem->ofi.sync.cqdata_cw + i;
         cqdata->kind = m_ofi_cq_kind_sync;
@@ -281,8 +272,8 @@ int ofi_rmem_wait_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
         iov.iov_base = &cqdata->sync.data;
         msg.desc = &cqdata->sync.mr.desc;
         msg.context = &cqdata->ctx;
-        msg.addr = mem->ofi.sync_trx->addr[rank[i]];
-        m_ofi_call_again(fi_trecvmsg(mem->ofi.sync_trx->srx, &msg, flags), &progress);
+        msg.addr = trx->addr[rank[i]];
+        m_ofi_call_again(fi_trecvmsg(trx->srx, &msg, flags), &progress);
     }
     return m_success;
 }

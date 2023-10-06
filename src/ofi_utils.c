@@ -511,9 +511,11 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
                 break;
         };
         // register
-        uint64_t rkey = 0;
+        // the key value is 100+ if we want to use the FENCE remote completion mechanism to allow
+        // the usage of FI_FENCE on CXI's MR. An alternative is to use optmized MR and FI_WEAK_FENCE
+        uint64_t rkey = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) ? 100 : 0;
         if (!(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY)) {
-            rkey = comm->unique_mr_key++;
+            rkey += comm->unique_mr_key++;
         }
         struct iovec iov = {
             .iov_base = buf,

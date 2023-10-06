@@ -70,7 +70,9 @@ int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_co
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
 #ifndef NDEBUG
     m_verb("starting");
-    for (int i = 0; i < (mem->ofi.n_tx + (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG)); ++i) {
+    const bool check_last =
+        (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG) && (comm->prov_mode.dtc_mode != M_OFI_DTC_MSG);
+    for (int i = 0; i < (mem->ofi.n_tx + check_last); ++i) {
         m_mem_check_empty_cq(mem->ofi.data_trx[i].cq);
     }
 #endif
@@ -105,7 +107,7 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
     }
 #ifndef NDEBUG
     m_verb("started");
-    if (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG) {
+    if (check_last) {
         // the sync cq MUST be empty now
         m_mem_check_empty_cq(mem->ofi.sync_trx->cq);
     }
@@ -159,7 +161,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     }
     m_verb("complete: waiting for %d syncs and %d calls, total %d to complete", ttl_sync, ttl_data,
            threshold);
-    // use complete fast to what for the threshold
+    // use complete fast to what for the threshold on all the TRX (data + sync)
     m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
                                        mem->ofi.data_trx, mem->ofi.sync.epch));
 
@@ -188,7 +190,9 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
 #ifndef NDEBUG
     m_verb("completed");
     // no need to check the last rx/tx if AM message is used
-    for (int i = 0; i < (mem->ofi.n_tx + (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG)); ++i) {
+    const bool check_last =
+        (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG) && (comm->prov_mode.dtc_mode != M_OFI_DTC_MSG);
+    for (int i = 0; i < (mem->ofi.n_tx + check_last); ++i) {
         m_mem_check_empty_cq(mem->ofi.data_trx[i].cq);
     }
 #endif
@@ -199,6 +203,10 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
  * note: we progress all the 
 */
 int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* comm) {
+    m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_FENCE,
+             "cannot complete fast with a fence mode");
+    m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_DELIV_COMPL,
+             "cannot complete fast with a delivery complete mode");
     m_verb("completing-fast: %d calls, already done: %d", threshold,
            m_countr_load(m_rma_mepoch_local(mem)));
     //----------------------------------------------------------------------------------------------
@@ -282,6 +290,12 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
 }
 
 int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
+    m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_FENCE,
+             "cannot complete fast with a fence mode");
+    m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_DELIV_COMPL,
+             "cannot complete fast with a delivery complete mode");
+    m_verb("completing-fast: %d calls, already done: %d", threshold,
+           m_countr_load(m_rma_mepoch_local(mem)));
     m_verb("waiting fast");
     m_verb("wait untill: waiting for %d calls to complete", ncalls);
     switch (comm->prov_mode.rcmpl_mode) {
