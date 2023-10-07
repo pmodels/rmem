@@ -1,10 +1,15 @@
 #!/bin/bash -l
-#SBATCH --partition=debug
-##SBATCH --partition=standard
-#SBATCH --time=00:05:00
-#SBATCH --ntasks=2
+#SBATCH --time=00:10:00
 #SBATCH --nodes=2
-#SBATCH --account=project_465000098
+#SBATCH --ntasks-per-node=1
+#SBATCH --account=project_465000723
+#--------------------------------------------
+#SBATCH --partition=small
+#SBATCH --cpus-per-task=16
+#--------------------------------------------
+##SBATCH --partition=dev-g
+##SBATCH --gpus-per-task=1
+#--------------------------------------------
 
 echo "loading modules"
 #-------------------------------------------------------------------------------
@@ -16,15 +21,27 @@ module list
 # get a unique tag
 TAG=`date '+%Y-%m-%d-%H%M'`-`uuidgen -t | head -c 4`
 #-------------------------------------------------------------------------------
-DBS_HOME=${HOME}/lib-PMI-4.1.1
+DBS_DIR=${HOME}/lib-PMI-4.1.1
+MPI_DIR=${DBS_DIR}
 HOME_DIR=${HOME}/rmem
-SCRATCH_DIR=/scratch/project_465000098/tgillis/rmem_${TAG}_${SLURM_JOBID}
+SCRATCH_DIR=/scratch/project_465000723/tgillis/rmem_${TAG}_${SLURM_JOBID}
 
+#-------------------------------------------------------------------------------
+# asan with cuda, from https://github.com/google/sanitizers/issues/629
+# asan with pthread, from https://github.com/google/sanitizers/issues/1171
+export ASAN_OPTIONS=protect_shadow_gap=0:use_sigaltstack=0
+#-------------------------------------------------------------------------------
+export FI_HMEM_CUDA_USE_GDRCOPY=1
+#export FI_CXI_OPTIMIZED_MRS=0
+#export FI_LOG_LEVEL=Debug
+#export FI_CXI_RDZV_THRESHOLD=4096
 echo "--------------------------------------------------"
 echo "running in ${SCRATCH_DIR}"
+echo "FI_CXI_OPTIMIZED_MRS = ${FI_CXI_OPTIMIZED_MRS}"
+echo "FI_CXI_RDZV_EAGER_SIZE = ${FI_CXI_RDZV_EAGER_SIZE}"
+echo "FI_CXI_RDZV_THRESHOLD = ${FI_CXI_RDZV_THRESHOLD}"
+echo "FI_CXI_RDZV_GET_MIN = ${FI_CXI_RDZV_GET_MIN}"
 echo "--------------------------------------------------"
-
-GIT_COMMIT=$(git rev-parse --short HEAD)
 
 #-------------------------------------------------------------------------------
 mkdir -p ${SCRATCH_DIR}
@@ -34,9 +51,48 @@ cp -r ${HOME_DIR}/src .
 cp -r ${HOME_DIR}/make_arch .
 cp -r ${HOME_DIR}/Makefile .
 
-rpm -qi libfabric
-
-make clean
-OPTS="-DNO_WRITE_DATA" make fast
-${DBS_HOME}/bin/mpiexec -n 2 -ppn 1 --bind-to core -l ./rmem
 #-------------------------------------------------------------------------------
+# need to put 2 here to let some space of the thread!
+MPI_OPT="-n 2 -ppn 1 -l --bind-to core:2"
+#-------------------------------------------------------------------------------
+export PMI_DIR=${DBS_DIR}
+export HYDRA_TOPO_DEBUG=1
+
+#for device in 0 1; do
+for device in 0; do
+    export USE_HIP=${device}
+    make clean
+    make info debug
+    ldd rmem
+    #test delivery
+    declare -a test=(
+        "-r am -d am -c delivery"
+        #"-r am -d tag -c fence"
+        "-r am -d am -c counter"
+    )
+    for RMEM_OPT in "${test[@]}"; do
+        echo "==> ${MPI_OPT} with ${RMEM_OPT} - HIP? ${USE_CUDA}"
+        FI_PROVIDER="cxi" ${MPI_DIR}/bin/mpiexec ${MPI_OPT} ./rmem ${RMEM_OPT}
+    done
+done
+
+#echo "--------------------------------------------------"
+#echo "running in ${SCRATCH_DIR}"
+#echo "--------------------------------------------------"
+#
+#GIT_COMMIT=$(git rev-parse --short HEAD)
+#
+##-------------------------------------------------------------------------------
+#mkdir -p ${SCRATCH_DIR}
+#mkdir -p ${SCRATCH_DIR}/build
+#cd ${SCRATCH_DIR}
+#cp -r ${HOME_DIR}/src .
+#cp -r ${HOME_DIR}/make_arch .
+#cp -r ${HOME_DIR}/Makefile .
+#
+#rpm -qi libfabric
+#
+#make clean
+#OPTS="-DNO_WRITE_DATA" make fast
+#${DBS_HOME}/bin/mpiexec -n 2 -ppn 1 --bind-to core -l ./rmem
+##-------------------------------------------------------------------------------
