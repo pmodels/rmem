@@ -5,6 +5,7 @@
 #include "ofi.h"
 #include "rmem_utils.h"
 
+#define N_CANCEL            1000
 #define m_ofi_rma_offset(a) (offsetof(ofi_rma_t, ofi.a) - offsetof(ofi_rma_t, ofi.qnode))
 #define m_ofi_rma_structgetptr(T, name, a, task) \
     T* name = (T*)((uint8_t*)task + m_ofi_rma_offset(a));
@@ -16,6 +17,7 @@ void* ofi_tthread_main(void* arg) {
     m_pthread_call(pthread_setcancelstate(info, &old));
     // loop on the list forever, the main thread is going to kill it
     rmem_qmpsc_t* workq = arg;
+    int icancel = 0;
     while (1) {
         // try to dequeue an element
         rmem_qnode_t* task;
@@ -76,6 +78,9 @@ void* ofi_tthread_main(void* arg) {
             }
         }
         // test if we need to abort, ideally we don't do this
-        pthread_testcancel();
+        icancel = (icancel + 1) % N_CANCEL;
+        if (!icancel) {
+            pthread_testcancel();
+        }
     };
 }
