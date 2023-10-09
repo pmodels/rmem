@@ -214,7 +214,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     //---------------------------------------------------------------------------------------------
     // GPU
 #ifndef NDEBUG
-    int device_count;
+    int device_count=0;
     m_gpu_call(gpuGetDeviceCount(&device_count));
     m_assert(device_count <= 1, "more than one GPU per rank is not supported");
     m_gpu_call(gpuSetDevice(0));
