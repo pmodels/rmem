@@ -46,7 +46,7 @@ static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* 
     const bool is_dcmpl = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     // count the number of calls issued for each of the ranks and notify them
     *ttl_data = 0;
-    const uint64_t flag = (is_fence) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : 0x0;
+    const uint64_t flag = (is_fence) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : FI_TRANSMIT_COMPLETE;
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
@@ -54,10 +54,9 @@ static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* 
     for (int i = 0; i < nrank; ++i) {
         int issued_rank = 0;
         // if we are delivery complete, this is no needed and saves an atomic operation
-        if (!is_dcmpl) {
-            int icntr = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
-            *ttl_data += icntr;
-            issued_rank = (is_fence) ? 0 : icntr;
+        if (!is_dcmpl && !is_fence) {
+            issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
+            *ttl_data += issued_rank;
         }
 
         // if using fence, we need to fence ALL of the data_trx, if not we only issue on the sync
@@ -75,7 +74,7 @@ static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* 
         cqd->epoch_ptr = mem->ofi.sync.epch;
         m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqd->ctx,
                cqd->kind & m_ofi_cq_inc_local, cqd->epoch_ptr);
-        m_verb("complete_fisend: I have done %d write to %d, value sent = %llu", issued_rank, i,
+        m_verb("complete_send: I have done %d write to %d, value sent = %llu", issued_rank, i,
                cqd->sync.data);
         struct iovec iov = {
             .iov_base = &cqd->sync.data,
@@ -91,6 +90,7 @@ static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* 
                     .context = &cqd->ctx,
                     .data = 0x0,
                 };
+                m_verb("complete using fi_sendmsg with EP %p",trx->ep);
                 m_ofi_call_again(fi_sendmsg(trx->ep, &msg, flag), &progress);
 
             } break;
@@ -106,6 +106,7 @@ static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* 
                     .context = &cqd->ctx,
                     .data = 0x0,
                 };
+                m_verb("complete using fi_tsendmsg on EP %p, FI_FENCE? %d",trx->ep,(flag&FI_FENCE)>0);
                 m_ofi_call_again(fi_tsendmsg(trx->ep, &msg, flag), &progress);
             } break;
         }

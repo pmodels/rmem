@@ -201,6 +201,12 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     }
     //---------------------------------------------------------------------------------------------
     // async progress
+    if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) {
+        mem->ofi.qtrigr.done = malloc(sizeof(countr_t));
+        m_countr_init(mem->ofi.qtrigr.done);
+    } else {
+        mem->ofi.qtrigr.done = NULL;
+    }
     m_atomicptr_init(&mem->ofi.qtrigr.head);
     m_atomicptr_init(&mem->ofi.qtrigr.tail);
     m_atomicptr_init(&mem->ofi.qtrigr.prev);
@@ -214,9 +220,11 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     //---------------------------------------------------------------------------------------------
     // GPU
 #ifndef NDEBUG
-    int device_count=0;
+    int device_count = 0;
     m_gpu_call(gpuGetDeviceCount(&device_count));
-    m_assert(device_count <= 1, "more than one GPU per rank is not supported");
+    if (device_count > 1) {
+        m_log("WARNING: more than one GPU per rank (here %d) is not supported", device_count);
+    }
     m_gpu_call(gpuSetDevice(0));
 #endif
 
@@ -226,10 +234,12 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     //----------------------------------------------------------------------------------------------
     // cancel the thread first to avoid issues
-    void* retval;
+    void* retval = NULL;
     m_pthread_call(pthread_cancel(mem->ofi.progress));
     m_pthread_call(pthread_join(mem->ofi.progress, &retval));
-    m_verb("thread exited with %s", retval);
+    if (mem->ofi.qtrigr.done) {
+        free(mem->ofi.qtrigr.done);
+    }
     //----------------------------------------------------------------------------------------------
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG) {
         ofi_rmem_am_free(mem, comm);
@@ -425,6 +435,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     }
     //---------------------------------------------------------------------------------------------
     // GPU request - allocated to the GPU
+    // https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#zero-copy__zero-copy-host-code
     int* d_ready_ptr;
     volatile int* h_ready_ptr = &rma->ofi.qnode.ready;
     if (M_HAVE_GPU) {

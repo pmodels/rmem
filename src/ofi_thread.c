@@ -47,7 +47,7 @@ void* ofi_tthread_main(void* arg) {
                 .data = *msg_data | *sig_data,
                 .context = &msg_cq->ctx,
             };
-            m_verb("doing it");
+            m_verb("THREAD: doing it on EP %p",*ep);
             m_ofi_call_again(fi_writemsg(*ep, &msg, *msg_flags), rma_prog);
 
             //--------------------------------------------------------------------------------------
@@ -75,6 +75,11 @@ void* ofi_tthread_main(void* arg) {
             // if we had to get a cq entry and the inject, mark is as done
             if ((*msg_flags) & FI_INJECT && (*msg_flags) & FI_COMPLETION) {
                 m_countr_fetch_add(&msg_cq->rqst.busy, -1);
+            }
+            // notify the task has been executed
+            if (workq->done) {
+                m_countr_fetch_add(workq->done, +1);
+                m_verb("THREAD: new task done, counter is now %d",m_countr_load(workq->done));
             }
         }
         // test if we need to abort, ideally we don't do this

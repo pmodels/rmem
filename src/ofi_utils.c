@@ -76,7 +76,7 @@ static int ofi_prov_score(char* provname, ofi_cap_t* caps) {
         return 1;
     } else if (0 == strcmp(provname, "sockets")) {
         if (caps) {
-            *caps = M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA;
+            *caps = M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA | M_OFI_PROV_HAS_FENCE;
         }
         return 1;
     } else if (0 == strcmp(provname, "tcp;ofi_rxm")) {
@@ -511,9 +511,7 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
                 break;
         };
         // register
-        // the key value is 100+ if we want to use the FENCE remote completion mechanism to allow
-        // the usage of FI_FENCE on CXI's MR. An alternative is to use optmized MR and FI_WEAK_FENCE
-        uint64_t rkey = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) ? 100 : 0;
+        uint64_t rkey = 0;
         if (!(comm->prov->domain_attr->mr_mode & FI_MR_PROV_KEY)) {
             rkey += comm->unique_mr_key++;
         }

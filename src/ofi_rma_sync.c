@@ -126,10 +126,13 @@ int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_c
 //==================================================================================================
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("completing");
+    m_verb("completing: has prov FI_FENCE? %d",(comm->prov->caps & FI_FENCE)>0);
+    const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
+    const bool is_deliv = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     //----------------------------------------------------------------------------------------------
     int ttl_data = 0;
     int ttl_sync = 0;
-    if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) {
+    if (is_deliv || is_fence) {
         // just read the number of calls to wait for and reset them to 0
         for (int i = 0; i < nrank; ++i) {
             int issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
@@ -161,13 +164,21 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     }
     m_verb("complete: waiting for %d syncs and %d calls, total %d to complete", ttl_sync, ttl_data,
            threshold);
-    // use complete fast to what for the threshold on all the TRX (data + sync)
-    m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
-                                       mem->ofi.data_trx, mem->ofi.sync.epch));
+    if (is_fence) {
+        // wait for the queue to have processed all the calls
+        while (m_countr_load(mem->ofi.qtrigr.done) < threshold) {
+            sched_yield();
+        }
+        m_countr_fetch_add(mem->ofi.qtrigr.done, -threshold);
+    } else {
+        // use complete fast to what for the threshold on all the TRX (data + sync)
+        m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
+                                           mem->ofi.data_trx, mem->ofi.sync.epch));
+    }
 
     //----------------------------------------------------------------------------------------------
     // send the ack if delivery complete
-    if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) {
+    if (is_deliv || is_fence) {
         // as we have already used the values in icntr, it's gonna be 0.
         // this is expected as there is no calls to wait for on the target side
         switch (comm->prov_mode.dtc_mode) {
@@ -181,20 +192,23 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
                 m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
                 break;
         };
-        m_verb("completing the delivery complete ack: %d", nrank);
+        m_verb("completing the delivery complete ack: %d, current = %d", nrank,
+               m_countr_load(m_rma_mepoch_local(mem)));
         // make sure the ack are done, progress the sync only
-        m_rmem_call(ofi_rmem_progress_wait(nrank, m_rma_mepoch_local(mem), 1, mem->ofi.sync_trx,
+        int to_wait_for = (is_fence) ? (threshold + nrank) : nrank;
+        ofi_rma_trx_t* trx = (is_fence) ? mem->ofi.data_trx : mem->ofi.sync_trx;
+        m_rmem_call(ofi_rmem_progress_wait(to_wait_for, m_rma_mepoch_local(mem), 1, trx,
                                            mem->ofi.sync.epch));
     }
     //----------------------------------------------------------------------------------------------
 #ifndef NDEBUG
-    m_verb("completed");
     // no need to check the last rx/tx if AM message is used
     const bool check_last =
         (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG) && (comm->prov_mode.dtc_mode != M_OFI_DTC_MSG);
     for (int i = 0; i < (mem->ofi.n_tx + check_last); ++i) {
         m_mem_check_empty_cq(mem->ofi.data_trx[i].cq);
     }
+    m_verb("completed");
 #endif
     return m_success;
 }
@@ -297,7 +311,7 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
              "cannot complete fast with a fence mode");
     m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_DELIV_COMPL,
              "cannot complete fast with a delivery complete mode");
-    m_verb("completing-fast: %d calls, already done: %d", threshold,
+    m_verb("completing-fast: %d calls, already done: %d", ncalls,
            m_countr_load(m_rma_mepoch_local(mem)));
     m_verb("waiting fast");
     m_verb("wait untill: waiting for %d calls to complete", ncalls);
