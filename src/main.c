@@ -33,6 +33,14 @@ void print_info(char* foldr_name, char* prov_name, ofi_mode_t* mode) {
 #endif
 
     fprintf(file, "provider: %s\n", prov_name);
+
+#ifdef HAVE_CUDA
+    fprintf(file, "CUDA GPU\n");
+#elif defined(HAVE_HIP)
+    fprintf(file, "HIP GPU\n");
+#else
+    fprintf(file, "NO GPU\n");
+#endif
     switch (mode->sig_mode) {
         case (M_OFI_SIG_NULL):
             m_assert(0, "null is not supported here");
@@ -361,9 +369,9 @@ int main(int argc, char** argv) {
                     ti_p2pf / ti_p2p);
             }
             // write to csv
-            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int),
-                    ti_p2p, ti_put, ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_fast,
-                    ci_psig, ci_plat, ci_p2pf);
+            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int),
+                    ti_p2p, ti_put, ti_pgpu, ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put,
+                    ci_pgpu, ci_fast, ci_psig, ci_plat, ci_p2pf);
             // bump the index
             idx++;
         }
