@@ -69,6 +69,37 @@ Note: if you prefer to add another make_arch file, you can also invoke it using 
 - `NO_RMA_EVENT`: disactivate the use of RMA events to track of the RMA calls on the target side, uses `writedata` based approach instead.
 - `NO_WRITE_DATA`: disactivate the use of `fi_writedata` to complete the `put + signal` operation, uses a `FI_FENCE` approach instead.
 
+## possible modes
+
+### ready-to-receive (`-r`)
+the ready-to-receive protocol is used to expose readiness to reception by the target to the origin of the RMA call.
+- `am`: will use `fi_send` and pre-posted buffers at the sender
+- `tag`: will use `fi_tsend` and `fi_trecv`. The main performance bottleneck is unexpected messages
+- `atomic`: uses an atomic (:warning: currently broken?)
+
+
+### down-to-close (`-d`)
+- `am`: will use `fi_send` and pre-posted buffers at the sender
+- `tag`: will use `fi_tsend` and `fi_trecv`. The main performance bottleneck is unexpected messages
+
+### remote completion (`-c`)
+- `delivery complete` uses `FI_DELIVERY_COMPLETE` on the payload
+- `fence` uses a fence to issue the down-to-close acknowledgment
+- `cq_data` uses `FI_CQ_DATA` to track remote completion
+- `counter` uses `FI_REMOTE_COUNTER` to track remote completion using remote counters
+
+### Usability:
+Different networks have different capabilities, here is a list of them (v1.19):
+- `psm3`: does not support RMA natively
+- `verbs;ofi_rxm`: supports `FI_MSG`, `FI_TAGGED`, `FI_DELIVERY_COMPLETE`, `FI_CQ_DATA`, `FI_ATOMIC` (not natively)
+- `cxi`: supports everything except `FI_CQ_DATA` (`FI_MSG`, `FI_TAGGED`, `FI_ATOMIC`, `FI_DELIVERY_COMPLETE`, `FI_REMOTE_COUNTER`, `FI_FENCE`)
+- `sockets`: supports everything except `FI_REMOTE_COUNTER` (unsure though it doesn't support it)
+
+
+### performance consideration
+- when used with GPU, avoid the use of `FI_DELIVERY_COMPLETE`, it requires a `StreamSynchronize`. To avoid this, `fi_recv` can use `FI_TRANSMIT_COMPLETE` and the user is responsible to `StreamSynchronize` manually (which stream? no idea).
+
+
 ## license
 
 ```
