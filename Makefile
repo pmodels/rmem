@@ -114,7 +114,7 @@ endif
 
 ################################################################################
 # mandatory flags
-CCFLAGS ?=
+CCFLAGS ?= 
 CCFLAGS += -Wno-deprecated-declarations -Wshadow
 ifneq (,$(GIT_COMMIT))
 CCFLAGS += -DGIT_COMMIT=\"$(GIT_COMMIT)\"   
@@ -194,10 +194,13 @@ $(TARGET):$(OBJ)
 ################################################################################
 .PHONY: debug
 debug:
-	@OPTS="${OPTS} -O0 -g -fsanitize=address -fsanitize=undefined" $(MAKE) $(TARGET)
+	@OPTS="${OPTS} -O0 -g" $(MAKE) $(TARGET)
 .PHONY: verbose
 verbose:
 	@OPTS="${OPTS} -DVERBOSE" $(MAKE) debug
+.PHONY: asan
+asan:
+	@OPTS="${OPTS} -fsanitize=address -fsanitize=undefined" $(MAKE) verbose
 .PHONY: fast
 fast:
 	@OPTS="${OPTS} -O3 -DNDEBUG" $(MAKE) $(TARGET)

@@ -55,19 +55,20 @@ The `Makefile` offers various targets by defaults:
 
 - `rmem`: builds `rmem`
 - `info`: display info about the build
-- `default`: displays the info and build `rmem`
-- `fast`: compiles for fast execution (equivalent to `OPTS=-O3 -DNDEBUG -flto`)
-- `debug`: compiles for debug (equivalent to `OPTS=-O0 -g -fsanitize=address -fsanitize=undefined`)
-- `verbose`: compiles for debug with added verbosity (equivalent to `OPTS=-DVERBOSE make debug`)
 - `clean`/`reallyclean`: cleans the build
+- `default`: displays the info and build `rmem`
+- `fast`: compiles for fast execution (equivalent to `OPTS=-O3 -DNDEBUG`)
+- `debug`: compiles with debug symbols (equivalent to `OPTS=-O0 -g`)
+- `verbose`: compiles for debug with added verbosity (equivalent to `OPTS=-DVERBOSE make debug`)
+- `asan`: compiles with debug symbols (equivalent to `OPTS=-fsanitize=address -fsanitize=undefined make verbose`)
 
 
 Note: if you prefer to add another make_arch file, you can also invoke it using `ARCH_FILE=make_arch/myfile make`.
 
 ### build variables
 
-- `NO_RMA_EVENT`: disactivate the use of RMA events to track of the RMA calls on the target side, uses `writedata` based approach instead.
-- `NO_WRITE_DATA`: disactivate the use of `fi_writedata` to complete the `put + signal` operation, uses a `FI_FENCE` approach instead.
+- `NO_RMA_EVENT`: deactivate the use of RMA events to track of the RMA calls on the target side, uses `writedata` based approach instead.
+- `NO_WRITE_DATA`: deactivate the use of `fi_writedata` to complete the `put + signal` operation, uses a `FI_FENCE` approach instead.
 
 ## possible modes
 

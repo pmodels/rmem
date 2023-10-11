@@ -170,9 +170,10 @@ static gpuMemoryType_t gpuMemoryType(void* ptr) {
     CUresult res = cuPointerGetAttribute(&data,CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr) ptr);
     return (res == CUDA_ERROR_INVALID_VALUE) ? gpuMemoryTypeSystem : (gpuMemoryType_t)data;
 #elif (HAVE_HIP)
-    unsigned int data;
-    hipError_t res = hipPointerGetAttribute(&data,HIP_POINTER_ATTRIBUTE_MEMORY_TYPE, (hipDeviceptr_t) ptr);
-    return (res == hipErrorInvalidValue) ? gpuMemoryTypeSystem : (gpuMemoryType_t)data;
+    hipPointerAttribute_t attr;
+    hipError_t ret;
+    ret = hipPointerGetAttributes(&attr, ptr);
+    return (gpuMemoryType_t) attr.memoryType;
 #else
     return gpuMemoryTypeSystem;
 #endif
