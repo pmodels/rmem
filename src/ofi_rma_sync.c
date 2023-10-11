@@ -27,7 +27,8 @@ int ofi_rmem_post(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
 int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
 #ifndef NDEBUG
     // cq must be empty now unless we do AM
-    if (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG) {
+    if ((comm->prov_mode.rtr_mode != M_OFI_RTR_MSG) &&
+        (comm->prov_mode.dtc_mode != M_OFI_DTC_MSG)) {
         m_mem_check_empty_cq(mem->ofi.sync_trx->cq);
         m_verb("posting-fast");
     }
@@ -253,9 +254,10 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         i = (i + 1) % mem->ofi.n_rx;
     }
     m_countr_fetch_add(m_rma_mepoch_cmpl(mem), -nrank);
+    m_verb("I have received the %d sync calls",nrank);
 #ifndef NDEBUG
     // sync cq must be empty now unless we have AM posted receives
-    if (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG) {
+    if (comm->prov_mode.rtr_mode != M_OFI_RTR_MSG && comm->prov_mode.dtc_mode != M_OFI_DTC_MSG) {
         m_mem_check_empty_cq(mem->ofi.sync_trx->cq);
     }
 #endif

@@ -193,7 +193,8 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     }
     //----------------------------------------------------------------------------------------------
     // post the AM buffers once the EP are ready done
-    if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG) {
+    if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG || comm->prov_mode.dtc_mode == M_OFI_DTC_MSG) {
+        m_verb("init AM buffers");
         ofi_rmem_am_init(mem, comm);
         // we MUST have this barrier to make sure that no sync message is sent before all the AM
         // receive have been posted
@@ -241,7 +242,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
         free(mem->ofi.qtrigr.done);
     }
     //----------------------------------------------------------------------------------------------
-    if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG) {
+    if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG || comm->prov_mode.dtc_mode == M_OFI_DTC_MSG) {
         ofi_rmem_am_free(mem, comm);
     }
     //----------------------------------------------------------------------------------------------
