@@ -14,7 +14,6 @@ OFI_DIR?=${HOME}/lib-OFI-1.18.0-CUDA-11.7.0-dbg
 #---------------------------------------------------------------------------------------------------
 # LUMI
 else ifneq (,$(or $(findstring uan,$(HOSTNAME)),$(findstring nid,$(HOSTNAME))))
-USE_CUDA ?=0
 CC=gcc
 CXX=g++
 PMI_DIR?=${HOME}/lib-PMI-4.1.1

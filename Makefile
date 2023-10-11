@@ -15,11 +15,14 @@ include $(ARCH_FILE)
 # Do not show GNU makefile command and info 
 .SILENT:
 
+USE_CUDA?=0
+USE_HIP?=0
 #---------------------------------------------------------------------------------------------------
 CC ?= gcc
 CXX ?= g++
 LD ?= gcc
 NVCC ?= nvcc
+HIPCC ?= hipcc
 
 #---------------------------------------------------------------------------------------------------
 TARGET := rmem
@@ -68,7 +71,7 @@ LIB =
 LIB += -lpthread -lm
 LIB += -L$(OFI_LIB) $(OFI_LIBNAME)
 LIB += -L$(PMI_LIB) $(PMI_LIBNAME)
-# different way of doing rpath
+# different way of doing rpath in CUDA
 ifeq ($(USE_CUDA),1)
 LIB += -rpath=$(OFI_LIB)
 LIB += -rpath=$(PMI_LIB)
@@ -88,11 +91,13 @@ endif
 ## add the wanted folders - common folders
 CC_SRC := $(notdir $(wildcard $(SRC_DIR)/*.c))
 CU_SRC := $(notdir $(wildcard $(SRC_DIR)/*.cu))
+HIP_SRC := $(notdir $(wildcard $(SRC_DIR)/*.hip))
 CC_HEAD := $(wildcard $(SRC_DIR)/*.h)
 
 ## generate object list
 CC_OBJ := $(CC_SRC:%.c=$(OBJ_DIR)/%.o)
 CU_OBJ := $(CU_SRC:%.cu=$(OBJ_DIR)/%.o)
+HIP_OBJ := $(HIP_SRC:%.hip=$(OBJ_DIR)/%.o)
 DEP := $(CC_SRC:%.c=$(OBJ_DIR)/%.d)
 
 #create the object list
@@ -100,6 +105,11 @@ OBJ := $(CC_OBJ)
 # add the cuda objects
 ifeq ($(USE_CUDA),1)
 OBJ += $(CU_OBJ)
+$(info cuda OBJ = ${OBJ})
+else ifeq ($(USE_HIP),1)
+$(info hip OBJ = ${OBJ})
+OBJ += $(HIP_OBJ)
+$(info hip OBJ = ${OBJ})
 endif
 
 ################################################################################
@@ -114,6 +124,11 @@ GENCODE ?=
 ifeq ($(USE_CUDA),1)
 GENCODE += -gencode=arch=compute_80,code=sm_80
 CCFLAGS += -DHAVE_CUDA
+else ifeq ($(USE_HIP),1)
+#GENCODE += -offload-arch=auto
+CCFLAGS += -DHAVE_HIP
+#capture the includes for HIP
+CCFLAGS += $(shell hipconfig --cpp_config)
 endif
 
 
@@ -137,13 +152,18 @@ $(OBJ_DIR)/%.o : $(SRC_DIR)/%.c
 	@echo "$(CC) $@"
 	$(CC) -std=c11 $(REAL_CC_FLAGS) -MMD -c $< -o $@
 
+ifeq ($(USE_CUDA),1)
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cu
-	@echo "$(NVCC) $@"
+	@echo "cuda: $(NVCC) $@"
 	$(NVCC) $(GENCODE) -Xcompiler $(REAL_CU_FLAGS) -c $< -o $@
-
+else ifeq ($(USE_HIP),1)
+$(OBJ_DIR)/%.o : $(SRC_DIR)/%.hip
+	@echo "hip: $(HIPCC) $@"
+	$(HIPCC) $(GENCODE) -std=c++11 $(REAL_CC_FLAGS) -MMD -c $< -o $@
+endif
 #---------------------------------------------------------------------------------------------------
 # link stage
-# CUDA
+# ======= CUDA =======
 ifeq ($(USE_CUDA),1)
 # we use cuda to link
 LD := $(NVCC) -lcuda $(GENCODE)
@@ -152,12 +172,19 @@ REAL_LD_FLAGS := -Xlinker $(subst $(space),$(comma),$(strip $(LDFLAGS) $(LIB)))
 ifneq (,$(OPTS))
 REAL_LD_FLAGS += -Xcompiler $(subst $(space),$(comma),$(strip $(OPTS)))
 endif
-# no CUDA
+# ======= HIP =======
+else ifeq ($(USE_HIP),1)
+LD := $(HIPCC)
+$(info using LD = ${LD})
+REAL_LD_FLAGS:= $(strip $(OPTS) $(LDFLAGS) $(LIB))
+# ======= no GPU =======
 else
 # use normal GCC to link
-LD := $(CC)
+LD := $(CC) $(GENCODE)
 REAL_LD_FLAGS:= $(strip $(OPTS) $(LDFLAGS) $(LIB))
 endif
+
+
 
 # link recipe
 $(TARGET):$(OBJ)

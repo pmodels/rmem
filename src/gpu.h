@@ -6,7 +6,7 @@
 #define GPU_DEFAULT_STREAM 0
 
 //--------------------------------------------------------------------------------------------------
-#if (HAVE_CUDA || HAVE_HIP)
+#if defined(HAVE_CUDA) || defined(HAVE_HIP)
 //--------------------------------------------------------------------------------------------------
 #define M_HAVE_GPU 1
 #define m_gpu(f)   f
@@ -51,23 +51,38 @@ typedef enum {
 //--------------------------------------------------
 #elif HAVE_HIP
 //--------------------------------------------------
-#include <hip.h>
-#include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 
+#define gpuSuccess  hipSuccess
 #define gpuStream_t hipStream_t
 
-#ifndef NDEBUG
-#define m_gpu_call(func)                                                             \
-    do {                                                                             \
-        int m_cuda_call_res = func;                                                  \
-        m_assert(m_cuda_call_res == cudaSuccess, "CUDA ERROR: %d", m_cuda_call_res); \
-    } while (0)
-#else
-#define m_cuda_call(func) \
-    do {                  \
-        func;             \
-    } while (0)
-#endif
+// memory
+#define gpuMalloc               hipMalloc
+#define gpuFree                 hipFree
+#define gpuHostRegister         hipHostRegister
+#define gpuHostUnregister       hipHostUnregister
+#define gpuHostGetDevicePointer hipHostGetDevicePointer
+#define gpuHostRegisterMapped   hipHostRegisterMapped
+#define gpuMemcpyHostToDevice   hipMemcpyHostToDevice
+#define gpuMemcpyDeviceToHost   hipMemcpyDeviceToHost
+#define gpuMemcpyAsync          hipMemcpyAsync
+
+// stream
+#define gpuStreamCreate      hipStreamCreate
+#define gpuStreamDestroy     hipStreamDestroy
+#define gpuStreamSynchronize hipStreamSynchronize
+// other
+#define gpuSetDevice      hipSetDevice
+#define gpuGetDeviceCount hipGetDeviceCount
+#define gpuDeviceProp     hipDeviceProp
+
+typedef enum {
+    gpuMemoryTypeHost = hipMemoryTypeHost,
+    gpuMemoryTypeDevice = hipMemoryTypeDevice,
+    gpuMemoryTypeSystem,
+    gpuMemoryTypeManaged,
+} gpuMemoryType_t;
+#define FI_HMEM_GPU FI_HMEM_ROCR
 
 #endif  // end CUDA-HIP
 
@@ -155,6 +170,9 @@ static gpuMemoryType_t gpuMemoryType(void* ptr) {
     CUresult res = cuPointerGetAttribute(&data,CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr) ptr);
     return (res == CUDA_ERROR_INVALID_VALUE) ? gpuMemoryTypeSystem : (gpuMemoryType_t)data;
 #elif (HAVE_HIP)
+    unsigned int data;
+    hipError_t res = hipPointerGetAttribute(&data,HIP_POINTER_ATTRIBUTE_MEMORY_TYPE, (hipDeviceptr_t) ptr);
+    return (res == hipErrorInvalidValue) ? gpuMemoryTypeSystem : (gpuMemoryType_t)data;
 #else
     return gpuMemoryTypeSystem;
 #endif
