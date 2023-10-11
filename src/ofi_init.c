@@ -55,17 +55,17 @@ int ofi_ctx_init(const int comm_size, struct fi_info* prov, struct fid_domain* d
 }
 
 int ofi_ctx_free(struct fi_info* prov, ofi_ctx_t** ctx){
-    free((*ctx)->p2p_addr);
     m_rmem_call(ofi_util_free_ep(prov,&(*ctx)->p2p_ep, &(*ctx)->stx, &(*ctx)->srx));
     m_ofi_call(fi_close(&(*ctx)->p2p_cq->fid));
     m_ofi_call(fi_close(&(*ctx)->p2p_av->fid));
+    free((*ctx)->p2p_addr);
     return m_success;
 }
 
 // main functions
 int ofi_init(ofi_comm_t* ofi) {
     // get the provider list
-    m_rmem_call(ofi_util_get_prov(&ofi->prov));
+    m_rmem_call(ofi_util_get_prov(&ofi->prov,&ofi->prov_mode));
     // struct fi_info* prov_list;
     // m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, NULL, &prov_list));
     //

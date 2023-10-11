@@ -46,10 +46,16 @@ OFI_INC ?= $(OFI_DIR)/include
 OFI_LIB ?= $(OFI_DIR)/lib
 OFI_LIBNAME ?= -lfabric
 
+# ARGP
+ARGP_DIR ?= /usr
+ARGP_INC ?= $(ARGP_DIR)/include
+ARGP_LIB ?= $(ARGP_DIR)/lib
+ARGP_LIBNAME ?= -largp
+
 #---------------------------------------------------------------------------------------------------
 # includes
-INC += -I$(PMI_INC)
 INC += -I$(OFI_INC)
+INC += -I$(PMI_INC)
 # pthread 
 INC += -pthread
 # gcc need this special define to handle time measurement
@@ -59,10 +65,15 @@ endif
 
 # add the link options
 LIB += -lpthread -lm
-LIB += -L$(PMI_LIB) $(PMI_LIBNAME)
-LIB += -L$(OFI_LIB) $(OFI_LIBNAME)
-LIB += -Wl,-rpath,$(PMI_LIB)
-LIB += -Wl,-rpath,$(OFI_LIB)
+LIB += -L$(OFI_LIB) $(OFI_LIBNAME) -Wl,-rpath,$(OFI_LIB)
+LIB += -L$(PMI_LIB) $(PMI_LIBNAME) -Wl,-rpath,$(PMI_LIB)
+
+# if not gcc, add argp lib
+ifeq (,$(findstring gcc,$(CC)))
+INC += -I$(ARGP_INC)
+LIB += -L$(ARGP_LIB) $(ARGP_LIBNAME)
+LIB += -Wl,-rpath,$(ARGP_LIB)
+endif
 
 #---------------------------------------------------------------------------------------------------
 ## add the wanted folders - common folders

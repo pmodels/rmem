@@ -5,7 +5,14 @@
 #ifndef RMEM_RUN_H_
 #define RMEM_RUN_H_
 
-#define m_max_size (1<<24)
+#define m_max_ttl_size (1<<22)
+#define m_min_msg_size (1<<15)
+
+#define m_msg_size(n, size, type)                                            \
+    ({                                                                       \
+        size_t n_msg_size_limit = m_max(m_max_ttl_size, m_min_msg_size * n); \
+        m_min(n* size * sizeof(type), n_msg_size_limit) / sizeof(type);      \
+    })
 
 #include "ofi.h"
 
@@ -25,16 +32,16 @@ typedef struct {
 } run_time_t;
 
 typedef struct {
+    int n_msg;        // number of messages
+    size_t msg_size;  // size of a message
     ofi_rmem_t* mem;
     ofi_comm_t* comm;
-    int n_msg;     // number of messages
-    int msg_size;  // size of a message
 } run_param_t;
 
 typedef struct {
     void* data;
     void (*pre)(run_param_t* param, void*);
-    double (*run)(run_param_t* param, void*);
+    double (*run)(run_param_t* param, void*,void*);
     void (*post)(run_param_t* param, void*);
 } run_t;
 
@@ -56,10 +63,10 @@ void p2p_pre_send(run_param_t* param, void* data);
 void p2p_pre_recv(run_param_t* param, void* data);
 void p2p_post_send(run_param_t* param, void* data);
 void p2p_post_recv(run_param_t* param, void* data);
-double p2p_run_send(run_param_t* param, void* data);
-double p2p_run_recv(run_param_t* param, void* data);
-double p2p_fast_run_send(run_param_t* param, void* data);
-double p2p_fast_run_recv(run_param_t* param, void* data);
+double p2p_run_send(run_param_t* param, void* data, void* ack);
+double p2p_run_recv(run_param_t* param, void* data, void* ack);
+double p2p_fast_run_send(run_param_t* param, void* data, void* ack);
+double p2p_fast_run_recv(run_param_t* param, void* data, void* ack);
 
 //--------------------------------------------------------------------------------------------------
 // PRE
@@ -79,13 +86,13 @@ void rma_post(run_param_t* param, void* data);
 // RUN
 //----------------
 // send
-double rma_run_send(run_param_t* param, void* data);
-double rma_fast_run_send(run_param_t* param, void* data);
-double lat_run_send(run_param_t* param, void* data);
+double rma_run_send(run_param_t* param, void* data, void* ack);
+double rma_fast_run_send(run_param_t* param, void* data, void* ack);
+double lat_run_send(run_param_t* param, void* data, void* ack);
 // recv
-double rma_run_recv(run_param_t* param, void* data);
-double rma_fast_run_recv(run_param_t* param, void* data);
-double sig_run_recv(run_param_t* param, void* data);
-double lat_run_recv(run_param_t* param, void* data);
+double rma_run_recv(run_param_t* param, void* data, void* ack);
+double rma_fast_run_recv(run_param_t* param, void* data, void* ack);
+double sig_run_recv(run_param_t* param, void* data, void* ack);
+double lat_run_recv(run_param_t* param, void* data, void* ack);
 
 #endif
