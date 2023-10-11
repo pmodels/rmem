@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "ofi.h"
+#include "ofi_rma_sync_tools.h"
 #include "ofi_utils.h"
 #include "pmi_utils.h"
 #include "rdma/fi_atomic.h"
@@ -46,7 +47,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     //----------------------------------------------------------------------------------------------
     // the sync data needed for the Post-start atomic protocol
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
-        m_rmem_call(ofi_util_sig_reg(&mem->ofi.sync.rtr, comm));
+        m_rmem_call(ofi_util_sig_reg(&mem->ofi.sync.ps_sig, comm));
     }
     //---------------------------------------------------------------------------------------------
     // open shared completion and remote counter
@@ -140,7 +141,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
             }
         }
         if (is_sync && comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
-            m_rmem_call(ofi_util_sig_bind(&mem->ofi.sync.rtr, trx[i].ep, comm));
+            m_rmem_call(ofi_util_sig_bind(&mem->ofi.sync.ps_sig, trx[i].ep, comm));
         }
         // is not MR_ENDPOINT, first bind and then enable the EP
         if (!(comm->prov->domain_attr->mr_mode & FI_MR_ENDPOINT)) {
@@ -165,7 +166,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         ofi_util_sig_enable(&mem->ofi.signal, comm);
     }
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
-        ofi_util_sig_enable(&mem->ofi.sync.rtr, comm);
+        ofi_util_sig_enable(&mem->ofi.sync.ps_sig, comm);
     }
 
     //---------------------------------------------------------------------------------------------
@@ -179,7 +180,8 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         for (int j = 0; j < 2; ++j) {
             ofi_cqdata_t* ccq = tmp_cq_array[j] + i;
             ccq->kind = m_ofi_cq_kind_sync;
-            ccq->sync.epoch_ptr = mem->ofi.sync.epch;
+            ccq->epoch_ptr = mem->ofi.sync.epch;
+            m_verb("registering sync memory [%d,%d]",i,j);
             m_rmem_call(ofi_util_mr_reg(&ccq->sync.data, sizeof(uint64_t), FI_SEND | FI_RECV, comm,
                                         &ccq->sync.mr.mr, &ccq->sync.mr.desc, NULL));
             m_rmem_call(ofi_util_mr_bind(mem->ofi.sync_trx->ep, ccq->sync.mr.mr, NULL, comm));
@@ -187,18 +189,32 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         }
     }
     //----------------------------------------------------------------------------------------------
+    // post the AM buffers once the EP are ready done
+    if(comm->prov_mode.rtr_mode == M_OFI_RTR_MSG){
+        ofi_rmem_am_init(mem, comm);
+        // we MUST have this barrier to make sure that no sync message is sent before all the AM
+        // receive have been posted
+        PMI_Barrier();
+    }
+    //----------------------------------------------------------------------------------------------
     return m_success;
 }
 int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
+    if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG) {
+        ofi_rmem_am_free(mem, comm);
+    }
     //----------------------------------------------------------------------------------------------
     // free the sync
     for (int i = 0; i < comm->size; ++i) {
+        m_verb("closing sync memory [%d,%d]",i,0);
         m_rmem_call(ofi_util_mr_close(mem->ofi.sync.cqdata_ps[i].sync.mr.mr));
+        m_verb("closing sync memory [%d,%d]",i,1);
         m_rmem_call(ofi_util_mr_close(mem->ofi.sync.cqdata_cw[i].sync.mr.mr));
     }
     free(mem->ofi.sync.cqdata_ps);
     free(mem->ofi.sync.cqdata_cw);
     // free the MRs
+    m_verb("closing user memory");
     m_rmem_call(ofi_util_mr_close(mem->ofi.mr.mr));
     free(mem->ofi.mr.key_list);
     free(mem->ofi.mr.base_list);
@@ -208,7 +224,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
         ofi_util_sig_close(&mem->ofi.signal);
     }
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
-        ofi_util_sig_close(&mem->ofi.sync.rtr);
+        ofi_util_sig_close(&mem->ofi.sync.ps_sig);
     }
 
     // free the Tx first, need to close them before closing the AV in the Rx
@@ -228,7 +244,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
             free(trx->addr);
         }
     }
-    if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
+    if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_REMOTE_CNTR) {
         m_ofi_call(fi_close(&mem->ofi.rcntr->fid));
     }
     free(mem->ofi.data_trx);
@@ -253,6 +269,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     rma->ofi.addr = mem->ofi.data_trx[rx_id].addr[rma->peer];
     //----------------------------------------------------------------------------------------------
     // if needed, register the memory
+    m_verb("registering memory origin");
     m_rmem_call(ofi_util_mr_reg(rma->buf, rma->count, FI_WRITE | FI_READ, comm, &rma->ofi.msg.mr.mr,
                                 &rma->ofi.msg.mr.desc, NULL));
     m_rmem_call(ofi_util_mr_bind(rma->ofi.ep, rma->ofi.msg.mr.mr, NULL, comm));
@@ -274,34 +291,40 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     // cq and progress
     // any of the cqdata entry can be used to fallback, the first one always exists
     rma->ofi.progress.cq = mem->ofi.data_trx[ctx_id].cq;
-    rma->ofi.progress.fallback_ctx = &mem->ofi.sync.cqdata_cw[0].ctx;
+    rma->ofi.progress.xctx.epoch_ptr = mem->ofi.sync.epch;
     switch (op) {
         case (RMA_OPT_PUT):
         case (RMA_OPT_PUT_SIG): {
+            m_verb("using kind local and null");
             rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
         } break;
         case (RMA_OPT_RPUT): {
+            m_verb("using kind local and rqst");
             rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_rqst;
         } break;
     }
+    rma->ofi.msg.cq.epoch_ptr = mem->ofi.sync.epch;
     //----------------------------------------------------------------------------------------------
     // flag
     const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
     const bool do_delivery = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
-    const bool do_inject = (rma->count < comm->prov->tx_attr->inject_size) && auto_progress;
+    const bool do_inject =
+        (rma->count < comm->prov->tx_attr->inject_size) && auto_progress && (!do_delivery);
     // force the use of delivery complete if needed
     uint64_t flag_complete = 0x0;
     if (do_delivery) {
-        m_verb("using FI_DELIVERY_COMPLETE");
         flag_complete |= FI_DELIVERY_COMPLETE;
+        m_assert(!do_inject, "we cannot inject at the same time");
+        m_verb("using FI_DELIVERY_COMPLETE");
     } else if (auto_progress) {
-        m_verb("using FI_INJECT_COMPLETE");
         flag_complete |= FI_INJECT_COMPLETE;
+        m_verb("using FI_INJECT_COMPLETE");
     } else {
-        m_verb("using FI_TRANSMIT_COMPLETE");
         flag_complete |= FI_TRANSMIT_COMPLETE;
+        m_assert(!do_inject, "we cannot inject at the same time");
+        m_verb("using FI_TRANSMIT_COMPLETE");
     }
-    // fill out the falgs
+    // fill out the flags
     rma->ofi.msg.flags = (do_inject ? FI_INJECT : 0x0);
     switch (op) {
         case (RMA_OPT_PUT): {
@@ -331,6 +354,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     //----------------------------------------------------------------------------------------------
     // signal
     if (op == RMA_OPT_PUT_SIG) {
+        rma->ofi.sig.cq.epoch_ptr = mem->ofi.sync.epch;
         switch (comm->prov_mode.sig_mode) {
             case M_OFI_SIG_NULL:
                 m_assert(0, "null is not supported here");
@@ -353,14 +377,14 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
                 // setup cq data
                 rma->ofi.sig.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
                 // flag
-                rma->ofi.sig.flags = FI_FENCE | (do_inject ? FI_INJECT : 0x0) |
-                                     (auto_progress ? FI_INJECT_COMPLETE : FI_TRANSMIT_COMPLETE);
+                rma->ofi.sig.flags = FI_FENCE | (do_inject ? FI_INJECT : 0x0) | flag_complete;
                 break;
         };
     } else {
         rma->ofi.sig.flags = 0x0;
         rma->ofi.sig.iov = (struct fi_ioc){0};
         rma->ofi.sig.riov = (struct fi_rma_ioc){0};
+        rma->ofi.sig.cq.epoch_ptr = NULL;
     }
     //----------------------------------------------------------------------------------------------
     m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
@@ -396,9 +420,9 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
         m_assert(!curr, "the busy value is not 0: %d", curr);
     }
     // do the comm
-    m_verb("doing it: write msg with kind =%d (inc local? %d) to ep %p: cqdata = %llu",
+    m_verb("doing it: write msg with kind =%d (inc local? %d) to ep %p: cqdata = %llu, ctx = %p",
            rma->ofi.msg.cq.kind & 0x0f, rma->ofi.msg.cq.kind & m_ofi_cq_inc_local, rma->ofi.ep,
-           msg.data);
+           msg.data,msg.context);
     m_ofi_call_again(fi_writemsg(rma->ofi.ep, &msg, flags), &rma->ofi.progress);
     m_verb("doing it: done");
     m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
@@ -430,6 +454,7 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma) {
         m_countr_fetch_add(&rma->ofi.msg.cq.rqst.busy, -1);
     }
     //----------------------------------------------------------------------------------------------
+    m_verb("done");
     return m_success;
 }
 int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
@@ -443,6 +468,7 @@ int ofi_rma_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, 
 }
 
 int ofi_rma_free(ofi_rma_t* rma) {
+    m_verb("closing memory origin");
     m_rmem_call(ofi_util_mr_close(rma->ofi.msg.mr.mr));
     return m_success;
 }

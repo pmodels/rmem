@@ -35,7 +35,7 @@ static int ofi_p2p_init(ofi_p2p_t* p2p, const int ctx_id, ofi_comm_t* comm, cons
     }
     // set the progress param
     p2p->ofi.progress.cq = ctx->p2p_cq;
-    p2p->ofi.progress.fallback_ctx = NULL;
+    p2p->ofi.progress.xctx.epoch_ptr = NULL;
     // flag
     // we can use the inject (or FI_INJECT_COMPLETE) only if autoprogress cap is ON. Otherwise, not
     // reading the cq will lead to no progress, see issue https://github.com/pmodels/rmem/issues/4

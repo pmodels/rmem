@@ -20,34 +20,36 @@ static char args_doc[] = "";
 
 /* The options we understand. */
 static struct argp_option options[] = {
-    {"signal", 's', "MODE", 0,
-        "the prefered signal mechanism: atomic or cq_data",1},
+    {"signal", 's', "MODE", 0, "signal mechanism: atomic or cq_data", 1},
     {"remote-complete", 'c', "MODE", 0,
-        "the prefered remote completion mechanism: fence, cq_data, counter, or delivery",1},
-    {"ready-to-receive", 'r', "MODE", 0, "the prefered ready-to-receive mechanism: atomic or msg",1},
+     "remote completion mechanism: fence, cq_data, counter, or delivery", 1},
+    {"ready-to-receive", 'r', "MODE", 0, "ready-to-receive mechanism: atomic, tag or am", 1},
+    {"down-to-close", 'd', "MODE", 0, "down-to-close mechanism: tag or am", 1},
     {0}};
 
-// /* Used by main to communicate with parse_opt. */
-// struct argp_rmem {
-//     int sig_mode;
-//     int rtr_mode;
-//     int rcmpl_mode;
-// };
+/* Used by main to communicate with parse_opt. */
+typedef struct {
+    ofi_mode_t mode;
+}argp_rmem_t;
 
 /* Parse a single option. */
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
+    if (!arg) {
+        return m_success;
+    }
     /* Get the input argument from argp_parse, which we
        know is a pointer to our arguments structure. */
-    ofi_mode_t *arguments = state->input;
+    argp_rmem_t *arguments = state->input;
+    m_verb("parsing options: key = %d, arg = %s", key, arg);
 
     switch (key) {
         //------------------------------------------------------------------------------------------
         // signal
         case 's':
             if (0 == strcmp(arg, "atomic")) {
-                arguments->sig_mode = M_OFI_SIG_ATOMIC;
+                arguments->mode.sig_mode = M_OFI_SIG_ATOMIC;
             } else if (0 == strcmp(arg, "cq_data")) {
-                arguments->sig_mode = M_OFI_SIG_CQ_DATA;
+                arguments->mode.sig_mode = M_OFI_SIG_CQ_DATA;
             } else {
                 m_log("unknown value in signal argument: %s", arg);
                 argp_usage(state);
@@ -56,15 +58,14 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         //------------------------------------------------------------------------------------------
         // remote completion
         case 'c':
-            m_log("arg = %s", arg);
             if (0 == strcmp(arg, "fence")) {
-                arguments->rcmpl_mode = M_OFI_RCMPL_FENCE;
+                arguments->mode.rcmpl_mode = M_OFI_RCMPL_FENCE;
             } else if (0 == strcmp(arg, "cq_data")) {
-                arguments->rcmpl_mode = M_OFI_RCMPL_CQ_DATA;
+                arguments->mode.rcmpl_mode = M_OFI_RCMPL_CQ_DATA;
             } else if (0 == strcmp(arg, "counter")) {
-                arguments->rcmpl_mode = M_OFI_RCMPL_REMOTE_CNTR;
+                arguments->mode.rcmpl_mode = M_OFI_RCMPL_REMOTE_CNTR;
             } else if (0 == strcmp(arg, "delivery")) {
-                arguments->rcmpl_mode = M_OFI_RCMPL_DELIV_COMPL;
+                arguments->mode.rcmpl_mode = M_OFI_RCMPL_DELIV_COMPL;
             } else {
                 m_log("unknown value in remote completion argument: %s", arg);
                 argp_usage(state);
@@ -73,12 +74,26 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         //------------------------------------------------------------------------------------------
         // ready to receive
         case 'r':
-            if (0 == strcmp(arg, "msg")) {
-                arguments->rtr_mode = M_OFI_RTR_TMSG;
+            if (0 == strcmp(arg, "tag")) {
+                arguments->mode.rtr_mode = M_OFI_RTR_TAGGED;
             } else if (0 == strcmp(arg, "atomic")) {
-                arguments->rtr_mode = M_OFI_RTR_ATOMIC;
+                arguments->mode.rtr_mode = M_OFI_RTR_ATOMIC;
+            } else if (0 == strcmp(arg, "am")) {
+                arguments->mode.rtr_mode = M_OFI_RTR_MSG;
             } else {
                 m_log("unknown value in ready-to-receive argument: %s", arg);
+                argp_usage(state);
+            }
+            break;
+        //------------------------------------------------------------------------------------------
+        // down to close
+        case 'd':
+            if (0 == strcmp(arg, "am")) {
+                arguments->mode.dtc_mode = M_OFI_DTC_MSG;
+            } else if (0 == strcmp(arg, "tag")) {
+                arguments->mode.dtc_mode = M_OFI_DTC_TAGGED;
+            } else {
+                m_log("unknown value in down-to-close argument: %s", arg);
                 argp_usage(state);
             }
             break;
