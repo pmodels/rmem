@@ -569,6 +569,12 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     const size_t ttl_len = n_msg * msg_size;
     const int buddy = peer(param->comm->rank, param->comm->size);
 
+    // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
+    if (param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL ||
+        param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) {
+        return 0.0;
+    }
+
     double time;
     rmem_prof_t prof = {.name = "send"};
     //------------------------------------------------
@@ -588,10 +594,10 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     return time;
 }
 double rma_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_run_send_device(param, data, ack_ptr, RMEM_GPU);
+    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_GPU);
 }
 double rma_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_run_send_device(param, data, ack_ptr, RMEM_HOST);
+    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_HOST);
 }
 // double lat_run_send(run_param_t* param, void* data,void* ack_ptr) {
 //     run_rma_data_t* d = (run_rma_data_t*)data;
@@ -647,6 +653,12 @@ double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     const size_t msg_size = param->msg_size;
     const size_t ttl_len = n_msg * msg_size;
     const int buddy = peer(param->comm->rank, param->comm->size);
+
+    // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
+    if (param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL ||
+        param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) {
+        return 0.0;
+    }
 
     double time;
     rmem_prof_t prof = {.name = "recv"};

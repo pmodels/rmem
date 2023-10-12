@@ -238,19 +238,19 @@ int main(int argc, char** argv) {
     run_time_t pfast_time = {0};
     {
         run_rma_data_t pfast_data;
-        run_t plat_send = {
+        run_t pfast_send = {
             .data = &pfast_data,
             .pre = &put_pre_send,
             .run = &rma_fast_run_send,
             .post = &rma_post,
         };
-        run_t plat_recv = {
+        run_t pfast_recv = {
             .data = &pfast_data,
             .pre = &put_pre_recv,
             .run = &rma_fast_run_recv,
             .post = &rma_post,
         };
-        //run_test(&plat_send, &plat_recv, param, &pfast_time);
+        run_test(&pfast_send, &pfast_recv, param, &pfast_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT LATENCY

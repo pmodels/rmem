@@ -313,7 +313,7 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
              "cannot complete fast with a fence mode");
     m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_DELIV_COMPL,
              "cannot complete fast with a delivery complete mode");
-    m_verb("completing-fast: %d calls, already done: %d", ncalls,
+    m_verb("waiting-fast: %d calls, already done: %d", ncalls,
            m_countr_load(m_rma_mepoch_local(mem)));
     m_verb("waiting fast");
     m_verb("wait untill: waiting for %d calls to complete", ncalls);
