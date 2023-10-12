@@ -346,12 +346,12 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     rma->ofi.qnode.ready = 0;
     //----------------------------------------------------------------------------------------------
     // flag
-    const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
+    const bool do_inject = (rma->count < comm->prov->tx_attr->inject_size);
     const bool do_delivery = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
-    const bool do_inject =
-        (rma->count < comm->prov->tx_attr->inject_size) && auto_progress && (!do_delivery);
+    const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
     // force the use of delivery complete if needed
-    uint64_t flag_complete = 0x0;
+    m_verb("injection? %ld vs %ld", rma->count, comm->prov->tx_attr->inject_size);
+    uint64_t flag_complete = (do_inject) ? FI_INJECT : 0x0;
     if (do_delivery) {
         flag_complete |= FI_DELIVERY_COMPLETE;
         m_assert(!do_inject, "we cannot inject at the same time");
@@ -419,7 +419,8 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
                 // setup cq data
                 rma->ofi.sig.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
                 // flag
-                rma->ofi.sig.flags = FI_FENCE | (do_inject ? FI_INJECT : 0x0) | flag_complete;
+                rma->ofi.sig.flags = FI_FENCE | FI_INJECT | flag_complete;
+                // rma->ofi.sig.flags = FI_FENCE | (do_inject ? FI_INJECT : 0x0) | flag_complete;
                 break;
         };
     } else {
