@@ -37,7 +37,7 @@ typedef struct {
     atomic_ptr_t next;
 } rmem_qnode_t;  // node
 typedef struct {
-    countr_t* done;  // counter to decrease when task is executed
+    countr_t* done;  // counter to decrease when task is executed, increased when task is enqueue
     atomic_ptr_t head;
     atomic_ptr_t tail;
     atomic_ptr_t prev;

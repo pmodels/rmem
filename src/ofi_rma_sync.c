@@ -165,17 +165,17 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     }
     m_verb("complete: waiting for %d syncs and %d calls, total %d to complete", ttl_sync, ttl_data,
            threshold);
-    if (is_fence) {
-        // wait for the queue to have processed all the calls
-        while (m_countr_load(mem->ofi.qtrigr.done) < threshold) {
-            sched_yield();
-        }
-        m_countr_fetch_add(mem->ofi.qtrigr.done, -threshold);
-    } else {
-        // use complete fast to what for the threshold on all the TRX (data + sync)
-        m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
-                                           mem->ofi.data_trx, mem->ofi.sync.epch));
+
+    // wait for the queue to have processed all the calls
+    while (m_countr_load(mem->ofi.qtrigr.done)) {
+        sched_yield();
     }
+    // if (is_fence) {
+    // } else {
+    // use complete fast to what for the threshold on all the TRX (data + sync)
+    m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
+                                       mem->ofi.data_trx, mem->ofi.sync.epch));
+    // }
 
     //----------------------------------------------------------------------------------------------
     // send the ack if delivery complete

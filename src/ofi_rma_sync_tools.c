@@ -392,6 +392,7 @@ int ofi_rmem_progress_wait(const int threshold, countr_t* cntr, int n_trx, ofi_r
         progress.cq = trx[i].cq;
         m_ofi_call(ofi_progress(&progress));
         i = (i + 1) % (n_trx);
+        sched_yield();
     }
     // remove the values to the counter
     if (threshold) {

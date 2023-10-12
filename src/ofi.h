@@ -514,9 +514,12 @@ int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_com
 int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 int ofi_rma_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 // operation management
-int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma);
-int ofi_rma_start(ofi_rma_t* rma, rmem_device_t dev);
+int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev);
+int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev);
 int ofi_rma_wait(ofi_rma_t* p2p);
 int ofi_rma_free(ofi_rma_t* rma);
+
+
+int ofi_rma_start_from_task(rmem_qnode_t* task);
 
 #endif

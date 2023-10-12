@@ -202,12 +202,8 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     }
     //---------------------------------------------------------------------------------------------
     // async progress
-    if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) {
-        mem->ofi.qtrigr.done = malloc(sizeof(countr_t));
-        m_countr_init(mem->ofi.qtrigr.done);
-    } else {
-        mem->ofi.qtrigr.done = NULL;
-    }
+    mem->ofi.qtrigr.done = malloc(sizeof(countr_t));
+    m_countr_init(mem->ofi.qtrigr.done);
     m_atomicptr_init(&mem->ofi.qtrigr.head);
     m_atomicptr_init(&mem->ofi.qtrigr.tail);
     m_atomicptr_init(&mem->ofi.qtrigr.prev);
@@ -238,9 +234,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     void* retval = NULL;
     m_pthread_call(pthread_cancel(mem->ofi.progress));
     m_pthread_call(pthread_join(mem->ofi.progress, &retval));
-    if (mem->ofi.qtrigr.done) {
-        free(mem->ofi.qtrigr.done);
-    }
+    free(mem->ofi.qtrigr.done);
     //----------------------------------------------------------------------------------------------
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG || comm->prov_mode.dtc_mode == M_OFI_DTC_MSG) {
         ofi_rmem_am_free(mem, comm);
@@ -349,7 +343,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     rma->ofi.msg.cq.epoch_ptr = mem->ofi.sync.epch;
     //----------------------------------------------------------------------------------------------
     // setup the ready flag to 1 to avoid issues
-    rma->ofi.qnode.ready = 1;
+    rma->ofi.qnode.ready = 0;
     //----------------------------------------------------------------------------------------------
     // flag
     const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
@@ -475,25 +469,32 @@ int ofi_rma_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, 
     return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
 }
 
-int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma) {
-    rma->ofi.qnode.ready = 0;
-    rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
-    //----------------------------------------------------------------------------------------------
-    // increment the counter
-    m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
-    if (rma->ofi.sig.flags) {
-        m_countr_fetch_add(&mem->ofi.sync.isig, 1);
+int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
+    if (dev == RMEM_GPU) {
+        rma->ofi.qnode.ready = 0;
+        rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
+        // increment the counter
+        m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
+        if (rma->ofi.sig.flags) {
+            m_countr_fetch_add(&mem->ofi.sync.isig, 1);
+        }
     }
     //----------------------------------------------------------------------------------------------
     return m_success;
 }
-int ofi_rma_start(ofi_rma_t* rma, rmem_device_t dev) {
+int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
     m_assert(rma->ofi.qnode.ready == 0, "the ready value must be 0 and not %d",
              rma->ofi.qnode.ready);
     if (dev == RMEM_GPU) {
+        // trigger from the GPU, counters are incremented at enqueue time
         ofi_rma_start_gpu(rma->ofi.stream, rma->ofi.drma);
     } else {
-        rma->ofi.qnode.ready++;
+        // trigger from the host: increment the counters first
+        m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
+        if (rma->ofi.sig.flags) {
+            m_countr_fetch_add(&mem->ofi.sync.isig, 1);
+        }
+        m_rmem_call(ofi_rma_start_from_task(&rma->ofi.qnode));
     }
     return m_success;
 }
@@ -506,6 +507,65 @@ int ofi_rma_free(ofi_rma_t* rma) {
         m_gpu_call(gpuFree((void*)rma->ofi.drma));
     } else {
         free(rma->ofi.drma);
+    }
+    return m_success;
+}
+
+#define m_ofi_rma_task_offset(a) (offsetof(ofi_rma_t, ofi.a) - offsetof(ofi_rma_t, ofi.qnode))
+#define m_ofi_rma_task_structgetptr(T, name, a, task) \
+    T* name = (T*)((uint8_t*)task + m_ofi_rma_task_offset(a));
+int ofi_rma_start_from_task(rmem_qnode_t* task) {
+    m_ofi_rma_task_structgetptr(struct fid_ep*, ep, ep, task);
+    m_ofi_rma_task_structgetptr(fi_addr_t, addr, addr, task);
+    //--------------------------------------------------------------------------------------
+    // msg specific data
+    m_ofi_rma_task_structgetptr(uint64_t, msg_flags, msg.flags, task);
+    m_ofi_rma_task_structgetptr(uint64_t, msg_data, msg.data, task);
+    m_ofi_rma_task_structgetptr(uint64_t, sig_data, sig.data, task);
+    m_ofi_rma_task_structgetptr(ofi_cqdata_t, msg_cq, msg.cq, task);
+    m_ofi_rma_task_structgetptr(struct iovec, msg_iov, msg.iov, task);
+    m_ofi_rma_task_structgetptr(struct fi_rma_iov, msg_riov, msg.riov, task);
+    m_ofi_rma_task_structgetptr(ofi_progress_t, rma_prog, progress, task);
+    m_ofi_rma_task_structgetptr(void*, msg_desc, msg.mr.desc, task);
+
+    struct fi_msg_rma msg = {
+        .msg_iov = msg_iov,
+        .desc = msg_desc,  // it's a void** which is correct
+        .iov_count = 1,
+        .addr = *addr,
+        .rma_iov = msg_riov,
+        .rma_iov_count = 1,
+        .data = *msg_data | *sig_data,
+        .context = &msg_cq->ctx,
+    };
+    m_verb("THREAD: doing it on EP %p", *ep);
+    m_ofi_call_again(fi_writemsg(*ep, &msg, *msg_flags), rma_prog);
+
+    //--------------------------------------------------------------------------------------
+    // signal if needed
+    m_ofi_rma_task_structgetptr(uint64_t, sig_flags, sig.flags, task);
+    if ((*sig_flags)) {
+        m_ofi_rma_task_structgetptr(struct fi_ioc, sig_iov, sig.iov, task);
+        m_ofi_rma_task_structgetptr(struct fi_rma_ioc, sig_riov, sig.riov, task);
+        m_ofi_rma_task_structgetptr(struct fi_context, sig_ctx, sig.cq.ctx, task);
+        m_ofi_rma_task_structgetptr(void*, sig_desc, sig.iov_desc, task);
+        struct fi_msg_atomic sig = {
+            .msg_iov = sig_iov,
+            .desc = sig_desc,  // it's a void** which is correct
+            .iov_count = 1,
+            .addr = *addr,
+            .rma_iov = sig_riov,
+            .rma_iov_count = 1,
+            .datatype = FI_INT32,
+            .op = FI_SUM,
+            .data = 0x0,  // must always be 0
+            .context = sig_ctx,
+        };
+        m_ofi_call_again(fi_atomicmsg(*ep, &sig, *sig_flags), rma_prog);
+    }
+    // if we had to get a cq entry and the inject, mark is as done
+    if ((*msg_flags) & FI_INJECT && (*msg_flags) & FI_COMPLETION) {
+        m_countr_fetch_add(&msg_cq->rqst.busy, -1);
     }
     return m_success;
 }

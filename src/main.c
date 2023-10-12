@@ -197,7 +197,7 @@ int main(int argc, char** argv) {
     }
     //----------------------------------------------------------------------------------------------
     // PUT + GPU
-    run_time_t pgpu_time;
+    run_time_t pgpu_time ={0};
     {
         run_rma_data_t put_data;
         run_t put_send = {

@@ -539,7 +539,7 @@ double rma_run_send_device(run_param_t* param, void* data, void* ack_ptr, rmem_d
     //-------------------------------------------------
     // enqueue the requests
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_enqueue(param->mem, d->rma + j);
+        ofi_rma_enqueue(param->mem, d->rma + j,device);
     }
     // send a readiness signal
     ack_send(ack);
@@ -548,7 +548,7 @@ double rma_run_send_device(run_param_t* param, void* data, void* ack_ptr, rmem_d
     // injection can only be measure on the time to put the msgs and complete
     m_rmem_prof(prof, time) {
         for (int j = 0; j < n_msg; ++j) {
-            ofi_rma_start(d->rma + j, device);
+            ofi_rma_start(param->mem, d->rma + j, device);
         }
         m_verb("rma_run_send_device: rmem_complete");
         ofi_rmem_complete(1, &buddy, param->mem, param->comm);
@@ -580,14 +580,14 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     //------------------------------------------------
     // enqueue the requests
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_enqueue(param->mem, d->rma + j);
+        ofi_rma_enqueue(param->mem, d->rma + j,device);
     }
     // send a readiness signal
     ack_send(ack);
     ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
     m_rmem_prof(prof, time) {
         for (int j = 0; j < n_msg; ++j) {
-            ofi_rma_start(d->rma + j, device);
+            ofi_rma_start(param->mem, d->rma + j, device);
         }
         ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
     }

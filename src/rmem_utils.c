@@ -63,6 +63,7 @@ void rmem_qmpsc_enq(rmem_qmpsc_t *q, rmem_qnode_t *elem) {
         // head == tail, update the new head
         m_atomicptr_store(&q->head, (intptr_t)elem);
     }
+    m_countr_fetch_add(q->done, +1);
     m_verb("enq: current is now %p", (void *)m_atomicptr_load(&q->curnt));
     m_verb("enq: head is now %p", (void *)m_atomicptr_load(&q->head));
     m_verb("enq: tail is now %p", (void *)m_atomicptr_load(&q->tail));
