@@ -10,6 +10,25 @@
 #include "rdma/fabric.h"
 #include "rdma/fi_domain.h"
 
+#if __has_include("rdma/fi_cxi_ext.h")
+#include "rdma/fi_cxi_ext.h"
+#endif
+
+// allow CXI extensions
+//----------------------------------------
+#if defined(FI_CXI_DOM_OPS_3) || defined(FI_CXI_DOM_OPS_4)
+#define FI_CXI_DOM_OPS 1
+// choose the extension ID
+#if defined(FI_CXI_DOM_OPS_3)
+#define FI_CXI_DOM_OPS_ID FI_CXI_DOM_OPS_3
+#elif defined(FI_CXI_DOM_OPS_4)
+#define FI_CXI_DOM_OPS_ID FI_CXI_DOM_OPS_3
+#endif
+//----------------------------------------
+#else
+#define FI_CXI_DOM_OPS 0
+#endif
+
 
 // create a communication context
 int ofi_ctx_init(const int comm_size, struct fi_info* prov, struct fid_domain* dom,
@@ -85,12 +104,12 @@ int ofi_init(ofi_comm_t* ofi) {
     m_ofi_call(fi_domain(ofi->fabric, ofi->prov, &ofi->domain, NULL));
 
     // if cxi, enable the hybrid MR
-#ifdef FI_CXI_DOM_OPS_3
+#if (FI_CXI_DOM_OPS)
     if (strcmp(ofi->prov->domain_attr->name, "cxi")) {
-        m_log("using CXI hybrid MR");
+        m_log("[INFO] using CXI hybrid MR");
         struct fi_cxi_dom_ops* dom_ops;
-        m_ofi_call(fi_open_ops(&ofi->domain->fid, FI_CXI_DOM_OPS_3, 0, (void**)&dom_ops, NULL));
-        m_ofi_call(dom_ops->enable_hybrid_mr_desc(&cxit_domain->fid, true));
+        m_ofi_call(fi_open_ops(&ofi->domain->fid, FI_CXI_DOM_OPS_ID, 0, (void**)&dom_ops, NULL));
+        m_ofi_call(dom_ops->enable_hybrid_mr_desc(&ofi->domain->fid, true));
     }
 #endif
     // get the comm rank and comm_size
