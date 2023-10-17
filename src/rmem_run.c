@@ -591,14 +591,17 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
         ofi_rma_enqueue(param->mem, d->rma + j,device);
     }
     // send a readiness signal
-    ack_send(ack);
     ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
+    // compute the time difference
+    ack_offset_sender(ack);
     m_rmem_prof(prof, time) {
         for (int j = 0; j < n_msg; ++j) {
             ofi_rma_start(param->mem, d->rma + j, device);
         }
         ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
     }
+    // send the starting time from the profiler
+    ack_send_withtime(ack, &prof.t0);
     return time;
 }
 double rma_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
@@ -671,15 +674,24 @@ double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    ack_wait(ack);
+    ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
+    // obtain the acknowledgment
+    const double offset = ack_offset_recver(ack);
     m_rmem_prof(prof, time) {
-        ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
         ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
     }
+    // T sender = t recver + offset => T recver = T sender - offset
+    // time elapsed = (T recver -  (T sender - offset))
+    struct timespec tsend;
+    ack_wait_withtime(ack, &tsend);
+    double sync_time = m_get_wtimes(tsend, prof.t1) + offset;
+    m_verb("estimated time of comms = %f vs previously measured one %f, offset is %f", sync_time,
+           time, offset);
+
     //------------------------------------------------
     // check the result
     run_test_check(ttl_len, param->mem->buf);
-    return time;
+    return sync_time;
 }
 double rma_fast_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
     return rma_fast_run_recv(param, data, ack_ptr);
