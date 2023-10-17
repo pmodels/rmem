@@ -383,15 +383,12 @@ typedef struct {
  */
 typedef struct {
     countr_t epch[m_rma_n_epoch];
-    countr_t* icntr;  //!< array of fi_write counter (for each rank)
-    union {
-        struct {};             //!< tagged messaging sync
-        ofi_mem_sig_t ps_sig;  //!< atomic sync
-        struct {
-            ofi_am_buf_t* buf;     //!< active messaging buffer
-            ofi_cqdata_t* cqdata;  //!< completion data for the FI_MULTI_RECV
-        } am;
-    };
+    countr_t* icntr;       //!< array of fi_write counter (for each rank)
+    ofi_mem_sig_t ps_sig;  //!< atomic sync for RTR
+    struct {
+        ofi_am_buf_t* buf;     //!< active messaging buffer
+        ofi_cqdata_t* cqdata;  //!< completion data for the FI_MULTI_RECV
+    } am;                      // both for RTR and DTC
     ofi_cqdata_t* cqdata_ps;  //!< completion data for each rank Post-Start
     ofi_cqdata_t* cqdata_cw;  //!< completion data for each rank Complete-Wait
     countr_t isig;            //!< number of issued signal calls (for local completion)
