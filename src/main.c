@@ -41,17 +41,6 @@ void print_info(char* foldr_name, char* prov_name, ofi_mode_t* mode) {
 #else
     fprintf(file, "NO GPU\n");
 #endif
-    switch (mode->sig_mode) {
-        case (M_OFI_SIG_NULL):
-            m_assert(0, "null is not supported here");
-            break;
-        case (M_OFI_SIG_ATOMIC):
-            fprintf(file, "\t- signal: ATOMIC\n");
-            break;
-        case (M_OFI_SIG_CQ_DATA):
-            fprintf(file, "\t- signal: CQ DATA\n");
-            break;
-    };
     switch (mode->rtr_mode) {
         case (M_OFI_RTR_NULL):
             m_assert(0, "null is not supported here");
@@ -215,25 +204,6 @@ int main(int argc, char** argv) {
         run_test(&put_send, &put_recv, param, &pgpu_time);
     }
     //----------------------------------------------------------------------------------------------
-    // PUT + SIGNAL
-    run_time_t psig_time = {0};
-    {
-        // run_rma_data_t psig_data;
-        // run_t psig_send = {
-        //     .data = &psig_data,
-        //     .pre = &sig_pre_send,
-        //     .run = &rma_run_send,
-        //     .post = &rma_post,
-        // };
-        // run_t psig_recv = {
-        //     .data = &psig_data,
-        //     .pre = &sig_pre_recv,
-        //     .run = &sig_run_recv,
-        //     .post = &rma_post,
-        // };
-        //run_test(&psig_send, &psig_recv, param, &psig_time);
-    }
-    //----------------------------------------------------------------------------------------------
     // PUT FAST
     run_time_t pfast_time = {0};
     {
@@ -251,25 +221,6 @@ int main(int argc, char** argv) {
             .post = &rma_post,
         };
         run_test(&pfast_send, &pfast_recv, param, &pfast_time);
-    }
-    //----------------------------------------------------------------------------------------------
-    // PUT LATENCY
-    run_time_t plat_time = {0};
-    {
-        // run_rma_data_t plat_data;
-        // run_t plat_send = {
-        //     .data = &plat_data,
-        //     .pre = &put_pre_send,
-        //     .run = &lat_run_send,
-        //     .post = &rma_post,
-        // };
-        // run_t plat_recv = {
-        //     .data = &plat_data,
-        //     .pre = &put_pre_recv,
-        //     .run = &lat_run_recv,
-        //     .post = &rma_post,
-        // };
-        //run_test(&plat_send, &plat_recv, param, &plat_time);
     }
     //----------------------------------------------------------------------------------------------
     // free
@@ -347,10 +298,6 @@ int main(int argc, char** argv) {
             const double ci_pgpu = m_run_time(pgpu_time.ci);
             const double ti_p2pf = m_run_time(p2pf_time.avg);
             const double ci_p2pf = m_run_time(p2pf_time.ci);
-            const double ti_psig = m_run_time(psig_time.avg);
-            const double ci_psig = m_run_time(psig_time.ci);
-            const double ti_plat = m_run_time(plat_time.avg);
-            const double ci_plat = m_run_time(plat_time.ci);
             const double ti_fast = m_run_time(pfast_time.avg);
             const double ci_fast = m_run_time(pfast_time.ci);
             if (!is_sender(comm.rank)) {
@@ -360,18 +307,14 @@ int main(int argc, char** argv) {
                     "\tPUT       = %f +-[%f] (ratio = %f)\n"
                     "\tPUT TRIGR = %f +-[%f] (ratio = %f)\n"
                     "\tPUT FAST  = %f +-[%f] (ratio = %f)\n"
-                    "\tPUT + SIG = %f +-[%f] (ratio = %f)\n"
-                    "\tPUT LAT   = %f +-[%f] (ratio = %f)\n"
                     "\tP2P FAST  = %f +-[%f] (ratio = %f)\n",
                     msg_size * sizeof(int), imsg, ti_p2p, ci_p2p, ti_put, ci_put, ti_put / ti_p2p,
-                    ti_pgpu, ci_pgpu, ti_pgpu / ti_p2p, ti_fast, ci_fast, ti_fast / ti_p2p, ti_psig,
-                    ci_psig, ti_psig / ti_p2p, ti_plat, ci_plat, ti_plat / ti_p2p, ti_p2pf, ci_p2pf,
-                    ti_p2pf / ti_p2p);
+                    ti_pgpu, ci_pgpu, ti_pgpu / ti_p2p, ti_fast, ci_fast, ti_fast / ti_p2p, ti_p2pf,
+                    ci_p2pf, ti_p2pf / ti_p2p);
             }
             // write to csv
-            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int),
-                    ti_p2p, ti_put, ti_pgpu, ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put,
-                    ci_pgpu, ci_fast, ci_psig, ci_plat, ci_p2pf);
+            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int), ti_p2p,
+                    ti_put, ti_pgpu, ti_fast, ti_p2pf, ci_p2p, ci_put, ci_pgpu, ci_fast, ci_p2pf);
             // bump the index
             idx++;
         }
@@ -406,16 +349,11 @@ int main(int argc, char** argv) {
             const double ci_pgpu = m_run_time(pgpu_time.ci);
             const double ti_p2pf = m_run_time(p2pf_time.avg);
             const double ci_p2pf = m_run_time(p2pf_time.ci);
-            const double ti_psig = m_run_time(psig_time.avg);
-            const double ci_psig = m_run_time(psig_time.ci);
-            const double ti_plat = m_run_time(plat_time.avg);
-            const double ci_plat = m_run_time(plat_time.ci);
             const double ti_fast = m_run_time(pfast_time.avg);
             const double ci_fast = m_run_time(pfast_time.ci);
             // write to csv
-            fprintf(file, "%d,%f,%f,,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put,
-                    ti_pgpu, ti_fast, ti_psig, ti_plat, ti_p2pf, ci_p2p, ci_put, ci_pgpu, ci_fast,
-                    ci_psig, ci_plat, ci_p2pf);
+            fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put, ti_pgpu,
+                    ti_fast, ti_p2pf, ci_p2p, ci_put, ci_pgpu, ci_fast, ci_p2pf);
             // bump the index
             idx++;
         }
@@ -429,10 +367,6 @@ int main(int argc, char** argv) {
     if (put_time.ci) free(put_time.ci);
     if (pgpu_time.avg) free(pgpu_time.avg);
     if (pgpu_time.ci) free(pgpu_time.ci);
-    if (psig_time.avg) free(psig_time.avg);
-    if (psig_time.ci) free(psig_time.ci);
-    if (plat_time.avg) free(plat_time.avg);
-    if (plat_time.ci) free(plat_time.ci);
     if (pfast_time.avg) free(pfast_time.avg);
     if (pfast_time.ci) free(pfast_time.ci);
 

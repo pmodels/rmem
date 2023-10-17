@@ -191,36 +191,6 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
             mode->rcmpl_mode = M_OFI_RCMPL_DELIV_COMPL;
         }
     }
-    //----------------------------------------------------------------------------------------------
-    // [3] signal mode
-    if (mode->sig_mode) {
-        switch (mode->sig_mode) {
-            case (M_OFI_SIG_NULL):
-                m_assert(0, "null is not supported here");
-                break;
-            case M_OFI_SIG_CQ_DATA:
-                m_verb("PROV MODE - SIG: doing cq data");
-                m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
-                break;
-            case M_OFI_SIG_ATOMIC:
-                m_verb("PROV MODE - SIG: doing atomic + fence");
-                *ofi_cap |= FI_ATOMIC | FI_FENCE;
-                m_assert(m_ofi_prov_has_atomic(*prov_cap), "provider needs atomics capabilities");
-                m_assert(m_ofi_prov_has_fence(*prov_cap), "provider needs fencing capabilities");
-                break;
-        }
-    } else {
-        if (m_ofi_prov_has_cq_data(*prov_cap)) {
-            m_verb("PROV MODE - SIG: doing cq data");
-            mode->sig_mode = M_OFI_SIG_CQ_DATA;
-        } else if (m_ofi_prov_has_atomic(*prov_cap) && m_ofi_prov_has_fence(*prov_cap)) {
-            m_verb("PROV MODE - SIG: doing atomic + fence");
-            *ofi_cap |= FI_ATOMIC | FI_FENCE;
-            mode->sig_mode = M_OFI_SIG_ATOMIC;
-        } else {
-            m_assert(0, "unable to use signals");
-        }
-    }
     return m_success;
 }
 

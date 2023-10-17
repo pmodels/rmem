@@ -160,9 +160,6 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     //----------------------------------------------------------------------------------------------
     // get the correct threshold value depending if we have a signal or not
     int threshold = ttl_sync + ttl_data;
-    if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
-        threshold += m_countr_exchange(&mem->ofi.sync.isig, 0);
-    }
     m_verb("complete: waiting for %d syncs and %d calls, total %d to complete", ttl_sync, ttl_data,
            threshold);
 
