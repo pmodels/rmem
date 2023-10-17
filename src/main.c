@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
             .run = &p2p_fast_run_recv,
             .post = &p2p_post_recv,
         };
-        //run_test(&p2pf_send, &p2pf_recv, param, &p2pf_time);
+        run_test(&p2pf_send, &p2pf_recv, param, &p2pf_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT
@@ -196,7 +196,7 @@ int main(int argc, char** argv) {
         run_test(&put_send, &put_recv, param, &put_time);
     }
     //----------------------------------------------------------------------------------------------
-    // PUT + GPU
+    // PUT + TRIGGER FROM GPU
     run_time_t pgpu_time ={0};
     {
         run_rma_data_t put_data;

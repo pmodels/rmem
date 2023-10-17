@@ -375,11 +375,11 @@ double p2p_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    for (int j = 0; j < n_msg; ++j) {
-        ofi_p2p_start(p2p + j);
-    }
     const double offset = ack_offset_recver(ack);
     m_rmem_prof(prof, time) {
+        for (int j = 0; j < n_msg; ++j) {
+            ofi_p2p_start(p2p + j);
+        }
         for (int j = 0; j < n_msg; ++j) {
             ofi_p2p_wait(p2p + j);
         }
@@ -414,16 +414,24 @@ double p2p_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     for (int j = 0; j < n_msg; ++j) {
         ofi_p2p_start(p2p + j);
     }
-    PMI_Barrier();
+    const double offset = ack_offset_recver(ack);
     m_rmem_prof(prof, time) {
         for (int j = 0; j < n_msg; ++j) {
             ofi_p2p_wait(p2p + j);
         }
     }
+    // T sender = t recver + offset => T recver = T sender - offset
+    // time elapsed = (T recver -  (T sender - offset))
+    struct timespec tsend;
+    ack_wait_withtime(ack, &tsend);
+    double sync_time = m_get_wtimes(tsend, prof.t1) + offset;
+    m_verb("estimated time of comms = %f vs previously measured one %f, offset is %f", sync_time,
+           time, offset);
+
     //------------------------------------------------
     // check the result
-    run_test_check(ttl_len,d->buf);
-    return time;
+    run_test_check(ttl_len, d->buf);
+    return sync_time;
 }
 //==================================================================================================
 //= RMA
