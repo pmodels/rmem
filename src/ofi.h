@@ -129,17 +129,15 @@ static inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 #define m_ofi_data_bit_post (m_ofi_data_tot - 1)
 #define m_ofi_data_bit_cmpl (m_ofi_data_tot - 2)
 #define m_ofi_data_bit_rcq  (m_ofi_data_tot - 3)
-#define m_ofi_data_bit_sig  (m_ofi_data_tot - 4)
 
 #define m_ofi_data_set_rcq     ((uint64_t)0x1 << m_ofi_data_bit_rcq)
 #define m_ofi_data_set_sig     ((uint64_t)0x1 << m_ofi_data_bit_sig)
 #define m_ofi_data_set_post    ((uint64_t)0x1 << m_ofi_data_bit_post)
 #define m_ofi_data_set_cmpl    ((uint64_t)0x1 << m_ofi_data_bit_cmpl)
 #define m_ofi_data_get_rcq(a)  ((a >> m_ofi_data_bit_rcq) & 0x1)
-#define m_ofi_data_get_sig(a)  ((a >> m_ofi_data_bit_sig) & 0x1)
 #define m_ofi_data_get_post(a) ((a >> m_ofi_data_bit_post) & 0x1)
 #define m_ofi_data_get_cmpl(a) ((a >> m_ofi_data_bit_cmpl) & 0x1)
-#define m_ofi_data_mask_nops (((uint64_t)0x1 << m_ofi_data_avail) -1 )
+#define m_ofi_data_mask_nops   (((uint64_t)0x1 << m_ofi_data_avail) - 1)
 #define m_ofi_data_set_nops(a) (((uint64_t)a) & m_ofi_data_mask_nops)
 #define m_ofi_data_get_nops(a) ((uint32_t)(a & m_ofi_data_mask_nops))
 
@@ -181,20 +179,11 @@ typedef enum {
     M_OFI_DTC_TAGGED,
 } ofi_dtc_mode_t;
 /**
- * @brief define signal mode for RMA
- */
-typedef enum {
-    M_OFI_SIG_NULL,
-    M_OFI_SIG_ATOMIC,
-    M_OFI_SIG_CQ_DATA,
-} ofi_sig_mode_t;
-/**
  * @brief operational mode: define how the provider is going to operate
  */
 typedef struct {
     ofi_rtr_mode_t rtr_mode;
     ofi_dtc_mode_t dtc_mode;
-    ofi_sig_mode_t sig_mode;
     ofi_rcmpl_mode_t rcmpl_mode;
 } ofi_mode_t;
 
@@ -363,14 +352,12 @@ typedef struct {
 #define m_rma_epoch_post(e)    (e + 0)                 // posted
 #define m_rma_epoch_cmpl(e)    (e + 1)                 // completed
 #define m_rma_epoch_remote(e)  (e + 2)                 // remote fi_write
-#define m_rma_epoch_local(e)   (e + 3)                 // local (tsend, signal, fi_write/read)
-#define m_rma_epoch_signal(e)  (e + 4)                 // remote signal
+#define m_rma_epoch_local(e)   (e + 3)                 // local (tsend, fi_write/read)
 #define m_rma_mepoch_post(m)   (m->ofi.sync.epch + 0)  // posted
 #define m_rma_mepoch_cmpl(m)   (m->ofi.sync.epch + 1)  // completed
 #define m_rma_mepoch_remote(m) (m->ofi.sync.epch + 2)  // remote fi_write
-#define m_rma_mepoch_local(m)  (m->ofi.sync.epch + 3)  // local (tsend, signal, fi_write/read)
-#define m_rma_mepoch_signal(m) (m->ofi.sync.epch + 4)  // remote signal
-#define m_rma_n_epoch          5
+#define m_rma_mepoch_local(m)  (m->ofi.sync.epch + 3)  // local (tsend, fi_write/read)
+#define m_rma_n_epoch          4
 
 /**
  * @brief sync data structure
@@ -391,7 +378,6 @@ typedef struct {
     } am;                      // both for RTR and DTC
     ofi_cqdata_t* cqdata_ps;  //!< completion data for each rank Post-Start
     ofi_cqdata_t* cqdata_cw;  //!< completion data for each rank Complete-Wait
-    countr_t isig;            //!< number of issued signal calls (for local completion)
 } ofi_rma_sync_t;
 
 typedef struct {
@@ -415,17 +401,6 @@ typedef struct {
             struct fi_rma_iov riov;
             ofi_cqdata_t cq;
         } msg;
-        union {
-            uint64_t data;
-            struct {
-                uint64_t flags;
-                // iovs
-                void* iov_desc;
-                struct fi_ioc iov;
-                struct fi_rma_ioc riov;
-                ofi_cqdata_t cq;
-            };
-        } sig;
         fi_addr_t addr;
         struct fid_ep* ep;
         ofi_drma_t drma;
@@ -452,8 +427,6 @@ typedef struct {
 
         // completion and remote counter global for all trx
         struct fid_cntr* rcntr;  // Completed CouNTeR put and get
-        // signaling
-        ofi_mem_sig_t signal;
         // synchronization (PSCW)
         ofi_rma_sync_t sync;
         // work queue
@@ -503,13 +476,9 @@ int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_c
 int ofi_rmem_complete_fast(const int ttl_data, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm);
 
-// signal
-int ofi_rmem_sig_wait(const uint32_t val, ofi_rmem_t* mem, ofi_comm_t* comm);
-
 // operation creation
 int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
-int ofi_rma_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 // operation management
 int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev);
 int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev);

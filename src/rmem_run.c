@@ -489,31 +489,7 @@ void put_pre_send(run_param_t* param, void* data) {
     }
 }
 
-void sig_pre_send(run_param_t* param, void* data) {
-    run_rma_data_t* d = (run_rma_data_t*)data;
-    const int n_msg = param->n_msg;
-    const size_t msg_size = param->msg_size;
-    const size_t ttl_len = n_msg * msg_size;
-    // get the allocation of buffers
-    rma_alloc(param, data);
-    // allocate the puts
-    d->rma = calloc(n_msg, sizeof(ofi_rma_t));
-    for (int i = 0; i < n_msg; ++i) {
-        d->rma[i] = (ofi_rma_t){
-            .buf = d->buf + i * msg_size,
-            .count = msg_size * sizeof(int),
-            .disp = i * msg_size * sizeof(int),
-            .peer = peer(param->comm->rank, param->comm->size),
-        };
-        ofi_rma_put_signal_init(d->rma + i, param->mem, 0, param->comm);
-    }
-}
-
 void put_pre_recv(run_param_t* param, void* data) {
-    // get the allocation of buffers
-    rma_alloc(param, data);
-}
-void sig_pre_recv(run_param_t* param, void* data) {
     // get the allocation of buffers
     rma_alloc(param, data);
 }
@@ -697,44 +673,3 @@ double rma_fast_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
     return rma_fast_run_recv(param, data, ack_ptr);
 }
 
-// double sig_run_recv(run_param_t* param, void* data, void* ack_ptr) {
-//     run_rma_data_t* d = (run_rma_data_t*)data;
-//     ack_t* ack = (ack_t*) ack_ptr;
-//     const int n_msg = param->n_msg;
-//     const size_t msg_size = param->msg_size;
-//     const size_t ttl_len = n_msg * msg_size;
-//     const int buddy = peer(param->comm->rank, param->comm->size);
-//
-//     double time;
-//     rmem_prof_t prof = {.name = "recv"};
-//     //------------------------------------------------
-//     ack_wait(ack);
-//     m_rmem_prof(prof, time) {
-//         ofi_rmem_post(1, &buddy, param->mem, param->comm);
-//         ofi_rmem_sig_wait(n_msg, param->mem, param->comm);
-//         ofi_rmem_wait(1, &buddy, param->mem, param->comm);
-//     }
-//     //------------------------------------------------
-//     // check the result
-//     run_test_check(ttl_len, param->mem->buf);
-//     return time;
-// }
-// double lat_run_recv(run_param_t* param, void* data, void* ack_ptr) {
-//     run_rma_data_t* d = (run_rma_data_t*)data;
-//     ack_t* ack = (ack_t*) ack_ptr;
-//     const int n_msg = param->n_msg;
-//     const size_t msg_size = param->msg_size;
-//     const size_t ttl_len = n_msg * msg_size;
-//     const int buddy = peer(param->comm->rank, param->comm->size);
-//
-//     double time;
-//     rmem_prof_t prof = {.name = "recv"};
-//     //------------------------------------------------
-//     ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
-//     ack_wait(ack);
-//     m_rmem_prof(prof, time) { ofi_rmem_wait_fast(n_msg, param->mem, param->comm); }
-//     //------------------------------------------------
-//     // check the result
-//     run_test_check(ttl_len, param->mem->buf);
-//     return time;
-// }

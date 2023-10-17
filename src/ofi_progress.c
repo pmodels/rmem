@@ -43,11 +43,6 @@ static void ofi_cq_update_sync_tag(uint64_t* data, countr_t* epoch) {
         m_countr_fetch_add(m_rma_epoch_remote(epoch), +1);
         m_verb("remote cq data: counter +1, now = %d",m_countr_load(m_rma_epoch_remote(epoch)));
     }
-    uint32_t sig = m_ofi_data_get_sig(*data);
-    if (sig > 0) {
-        m_assert(sig <= 1, "post must be <=1");
-        m_countr_fetch_add(m_rma_epoch_signal(epoch), 1);
-    }
     return;
 }
 

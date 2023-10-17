@@ -39,12 +39,6 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("registered memory -> %p",mem->ofi.mr.mr);
 
     //----------------------------------------------------------------------------------------------
-    // register the signal then
-    if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
-        m_verb("registering the signal memory");
-        m_rmem_call(ofi_util_sig_reg(&mem->ofi.signal, comm));
-    }
-    //----------------------------------------------------------------------------------------------
     // the sync data needed for the Post-start atomic protocol
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
         m_rmem_call(ofi_util_sig_reg(&mem->ofi.sync.ps_sig, comm));
@@ -136,9 +130,6 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
             } else {
                 m_rmem_call(ofi_util_mr_bind(trx[i].ep, mem->ofi.mr.mr, NULL, comm));
             }
-            if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
-                m_rmem_call(ofi_util_sig_bind(&mem->ofi.signal, trx[i].ep, comm));
-            }
         }
         if (is_sync && comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
             m_rmem_call(ofi_util_sig_bind(&mem->ofi.sync.ps_sig, trx[i].ep, comm));
@@ -165,9 +156,6 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     // if needed, enable the MR and then get the corresponding key and share it
     // first the user region's key
     m_rmem_call(ofi_util_mr_enable(mem->ofi.mr.mr, comm, &mem->ofi.mr.key_list));
-    if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
-        ofi_util_sig_enable(&mem->ofi.signal, comm);
-    }
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
         ofi_util_sig_enable(&mem->ofi.sync.ps_sig, comm);
     }
@@ -256,9 +244,6 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     free(mem->ofi.mr.base_list);
 
     // close the signals
-    if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
-        ofi_util_sig_close(&mem->ofi.signal);
-    }
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_ATOMIC) {
         ofi_util_sig_close(&mem->ofi.sync.ps_sig);
     }
@@ -293,7 +278,6 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
 typedef enum {
     RMA_OPT_PUT,
     RMA_OPT_RPUT,
-    RMA_OPT_PUT_SIG,
 } rma_opt_t;
 
 static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_comm_t* comm,
@@ -330,8 +314,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     rma->ofi.progress.cq = mem->ofi.data_trx[ctx_id].cq;
     rma->ofi.progress.xctx.epoch_ptr = mem->ofi.sync.epch;
     switch (op) {
-        case (RMA_OPT_PUT):
-        case (RMA_OPT_PUT_SIG): {
+        case (RMA_OPT_PUT): {
             m_verb("using kind local and null");
             rma->ofi.msg.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
         } break;
@@ -374,14 +357,6 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
             rma->ofi.msg.flags |= flag_complete;
             rma->ofi.msg.flags |= FI_COMPLETION;
         } break;
-        case (RMA_OPT_PUT_SIG): {
-            if (comm->prov_mode.sig_mode == M_OFI_SIG_CQ_DATA) {
-                rma->ofi.msg.flags |= flag_complete;
-                rma->ofi.msg.flags |= FI_REMOTE_CQ_DATA;
-            } else if (comm->prov_mode.sig_mode == M_OFI_SIG_ATOMIC) {
-                rma->ofi.msg.flags |= FI_DELIVERY_COMPLETE;
-            }
-        } break;
     }
     // message data
     if (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_CQ_DATA) {
@@ -389,45 +364,6 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
         rma->ofi.msg.data = m_ofi_data_set_rcq;
     } else {
         rma->ofi.msg.data = 0x0;
-    }
-
-    //----------------------------------------------------------------------------------------------
-    // signal
-    if (op == RMA_OPT_PUT_SIG) {
-        rma->ofi.sig.cq.epoch_ptr = mem->ofi.sync.epch;
-        switch (comm->prov_mode.sig_mode) {
-            case M_OFI_SIG_NULL:
-                m_assert(0, "null is not supported here");
-                break;
-            case M_OFI_SIG_CQ_DATA:
-                rma->ofi.sig.data = m_ofi_data_set_sig;
-                rma->ofi.sig.flags = 0x0;
-                break;
-            case M_OFI_SIG_ATOMIC:
-                // get the local mr descriptor
-                rma->ofi.sig.iov_desc = mem->ofi.signal.inc_mr.desc;
-                // iovs
-                rma->ofi.sig.iov = (struct fi_ioc){
-                    .addr = &mem->ofi.signal.inc,
-                    .count = 1,
-                };
-                rma->ofi.sig.riov = (struct fi_rma_ioc){
-                    .addr = mem->ofi.signal.val_mr.base_list[rma->peer] + 0,  // offset from key
-                    .key = mem->ofi.signal.val_mr.key_list[rma->peer],
-                    .count = 1,
-                };
-                // setup cq data
-                rma->ofi.sig.cq.kind = m_ofi_cq_inc_local | m_ofi_cq_kind_null;
-                // flag
-                rma->ofi.sig.flags = FI_FENCE | FI_INJECT | flag_complete;
-                // rma->ofi.sig.flags = FI_FENCE | (do_inject ? FI_INJECT : 0x0) | flag_complete;
-                break;
-        };
-    } else {
-        rma->ofi.sig.flags = 0x0;
-        rma->ofi.sig.iov = (struct fi_ioc){0};
-        rma->ofi.sig.riov = (struct fi_rma_ioc){0};
-        rma->ofi.sig.cq.epoch_ptr = NULL;
     }
     //---------------------------------------------------------------------------------------------
     // GPU request - allocated to the GPU
@@ -457,28 +393,18 @@ int ofi_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t*
 int ofi_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
     return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
 }
-int ofi_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
-}
 int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
     return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT);
 }
 int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
     return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
 }
-int ofi_rma_put_signal_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
-    return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_PUT_SIG);
-}
 
 int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
     if (dev == RMEM_GPU) {
         rma->ofi.qnode.ready = 0;
-        rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
-        // increment the counter
         m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
-        if (rma->ofi.sig.flags) {
-            m_countr_fetch_add(&mem->ofi.sync.isig, 1);
-        }
+        rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
     }
     //----------------------------------------------------------------------------------------------
     return m_success;
@@ -492,9 +418,6 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
     } else {
         // trigger from the host: increment the counters first
         m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
-        if (rma->ofi.sig.flags) {
-            m_countr_fetch_add(&mem->ofi.sync.isig, 1);
-        }
         m_rmem_call(ofi_rma_start_from_task(&rma->ofi.qnode));
     }
     return m_success;
@@ -522,7 +445,6 @@ int ofi_rma_start_from_task(rmem_qnode_t* task) {
     // msg specific data
     m_ofi_rma_task_structgetptr(uint64_t, msg_flags, msg.flags, task);
     m_ofi_rma_task_structgetptr(uint64_t, msg_data, msg.data, task);
-    m_ofi_rma_task_structgetptr(uint64_t, sig_data, sig.data, task);
     m_ofi_rma_task_structgetptr(ofi_cqdata_t, msg_cq, msg.cq, task);
     m_ofi_rma_task_structgetptr(struct iovec, msg_iov, msg.iov, task);
     m_ofi_rma_task_structgetptr(struct fi_rma_iov, msg_riov, msg.riov, task);
@@ -536,39 +458,15 @@ int ofi_rma_start_from_task(rmem_qnode_t* task) {
         .addr = *addr,
         .rma_iov = msg_riov,
         .rma_iov_count = 1,
-        .data = *msg_data | *sig_data,
+        .data = *msg_data,
         .context = &msg_cq->ctx,
     };
     m_verb("THREAD: doing it on EP %p", *ep);
     m_ofi_call_again(fi_writemsg(*ep, &msg, *msg_flags), rma_prog);
-
-    //--------------------------------------------------------------------------------------
-    // signal if needed
-    m_ofi_rma_task_structgetptr(uint64_t, sig_flags, sig.flags, task);
-    if ((*sig_flags)) {
-        m_ofi_rma_task_structgetptr(struct fi_ioc, sig_iov, sig.iov, task);
-        m_ofi_rma_task_structgetptr(struct fi_rma_ioc, sig_riov, sig.riov, task);
-        m_ofi_rma_task_structgetptr(struct fi_context, sig_ctx, sig.cq.ctx, task);
-        m_ofi_rma_task_structgetptr(void*, sig_desc, sig.iov_desc, task);
-        struct fi_msg_atomic sig = {
-            .msg_iov = sig_iov,
-            .desc = sig_desc,  // it's a void** which is correct
-            .iov_count = 1,
-            .addr = *addr,
-            .rma_iov = sig_riov,
-            .rma_iov_count = 1,
-            .datatype = FI_INT32,
-            .op = FI_SUM,
-            .data = 0x0,  // must always be 0
-            .context = sig_ctx,
-        };
-        m_ofi_call_again(fi_atomicmsg(*ep, &sig, *sig_flags), rma_prog);
-    }
     // if we had to get a cq entry and the inject, mark is as done
     if ((*msg_flags) & FI_INJECT && (*msg_flags) & FI_COMPLETION) {
         m_countr_fetch_add(&msg_cq->rqst.busy, -1);
     }
     return m_success;
 }
-
 // end of file
