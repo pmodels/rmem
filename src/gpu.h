@@ -141,7 +141,7 @@ typedef struct ofi_gpu_rma_t* ofi_drma_t;
 
 #define m_rmem_trigger(drma) \
     do {                     \
-        drma->ready[0]++;    \
+        (drma)->ready[0]++;    \
     } while (0)
 
 //==================================================================================================

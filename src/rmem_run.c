@@ -335,7 +335,7 @@ static void p2p_dealloc(run_param_t* param, void* data) {
     } else {
         free(d->buf);
     }
-    m_gpu_call(gpuStreamDestroy(&d->stream));
+    m_gpu_call(gpuStreamDestroy(d->stream));
 }
 void p2p_post_send(run_param_t* param, void* data) {
     p2p_dealloc(param,data);
@@ -494,7 +494,7 @@ void rma_dealloc(run_param_t* param, void* data) {
         } else {
             free(d->buf);
         }
-        m_gpu_call(gpuStreamDestroy(&d->stream));
+        m_gpu_call(gpuStreamDestroy(d->stream));
     }
 }
 
