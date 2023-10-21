@@ -21,6 +21,7 @@
 // gpu specific
 #include "gpu.h"
 
+
 #define m_ofi_cq_entries     16
 #define m_ofi_am_max_size    8  // uint64_t
 #define m_ofi_am_buf_num     2
@@ -403,7 +404,6 @@ typedef struct {
         } msg;
         fi_addr_t addr;
         struct fid_ep* ep;
-        ofi_drma_t drma;
         gpuStream_t* stream;
     } ofi;
 } ofi_rma_t;
@@ -480,7 +480,7 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 // operation management
-int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev);
+int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_trigr_ptr* trigr, rmem_device_t dev);
 int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev);
 int ofi_rma_wait(ofi_rma_t* p2p);
 int ofi_rma_free(ofi_rma_t* rma);

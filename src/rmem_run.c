@@ -366,7 +366,7 @@ static double p2p_run_send_common(run_param_t* param, void* data, void* ack_ptr,
         }
     } else {
         m_rmem_prof(prof, time) {
-            gpu_trigger_op(n_msg, d->buf, param->msg_size, RMEM_GPU_P2P, NULL, NULL, d->stream);
+            gpu_trigger_op(RMEM_GPU_P2P, n_msg, d->buf, param->msg_size, NULL, d->stream);
             m_gpu_call(gpuStreamSynchronize(d->stream));
             for (int j = 0; j < n_msg; ++j) {
                 ofi_p2p_start(p2p + j);
@@ -478,11 +478,13 @@ void rma_alloc(run_param_t* param, void* data) {
         }
         m_gpu_call(gpuStreamCreate(&d->stream));
         if (M_HAVE_GPU) {
+            m_gpu_call(gpuMalloc((void**)&d->trigr, n_msg * sizeof(rmem_trigr_ptr)));
             m_gpu_call(gpuMalloc((void**)&d->buf, ttl_len * sizeof(int)));
             m_gpu_call(gpuMemcpySync(d->buf, tmp, ttl_len * sizeof(int), gpuMemcpyHostToDevice));
             free(tmp);
         } else {
             d->buf = tmp;
+            d->trigr = malloc(sizeof(rmem_trigr_ptr) * n_msg);
         }
     }
 }
@@ -491,8 +493,10 @@ void rma_dealloc(run_param_t* param, void* data) {
     if (is_sender(param->comm->rank)) {
         if (M_HAVE_GPU) {
             m_gpu_call(gpuFree(d->buf));
+            m_gpu_call(gpuFree(d->trigr));
         } else {
             free(d->buf);
+            free((void*)d->trigr);
         }
         m_gpu_call(gpuStreamDestroy(d->stream));
     }
@@ -550,9 +554,19 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
     double time;
     rmem_prof_t prof = {.name = "send"};
     //-------------------------------------------------
-    // enqueue the requests
+    // enqueue the requests, need to store locally the gpu addresses to trigger and then copy them
+    // back to the device
+    rmem_trigr_ptr* trigr = d->trigr;
+    if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
+        trigr = malloc(sizeof(rmem_trigr_ptr) * n_msg);
+    }
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_enqueue(param->mem, d->rma + j, device);
+        ofi_rma_enqueue(param->mem, d->rma + j, trigr + j, device);
+    }
+    if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
+        m_gpu_call(gpuMemcpySync((void*)d->trigr, trigr, n_msg * sizeof(rmem_trigr_ptr),
+                                 gpuMemcpyHostToDevice));
+        free((void*)trigr);
     }
     // send a readiness signal triggers the time measurement on the recv
     ack_send(ack);
@@ -568,7 +582,7 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
             ofi_rmem_complete(1, &buddy, param->mem, param->comm);
         }
     } else {
-        gpu_trigger_op(n_msg, d->buf, param->msg_size, RMEM_GPU_PUT, d->rma, param->mem, d->stream);
+        gpu_trigger_op(RMEM_GPU_PUT, n_msg, d->buf, param->msg_size, d->trigr, d->stream);
         m_rmem_prof(prof, time) {
             m_verb("rma_run_send_device: rmem_complete");
             ofi_rmem_complete(1, &buddy, param->mem, param->comm);
@@ -602,7 +616,7 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     //------------------------------------------------
     // enqueue the requests
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_enqueue(param->mem, d->rma + j,device);
+        ofi_rma_enqueue(param->mem, d->rma + j, NULL, device);
     }
     // send a readiness signal
     ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
@@ -618,32 +632,9 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     ack_send_withtime(ack, &prof.t0);
     return time;
 }
-double rma_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_TRIGGER);
-}
 double rma_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
     return rma_fast_run_send_device(param, data, ack_ptr, RMEM_AWARE);
 }
-// double lat_run_send(run_param_t* param, void* data,void* ack_ptr) {
-//     run_rma_data_t* d = (run_rma_data_t*)data;
-//     ack_t* ack = (ack_t*) ack_ptr;
-//     const int n_msg = param->n_msg;
-//     const size_t msg_size = param->msg_size;
-//     const size_t ttl_len = n_msg * msg_size;
-//     const int buddy = peer(param->comm->rank, param->comm->size);
-//     double time;
-//     rmem_prof_t prof = {.name = "send"};
-//     //------------------------------------------------
-//     ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
-//     ack_send(ack);
-//     m_rmem_prof(prof, time) {
-//         for (int j = 0; j < n_msg; ++j) {
-//             ofi_rma_start(param->mem, d->rma + j);
-//         }
-//         ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
-//     }
-//     return time;
-// }
 
 //--------------------------------------------------------------------------------------------------
 double rma_run_recv(run_param_t* param, void* data, void* ack_ptr) {
@@ -706,8 +697,5 @@ double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     // check the result
     run_test_check(ttl_len, param->mem->buf);
     return sync_time;
-}
-double rma_fast_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_fast_run_recv(param, data, ack_ptr);
 }
 

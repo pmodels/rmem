@@ -144,6 +144,9 @@ int main(int argc, char** argv) {
             .run = &p2p_run_recv,
             .post = &p2p_post_recv,
         };
+        if(!comm.rank){
+            m_log("<p2p>");
+        }
         run_test(&p2p_send, &p2p_recv, param, &p2p_time);
     }
     //----------------------------------------------------------------------------------------------
@@ -163,6 +166,9 @@ int main(int argc, char** argv) {
             .run = &p2p_run_recv_gpu,
             .post = &p2p_post_recv,
         };
+        if(!comm.rank){
+            m_log("<p2p triggered>");
+        }
         run_test(&p2p_send, &p2p_recv, param, &p2pgpu_time);
     }
     //----------------------------------------------------------------------------------------------
@@ -182,6 +188,9 @@ int main(int argc, char** argv) {
             .run = &p2p_fast_run_recv,
             .post = &p2p_post_recv,
         };
+        if(!comm.rank){
+            m_log("<p2p preposted>");
+        }
         run_test(&p2pf_send, &p2pf_recv, param, &p2pf_time);
     }
     //----------------------------------------------------------------------------------------------
@@ -201,6 +210,9 @@ int main(int argc, char** argv) {
             .run = &rma_run_recv,
             .post = &rma_post,
         };
+        if(!comm.rank){
+            m_log("<put>");
+        }
         run_test(&put_send, &put_recv, param, &put_time);
     }
     //----------------------------------------------------------------------------------------------
@@ -220,6 +232,9 @@ int main(int argc, char** argv) {
             .run = &rma_run_recv_gpu,
             .post = &rma_post,
         };
+        if(!comm.rank){
+            m_log("<put triggered>");
+        }
         run_test(&put_send, &put_recv, param, &pgpu_time);
     }
     //----------------------------------------------------------------------------------------------
@@ -239,6 +254,9 @@ int main(int argc, char** argv) {
             .run = &rma_fast_run_recv,
             .post = &rma_post,
         };
+        if(!comm.rank){
+            m_log("<put fast>");
+        }
         run_test(&pfast_send, &pfast_recv, param, &pfast_time);
     }
     //----------------------------------------------------------------------------------------------
@@ -328,11 +346,15 @@ int main(int argc, char** argv) {
                     "\tPUT       = %f +-[%f] (ratio = %f)\n"
                     "\tP2P TRIGR = %f +-[%f] (ratio = %f)\n"
                     "\tPUT TRIGR = %f +-[%f] (ratio = %f)\n"
-                    "\tPUT FAST  = %f +-[%f] (ratio = %f)\n"
-                    "\tP2P FAST  = %f +-[%f] (ratio = %f)\n",
-                    msg_size * sizeof(int), imsg, ti_p2p, ci_p2p, ti_put, ci_put, ti_put / ti_p2p,
-                    ti_pgpu, ci_pgpu, ti_pgpu / ti_p2p, ti_p2pgpu, ci_p2pgpu, ti_p2pgpu / ti_p2p,
-                    ti_fast, ci_fast, ti_fast / ti_p2p, ti_p2pf, ci_p2pf, ti_p2pf / ti_p2p);
+                    "\tP2P FAST  = %f +-[%f] (ratio = %f)\n"
+                    "\tPUT FAST  = %f +-[%f] (ratio = %f)\n",
+                    msg_size * sizeof(int), imsg,
+                    ti_p2p, ci_p2p,
+                    ti_put, ci_put, ti_put / ti_p2p,
+                    ti_p2pgpu, ci_p2pgpu, ti_p2pgpu / ti_p2p,
+                    ti_pgpu, ci_pgpu, ti_pgpu / ti_p2p,
+                    ti_p2pf, ci_p2pf, ti_p2pf / ti_p2p,
+                    ti_fast, ci_fast, ti_fast / ti_p2p);
             }
             // write to csv
             fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int),
@@ -389,6 +411,8 @@ int main(int argc, char** argv) {
     if (p2p_time.ci) free(p2p_time.ci);
     if (p2pf_time.avg) free(p2pf_time.avg);
     if (p2pf_time.ci) free(p2pf_time.ci);
+    if (p2pgpu_time.avg) free(p2pgpu_time.avg);
+    if (p2pgpu_time.ci) free(p2pgpu_time.ci);
     if (put_time.avg) free(put_time.avg);
     if (put_time.ci) free(put_time.ci);
     if (pgpu_time.avg) free(pgpu_time.avg);

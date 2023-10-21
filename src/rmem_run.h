@@ -52,6 +52,7 @@ typedef struct {
 typedef struct {
     ofi_rma_t* rma;  // array of op
     int* buf;
+    rmem_trigr_ptr* trigr;
     gpuStream_t stream;
 } run_rma_data_t;
 

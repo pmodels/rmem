@@ -1,9 +1,13 @@
 #ifndef GPU_H_
 #define GPU_H_
 
+// device pointer to trigger an operation
+typedef volatile int* rmem_trigr_ptr;
+
 //==================================================================================================
 // define stuff to be overwritten bellow by cuda or hip
 #define GPU_DEFAULT_STREAM 0
+
 
 //--------------------------------------------------------------------------------------------------
 #if defined(HAVE_CUDA) || defined(HAVE_HIP)
@@ -23,6 +27,7 @@
 // memory
 #define gpuMalloc               cudaMalloc
 #define gpuFree                 cudaFree
+#define gpuHostAlloc            cudaHostAlloc
 #define gpuHostRegister         cudaHostRegister
 #define gpuHostUnregister       cudaHostUnregister
 #define gpuHostGetDevicePointer cudaHostGetDevicePointer
@@ -59,6 +64,7 @@ typedef enum {
 // memory
 #define gpuMalloc               hipMalloc
 #define gpuFree                 hipFree
+#define gpuHostAlloc            hipHostAlloc
 #define gpuHostRegister         hipHostRegister
 #define gpuHostUnregister       hipHostUnregister
 #define gpuHostGetDevicePointer hipHostGetDevicePointer
@@ -133,33 +139,28 @@ typedef enum {
     RMEM_AWARE,
 } rmem_device_t;
 
-// device version of the RMA request
-struct ofi_gpu_rma_t {
-    volatile int* ready;
-};
-typedef struct ofi_gpu_rma_t* ofi_drma_t;
-
-#define m_rmem_trigger(drma) \
-    do {                     \
-        (drma)->ready[0]++;    \
+#define m_rmem_trigger(trigr)                       \
+    do {                                            \
+        volatile int* rmem_trigger_trigr = (trigr); \
+        (*rmem_trigger_trigr)++;                    \
     } while (0)
 
 //==================================================================================================
 // RMEM device functions
 //==================================================================================================
 #if (HAVE_CUDA)
-extern int ofi_rma_start_cuda(cudaStream_t* stream, ofi_drma_t drma);
+extern int ofi_rma_start_cuda(cudaStream_t* stream, rmem_trigr_ptr trigr);
 #elif (HAVE_HIP)
-extern int ofi_rma_start_hip(gpuStream_t* stream, ofi_drma_t drma);
+extern int ofi_rma_start_hip(gpuStream_t* stream, rmem_trigr_ptr trigr);
 #endif
 
-static int ofi_rma_start_gpu(gpuStream_t* stream, ofi_drma_t drma) {
+static int ofi_rma_start_gpu(gpuStream_t* stream, rmem_trigr_ptr trigr) {
 #if (HAVE_CUDA)
-    return ofi_rma_start_cuda(stream, drma);
+    return ofi_rma_start_cuda(stream, trigr);
 #elif (HAVE_HIP)
-    return ofi_rma_start_hip(stream, drma);
+    return ofi_rma_start_hip(stream, trigr);
 #else
-    m_rmem_trigger(drma);
+    m_rmem_trigger(trigr);
     return gpuSuccess;
 #endif
 };

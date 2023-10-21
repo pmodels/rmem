@@ -329,7 +329,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     rma->ofi.qnode.ready = 0;
     //----------------------------------------------------------------------------------------------
     // flag
-    const bool do_inject = (rma->count < comm->prov->tx_attr->inject_size);
+    const bool do_inject = false; //(rma->count < comm->prov->tx_attr->inject_size);
     const bool do_delivery = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     const bool auto_progress = (comm->prov->domain_attr->data_progress & FI_PROGRESS_AUTO);
     // force the use of delivery complete if needed
@@ -368,20 +368,20 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     //---------------------------------------------------------------------------------------------
     // GPU request - allocated to the GPU
     // https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#zero-copy__zero-copy-host-code
-    int* d_ready_ptr;
     volatile int* h_ready_ptr = &rma->ofi.qnode.ready;
     if (M_HAVE_GPU) {
-        m_gpu_call(gpuMalloc((void**)&rma->ofi.drma, sizeof(struct ofi_gpu_rma_t)));
-        m_gpu_call(gpuHostRegister((void*)h_ready_ptr, sizeof(int), gpuHostRegisterMapped));
+        int* d_ready_ptr;
+        m_gpu_call(
+            gpuHostRegister((void*)h_ready_ptr, sizeof(volatile int), gpuHostRegisterMapped));
         m_gpu_call(gpuHostGetDevicePointer((void**)&d_ready_ptr, (void*)h_ready_ptr, 0));
-        m_gpu_call(gpuMemcpySync((void*)&rma->ofi.drma->ready, (void*)&d_ready_ptr, sizeof(int*),
-                                 gpuMemcpyHostToDevice));
-        // store the stream
+        m_verb("RMA operation: host ptr is %p, device ptr is %p",h_ready_ptr,d_ready_ptr);
+
+        // store the stream and the device pointer
         rma->ofi.stream = &mem->ofi.data_trx[ctx_id].stream;
+        rma->ofi.qnode.d_ready_ptr = d_ready_ptr;
     } else {
         rma->ofi.stream = NULL;
-        rma->ofi.drma = malloc(sizeof(struct ofi_gpu_rma_t));
-        rma->ofi.drma->ready = h_ready_ptr;
+        rma->ofi.qnode.d_ready_ptr = h_ready_ptr;
     }
     //----------------------------------------------------------------------------------------------
     m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
@@ -399,12 +399,15 @@ int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_com
 int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm) {
     return ofi_rma_init(put, pmem, ctx_id, comm, RMA_OPT_RPUT);
 }
-
-int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
+int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_trigr_ptr* trigr, rmem_device_t dev) {
     if (dev == RMEM_TRIGGER) {
         rma->ofi.qnode.ready = 0;
         m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
         rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
+        *trigr = rma->ofi.qnode.d_ready_ptr;
+        m_verb("enqueuing: trigger value = %p",trigr[0]);
+    } else {
+        trigr = NULL;
     }
     //----------------------------------------------------------------------------------------------
     return m_success;
@@ -414,7 +417,7 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
              rma->ofi.qnode.ready);
     if (dev == RMEM_TRIGGER) {
         // trigger from the GPU, counters are incremented at enqueue time
-        ofi_rma_start_gpu(rma->ofi.stream, rma->ofi.drma);
+        ofi_rma_start_gpu(rma->ofi.stream, rma->ofi.qnode.d_ready_ptr);
     } else {
         // trigger from the host: increment the counters first
         m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
@@ -427,11 +430,6 @@ int ofi_rma_free(ofi_rma_t* rma) {
     m_verb("closing memory origin");
     m_rmem_call(ofi_util_mr_close(rma->ofi.msg.mr.mr));
     m_gpu_call(gpuHostUnregister((void*)&rma->ofi.qnode.ready));
-    if (M_HAVE_GPU) {
-        m_gpu_call(gpuFree((void*)rma->ofi.drma));
-    } else {
-        free(rma->ofi.drma);
-    }
     return m_success;
 }
 
