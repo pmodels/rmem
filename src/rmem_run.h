@@ -46,11 +46,13 @@ typedef struct {
 typedef struct {
     ofi_p2p_t* p2p;
     int* buf;
+    gpuStream_t stream;
 } run_p2p_data_t;
 
 typedef struct {
     ofi_rma_t* rma;  // array of op
     int* buf;
+    gpuStream_t stream;
 } run_rma_data_t;
 
 void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timings);
@@ -63,6 +65,8 @@ void p2p_post_send(run_param_t* param, void* data);
 void p2p_post_recv(run_param_t* param, void* data);
 double p2p_run_send(run_param_t* param, void* data, void* ack);
 double p2p_run_recv(run_param_t* param, void* data, void* ack);
+double p2p_run_send_gpu(run_param_t* param, void* data, void* ack);
+double p2p_run_recv_gpu(run_param_t* param, void* data, void* ack);
 double p2p_fast_run_send(run_param_t* param, void* data, void* ack);
 double p2p_fast_run_recv(run_param_t* param, void* data, void* ack);
 

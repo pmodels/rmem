@@ -3,6 +3,7 @@
  *	See COPYRIGHT in top-level directory
  */
 #include "rmem_run.h"
+#include "rmem_run_gpu.h"
 
 #include <math.h>
 
@@ -283,6 +284,7 @@ static void p2p_pre_alloc(run_param_t* param, void* data) {
         tmp[i] = i + 1;
     }
 
+    m_gpu_call(gpuStreamCreate(&d->stream));
     if (M_HAVE_GPU) {
         m_gpu_call(gpuMalloc((void**)&d->buf, ttl_len * sizeof(int)));
         m_gpu_call(gpuMemcpySync(d->buf, tmp, ttl_len * sizeof(int), gpuMemcpyHostToDevice));
@@ -333,6 +335,7 @@ static void p2p_dealloc(run_param_t* param, void* data) {
     } else {
         free(d->buf);
     }
+    m_gpu_call(gpuStreamDestroy(&d->stream));
 }
 void p2p_post_send(run_param_t* param, void* data) {
     p2p_dealloc(param,data);
@@ -340,7 +343,7 @@ void p2p_post_send(run_param_t* param, void* data) {
 void p2p_post_recv(run_param_t* param, void* data) {
     p2p_dealloc(param,data);
 }
-double p2p_run_send(run_param_t* param, void* data, void* ack_ptr) {
+static double p2p_run_send_common(run_param_t* param, void* data, void* ack_ptr,rmem_device_t dev) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
     ack_t* ack = (ack_t*)ack_ptr;
     ofi_p2p_t* p2p = d->p2p;
@@ -352,17 +355,36 @@ double p2p_run_send(run_param_t* param, void* data, void* ack_ptr) {
     //------------------------------------------------
     ack_offset_sender(ack);
     // start exposure
-    m_rmem_prof(prof, time) {
-        for (int j = 0; j < n_msg; ++j) {
-            ofi_p2p_start(p2p + j);
+    if (dev == RMEM_AWARE) {
+        m_rmem_prof(prof, time) {
+            for (int j = 0; j < n_msg; ++j) {
+                ofi_p2p_start(p2p + j);
+            }
+            for (int j = 0; j < n_msg; ++j) {
+                ofi_p2p_wait(p2p + j);
+            }
         }
-        for (int j = 0; j < n_msg; ++j) {
-            ofi_p2p_wait(p2p + j);
+    } else {
+        m_rmem_prof(prof, time) {
+            gpu_trigger_op(n_msg, d->buf, param->msg_size, RMEM_GPU_P2P, NULL, NULL, d->stream);
+            m_gpu_call(gpuStreamSynchronize(d->stream));
+            for (int j = 0; j < n_msg; ++j) {
+                ofi_p2p_start(p2p + j);
+            }
+            for (int j = 0; j < n_msg; ++j) {
+                ofi_p2p_wait(p2p + j);
+            }
         }
     }
     // send the starting time from the profiler
     ack_send_withtime(ack, &prof.t0);
     return time;
+}
+double p2p_run_send(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_send_common(param, data, ack_ptr, RMEM_AWARE);
+}
+double p2p_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_send_common(param, data, ack_ptr, RMEM_TRIGGER);
 }
 double p2p_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
@@ -397,6 +419,11 @@ double p2p_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     run_test_check(ttl_len, d->buf);
     return sync_time;
 }
+double p2p_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_recv(param, data, ack_ptr);
+}
+
+//============ p2p fast
 double p2p_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
     return p2p_run_send(param, data, ack_ptr);
 }
@@ -449,6 +476,7 @@ void rma_alloc(run_param_t* param, void* data) {
         for (int i = 0; i < ttl_len; ++i) {
             tmp[i] = i + 1;
         }
+        m_gpu_call(gpuStreamCreate(&d->stream));
         if (M_HAVE_GPU) {
             m_gpu_call(gpuMalloc((void**)&d->buf, ttl_len * sizeof(int)));
             m_gpu_call(gpuMemcpySync(d->buf, tmp, ttl_len * sizeof(int), gpuMemcpyHostToDevice));
@@ -466,6 +494,7 @@ void rma_dealloc(run_param_t* param, void* data) {
         } else {
             free(d->buf);
         }
+        m_gpu_call(gpuStreamDestroy(&d->stream));
     }
 }
 
@@ -509,7 +538,7 @@ void rma_post(run_param_t* param, void* data) {
 }
 
 //--------------------------------------------------------------------------------------------------
-double rma_run_send_device(run_param_t* param, void* data, void* ack_ptr, rmem_device_t device) {
+static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr, rmem_device_t device) {
     m_verb("rma_run_send_device: entering");
     run_rma_data_t* d = (run_rma_data_t*)data;
     ack_t* ack = (ack_t*)ack_ptr;
@@ -523,27 +552,36 @@ double rma_run_send_device(run_param_t* param, void* data, void* ack_ptr, rmem_d
     //-------------------------------------------------
     // enqueue the requests
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_enqueue(param->mem, d->rma + j,device);
+        ofi_rma_enqueue(param->mem, d->rma + j, device);
     }
-    // send a readiness signal
+    // send a readiness signal triggers the time measurement on the recv
     ack_send(ack);
     // start the request
     ofi_rmem_start(1, &buddy, param->mem, param->comm);
-    // injection can only be measure on the time to put the msgs and complete
-    m_rmem_prof(prof, time) {
-        for (int j = 0; j < n_msg; ++j) {
-            ofi_rma_start(param->mem, d->rma + j, device);
+    if (device == RMEM_AWARE) {
+        // only measure injection on the send side
+        m_rmem_prof(prof, time) {
+            for (int j = 0; j < n_msg; ++j) {
+                ofi_rma_start(param->mem, d->rma + j, RMEM_AWARE);
+            }
+            m_verb("rma_run_send_device: rmem_complete");
+            ofi_rmem_complete(1, &buddy, param->mem, param->comm);
         }
-        m_verb("rma_run_send_device: rmem_complete");
-        ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+    } else {
+        gpu_trigger_op(n_msg, d->buf, param->msg_size, RMEM_GPU_PUT, d->rma, param->mem, d->stream);
+        m_rmem_prof(prof, time) {
+            m_verb("rma_run_send_device: rmem_complete");
+            ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+        }
+        m_gpu_call(gpuStreamSynchronize(d->stream));
     }
     return time;
 }
 double rma_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_run_send_device(param, data, ack_ptr, RMEM_GPU);
+    return rma_run_send_common(param, data, ack_ptr, RMEM_TRIGGER);
 }
 double rma_run_send(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_run_send_device(param, data, ack_ptr, RMEM_HOST);
+    return rma_run_send_common(param, data, ack_ptr, RMEM_AWARE);
 }
 double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rmem_device_t device) {
     run_rma_data_t* d = (run_rma_data_t*)data;
@@ -581,10 +619,10 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     return time;
 }
 double rma_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_GPU);
+    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_TRIGGER);
 }
 double rma_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_HOST);
+    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_AWARE);
 }
 // double lat_run_send(run_param_t* param, void* data,void* ack_ptr) {
 //     run_rma_data_t* d = (run_rma_data_t*)data;

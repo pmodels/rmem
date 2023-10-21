@@ -401,7 +401,7 @@ int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_co
 }
 
 int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
-    if (dev == RMEM_GPU) {
+    if (dev == RMEM_TRIGGER) {
         rma->ofi.qnode.ready = 0;
         m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
         rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
@@ -412,7 +412,7 @@ int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
 int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
     m_assert(rma->ofi.qnode.ready == 0, "the ready value must be 0 and not %d",
              rma->ofi.qnode.ready);
-    if (dev == RMEM_GPU) {
+    if (dev == RMEM_TRIGGER) {
         // trigger from the GPU, counters are incremented at enqueue time
         ofi_rma_start_gpu(rma->ofi.stream, rma->ofi.drma);
     } else {

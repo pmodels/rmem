@@ -129,8 +129,8 @@ typedef enum {
 
 //--------------------------------------------------------------------------------------------------
 typedef enum {
-    RMEM_GPU = 0,
-    RMEM_HOST,
+    RMEM_TRIGGER = 0,
+    RMEM_AWARE,
 } rmem_device_t;
 
 // device version of the RMA request
