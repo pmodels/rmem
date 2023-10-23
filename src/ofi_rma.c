@@ -199,8 +199,16 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     // create the thread
     pthread_attr_t pthread_attr;
     m_pthread_call(pthread_attr_init(&pthread_attr));
+    mem->ofi.thread_arg = (rmem_thread_arg_t){
+        .workq = &mem->ofi.qtrigr,
+        .data_trx = mem->ofi.data_trx,
+        .xctx.epoch_ptr = mem->ofi.sync.epch,
+        .n_tx = mem->ofi.n_tx,
+    };
+    mem->ofi.thread_arg.do_progress = malloc(sizeof(countr_t));
+    m_countr_init(mem->ofi.thread_arg.do_progress);
     m_pthread_call(
-        pthread_create(&mem->ofi.progress, &pthread_attr, &ofi_tthread_main, &mem->ofi.qtrigr));
+        pthread_create(&mem->ofi.progress, &pthread_attr, &ofi_tthread_main, &mem->ofi.thread_arg));
     m_pthread_call(pthread_attr_destroy(&pthread_attr));
     //---------------------------------------------------------------------------------------------
     // GPU
@@ -223,6 +231,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_pthread_call(pthread_cancel(mem->ofi.progress));
     m_pthread_call(pthread_join(mem->ofi.progress, &retval));
     free(mem->ofi.qtrigr.done);
+    free(mem->ofi.thread_arg.do_progress);
     //----------------------------------------------------------------------------------------------
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG || comm->prov_mode.dtc_mode == M_OFI_DTC_MSG) {
         ofi_rmem_am_free(mem, comm);

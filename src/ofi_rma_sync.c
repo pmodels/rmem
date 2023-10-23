@@ -106,6 +106,8 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
             m_countr_fetch_add(m_rma_mepoch_post(mem), -nrank);
             break;
     }
+    // activate progress in the helper thread
+    m_countr_store(mem->ofi.thread_arg.do_progress, 1);
 #ifndef NDEBUG
     m_verb("started");
     if (check_last) {
@@ -116,6 +118,7 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
     return m_success;
 }
 int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
+    // start as normal, progress has been activated
     m_rmem_call(ofi_rmem_start(nrank, rank, mem, comm));
     // reset the value of icntr, it's needed if we use the fast completion mechanism
     for (int i = 0; i < nrank; ++i) {
@@ -131,6 +134,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     const bool is_deliv = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     //----------------------------------------------------------------------------------------------
+    // issue the ack
     int ttl_data = 0;
     int ttl_sync = 0;
     if (is_deliv || is_fence) {
@@ -173,6 +177,8 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         m_ofi_call(ofi_progress(&progress));
         sched_yield();
     }
+    // disable progress in the helper thread
+    m_countr_store(mem->ofi.thread_arg.do_progress, 0);
     // if we are not fencing, progress every EP now, waiting for the completion
     // if we are fencing, then progress will be made later
     if (!is_fence) {
@@ -228,6 +234,19 @@ int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* com
     m_verb("completing-fast: %d calls, already done: %d", threshold,
            m_countr_load(m_rma_mepoch_local(mem)));
     //----------------------------------------------------------------------------------------------
+    // wait for the helper thread to be done with issuing operations
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .xctx.epoch_ptr = mem->ofi.sync.epch,
+    };
+    while (m_countr_load(mem->ofi.qtrigr.done) &&
+           (m_countr_load(m_rma_mepoch_local(mem)) < threshold)) {
+        m_ofi_call(ofi_progress(&progress));
+        sched_yield();
+    }
+    // disable progress in the helper thread
+    m_countr_store(mem->ofi.thread_arg.do_progress, 0);
+    // wait for completion of the requested operations
     m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx,
                                        mem->ofi.data_trx, mem->ofi.sync.epch));
     m_verb("completed fast");

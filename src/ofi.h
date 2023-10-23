@@ -408,6 +408,15 @@ typedef struct {
     } ofi;
 } ofi_rma_t;
 
+// thread-based data structure, must stay valid accross the thread execution
+typedef struct {
+    countr_t* do_progress;  //<! acts like a switch to activate or not the  progress in the list
+    rmem_qmpsc_t* workq;
+    ofi_rma_trx_t* data_trx;
+    ofi_special_cq_t xctx;
+    int n_tx;
+} rmem_thread_arg_t;
+
 //-------------------------------------------------------------------------------------------------
 // memory exposed to the world - public memory
 typedef struct {
@@ -432,6 +441,7 @@ typedef struct {
         // work queue
         pthread_t progress;
         rmem_qmpsc_t qtrigr;
+        rmem_thread_arg_t thread_arg;
     } ofi;
 } ofi_rmem_t;
 
