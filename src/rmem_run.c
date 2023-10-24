@@ -21,6 +21,17 @@
 #define m_msg_idx(imsg)  ((log10(imsg) - log10(m_min_msg)) / log10(2))
 #define m_size_idx(imsg) ((log10(imsg) - log10(m_min_size)) / log10(2))
 
+/**
+ * @brief returns a random number [0; max[
+ */
+static int rmem_get_rand(const int max) {
+    // get a random number between [0;RAND_MAX[.
+    // note: the modulo is required because rand() returns [0;RAND_MAX]
+    const int i = rand() % RAND_MAX;
+    double r = (double)i / (double)RAND_MAX;
+    return (int)(r * (double)(max));
+}
+
 static void run_test_check(const size_t ttl_len, int* buf) {
     //------------------------------------------------
     // check the result
@@ -352,13 +363,16 @@ static double p2p_run_send_common(run_param_t* param, void* data, void* ack_ptr,
     double time;
     rmem_prof_t prof = {.name = "send"};
 
+    // get a random starting point
+    const int start_id = rmem_get_rand(n_msg);
     //------------------------------------------------
     ack_offset_sender(ack);
     // start exposure
     if (dev == RMEM_AWARE) {
         m_rmem_prof(prof, time) {
             for (int j = 0; j < n_msg; ++j) {
-                ofi_p2p_start(p2p + j);
+                const int id = (start_id + j)%n_msg;
+                ofi_p2p_start(p2p + id);
             }
             for (int j = 0; j < n_msg; ++j) {
                 ofi_p2p_wait(p2p + j);
@@ -369,7 +383,8 @@ static double p2p_run_send_common(run_param_t* param, void* data, void* ack_ptr,
             gpu_trigger_op(RMEM_GPU_P2P, n_msg, d->buf, param->msg_size, NULL, d->stream);
             m_gpu_call(gpuStreamSynchronize(d->stream));
             for (int j = 0; j < n_msg; ++j) {
-                ofi_p2p_start(p2p + j);
+                const int id = (start_id + j) % n_msg;
+                ofi_p2p_start(p2p + id);
             }
             for (int j = 0; j < n_msg; ++j) {
                 ofi_p2p_wait(p2p + j);
