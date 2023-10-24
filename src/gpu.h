@@ -1,6 +1,9 @@
 #ifndef GPU_H_
 #define GPU_H_
 
+#define m_gpu_page_size (1 << 16)
+#define m_gpu_max_op    (m_gpu_page_size / sizeof(int))
+
 // device pointer to trigger an operation
 typedef volatile int* rmem_trigr_ptr;
 
@@ -27,10 +30,12 @@ typedef volatile int* rmem_trigr_ptr;
 // memory
 #define gpuMalloc               cudaMalloc
 #define gpuFree                 cudaFree
+#define gpuFreeHost             cudaFreeHost
 #define gpuHostAlloc            cudaHostAlloc
 #define gpuHostRegister         cudaHostRegister
 #define gpuHostUnregister       cudaHostUnregister
 #define gpuHostGetDevicePointer cudaHostGetDevicePointer
+#define gpuHostAllocMapped      cudaHostAllocMapped
 #define gpuHostRegisterMapped   cudaHostRegisterMapped
 #define gpuMemcpyHostToDevice   cudaMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost   cudaMemcpyDeviceToHost
@@ -64,11 +69,13 @@ typedef enum {
 // memory
 #define gpuMalloc               hipMalloc
 #define gpuFree                 hipFree
+#define gpuFreeHost             hipFreeHost
 #define gpuHostAlloc            hipHostAlloc
 #define gpuHostRegister         hipHostRegister
 #define gpuHostUnregister       hipHostUnregister
 #define gpuHostGetDevicePointer hipHostGetDevicePointer
 #define gpuHostRegisterMapped   hipHostRegisterMapped
+#define gpuHostAllocMapped      hipHostAllocMapped
 #define gpuMemcpyHostToDevice   hipMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost   hipMemcpyDeviceToHost
 #define gpuMemcpyAsync          hipMemcpyAsync

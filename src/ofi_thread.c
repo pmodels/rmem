@@ -29,7 +29,7 @@ void* ofi_tthread_main(void* arg) {
         rmem_qnode_t* task;
         rmem_qmpsc_deq_ifready(workq, &task);
         if (task) {
-            m_assert(task->ready, "the task is not ready");
+            m_assert(task->h_ready_ptr[0], "the task is not ready");
             ofi_rma_start_from_task(task);
             // notify the task has been executed
             m_assert(m_countr_load(workq->done) >= 0, "done counter = %d cannot be <=0",

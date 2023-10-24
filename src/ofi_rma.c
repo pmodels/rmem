@@ -212,6 +212,18 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_pthread_call(pthread_attr_destroy(&pthread_attr));
     //---------------------------------------------------------------------------------------------
     // GPU
+    // allocate trigr pool
+    m_countr_init(&mem->ofi.trigr_count);
+    if (M_HAVE_GPU) {
+        m_gpu_call(
+            gpuHostAlloc((void**)&mem->ofi.h_trigr_pool, m_gpu_page_size, gpuHostAllocMapped));
+        m_gpu_call(gpuHostGetDevicePointer((void**)&mem->ofi.d_trigr_pool,
+                                           (void*)mem->ofi.h_trigr_pool, 0));
+    } else {
+        mem->ofi.h_trigr_pool = malloc(m_gpu_page_size);
+        mem->ofi.d_trigr_pool = mem->ofi.h_trigr_pool;
+    }
+
 #ifndef NDEBUG
     int device_count = 0;
     m_gpu_call(gpuGetDeviceCount(&device_count));
@@ -232,6 +244,11 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_pthread_call(pthread_join(mem->ofi.progress, &retval));
     free(mem->ofi.qtrigr.done);
     free(mem->ofi.thread_arg.do_progress);
+    if (M_HAVE_GPU) {
+        m_gpu_call(gpuFreeHost((void*)mem->ofi.h_trigr_pool));
+    } else {
+        free((void*)mem->ofi.h_trigr_pool);
+    }
     //----------------------------------------------------------------------------------------------
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG || comm->prov_mode.dtc_mode == M_OFI_DTC_MSG) {
         ofi_rmem_am_free(mem, comm);
@@ -335,7 +352,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     rma->ofi.msg.cq.epoch_ptr = mem->ofi.sync.epch;
     //----------------------------------------------------------------------------------------------
     // setup the ready flag to 1 to avoid issues
-    rma->ofi.qnode.ready = 0;
+    rma->ofi.qnode.h_ready_ptr = 0;
     //----------------------------------------------------------------------------------------------
     // flag
     const bool do_inject = false; //(rma->count < comm->prov->tx_attr->inject_size);
@@ -377,20 +394,20 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     //---------------------------------------------------------------------------------------------
     // GPU request - allocated to the GPU
     // https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#zero-copy__zero-copy-host-code
-    volatile int* h_ready_ptr = &rma->ofi.qnode.ready;
+    // volatile int* h_ready_ptr = &rma->ofi.qnode.h_ready_ptr;
     if (M_HAVE_GPU) {
-        int* d_ready_ptr;
-        m_gpu_call(
-            gpuHostRegister((void*)h_ready_ptr, sizeof(volatile int), gpuHostRegisterMapped));
-        m_gpu_call(gpuHostGetDevicePointer((void**)&d_ready_ptr, (void*)h_ready_ptr, 0));
-        m_verb("RMA operation: host ptr is %p, device ptr is %p",h_ready_ptr,d_ready_ptr);
+        // int* d_ready_ptr;
+        // m_gpu_call(
+        //     gpuHostRegister((void*)h_ready_ptr, sizeof(volatile int), gpuHostRegisterMapped));
+        // m_gpu_call(gpuHostGetDevicePointer((void**)&d_ready_ptr, (void*)h_ready_ptr, 0));
+        // m_verb("RMA operation: host ptr is %p, device ptr is %p",h_ready_ptr,d_ready_ptr);
 
         // store the stream and the device pointer
         rma->ofi.stream = &mem->ofi.data_trx[ctx_id].stream;
-        rma->ofi.qnode.d_ready_ptr = d_ready_ptr;
+        // rma->ofi.qnode.d_ready_ptr = d_ready_ptr;
     } else {
         rma->ofi.stream = NULL;
-        rma->ofi.qnode.d_ready_ptr = h_ready_ptr;
+        // rma->ofi.qnode.d_ready_ptr = h_ready_ptr;
     }
     //----------------------------------------------------------------------------------------------
     m_assert(rma->ofi.msg.riov.key != FI_KEY_NOTAVAIL, "key must be >0");
@@ -410,20 +427,31 @@ int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_co
 }
 int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_trigr_ptr* trigr, rmem_device_t dev) {
     if (dev == RMEM_TRIGGER) {
-        rma->ofi.qnode.ready = 0;
+        // get the pool counter
+        const size_t pool_idx = m_countr_fetch_add(&mem->ofi.trigr_count, 1);
+        m_assert(pool_idx < m_gpu_max_op, "we have reached maximum enqueuing capacity: %ld/%ld",
+                 pool_idx, m_gpu_max_op);
+        rma->ofi.qnode.h_ready_ptr = mem->ofi.h_trigr_pool + pool_idx;
+        rma->ofi.qnode.d_ready_ptr = mem->ofi.d_trigr_pool + pool_idx;
+        rma->ofi.qnode.h_ready_ptr[0] = 0;
+        // enqueue the operation
         m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
         rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
+
+        // return trigr_handle
         *trigr = rma->ofi.qnode.d_ready_ptr;
-        m_verb("enqueuing: trigger value = %p",trigr[0]);
+        m_verb("enqueuing: trigger value = %p", trigr[0]);
     } else {
+        rma->ofi.qnode.h_ready_ptr = NULL;
+        rma->ofi.qnode.d_ready_ptr = NULL;
         trigr = NULL;
     }
     //----------------------------------------------------------------------------------------------
     return m_success;
 }
 int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
-    m_assert(rma->ofi.qnode.ready == 0, "the ready value must be 0 and not %d",
-             rma->ofi.qnode.ready);
+    m_assert(!(rma->ofi.qnode.h_ready_ptr && rma->ofi.qnode.h_ready_ptr[0] == 0),
+             "the ready value must be 0 and not %d", rma->ofi.qnode.h_ready_ptr[0]);
     if (dev == RMEM_TRIGGER) {
         // trigger from the GPU, counters are incremented at enqueue time
         ofi_rma_start_gpu(rma->ofi.stream, rma->ofi.qnode.d_ready_ptr);
@@ -438,7 +466,7 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
 int ofi_rma_free(ofi_rma_t* rma) {
     m_verb("closing memory origin");
     m_rmem_call(ofi_util_mr_close(rma->ofi.msg.mr.mr));
-    m_gpu_call(gpuHostUnregister((void*)&rma->ofi.qnode.ready));
+    // m_gpu_call(gpuHostUnregister((void*)&rma->ofi.qnode.ready));
     return m_success;
 }
 

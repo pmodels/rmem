@@ -51,7 +51,9 @@ void PrintBackTrace() {
  *
  */
 void rmem_qmpsc_enq(rmem_qmpsc_t *q, rmem_qnode_t *elem) {
-    m_verb("enqueueing task %p, value = %d",elem, elem->ready);
+    m_assert(elem->h_ready_ptr,"elem must have a host ready pointer");
+    m_assert(elem->d_ready_ptr,"elem must have a device ready pointer");
+    m_verb("enqueueing task %p, value = %d",elem, elem->h_ready_ptr[0]);
     // overwrite the next value
     m_atomicptr_store(&elem->next,0);
     // update the tail
@@ -125,8 +127,8 @@ void rmem_qmpsc_deq_ifready(rmem_qmpsc_t *q, rmem_qnode_t **res) {
             const intptr_t elem = m_atomicptr_load(&q->curnt);
             m_assert(elem, "the element must be non-NULL here");
             *res = (rmem_qnode_t *)elem;
-            if ((*res)->ready) {
-                m_verb("THREAD: elem = %ld, ready? %d", elem, (*res)->ready);
+            if ((*res)->h_ready_ptr[0]) {
+                m_verb("THREAD: elem = %ld, ready? %d", elem, (*res)->h_ready_ptr);
                 // read the previous value
                 rmem_qnode_t *prev = (rmem_qnode_t *)m_atomicptr_load(&q->prev);
                 // item must be dequeue, q->prev stays the same
@@ -153,7 +155,7 @@ void rmem_qmpsc_deq_ifready(rmem_qmpsc_t *q, rmem_qnode_t **res) {
                         rmem_qmpsc_update_ptr(q, prev, &(*res)->next);
                     }
                 }
-                m_verb("THREAD: returning task %ld with value %d", elem, (*res)->ready);
+                m_verb("THREAD: returning task %ld with value %d", elem, (*res)->h_ready_ptr);
                 m_verb("THREAD: current is now %p", (void *)m_atomicptr_load(&q->curnt));
                 m_verb("THREAD: head is now %p", (void *)m_atomicptr_load(&q->head));
                 m_verb("THREAD: tail is now %p", (void *)m_atomicptr_load(&q->tail));

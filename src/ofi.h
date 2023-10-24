@@ -442,6 +442,10 @@ typedef struct {
         pthread_t progress;
         rmem_qmpsc_t qtrigr;
         rmem_thread_arg_t thread_arg;
+        // gpu triggered resources
+        countr_t trigr_count;
+        rmem_trigr_ptr h_trigr_pool;
+        rmem_trigr_ptr d_trigr_pool;
     } ofi;
 } ofi_rmem_t;
 
