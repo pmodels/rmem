@@ -5,6 +5,8 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include "rmem_utils.h"
+#include "rmem_trigr.h"
+
 //--------------------------------------------------------------------------------------------------
 #define m_default_mem_model memory_order_relaxed
 typedef struct {
@@ -15,6 +17,13 @@ typedef struct {
 #define m_countr_store(a, v)     atomic_store_explicit(&(a)->val, v, m_default_mem_model)
 #define m_countr_exchange(a, v)  atomic_exchange_explicit(&(a)->val, v, m_default_mem_model)
 #define m_countr_fetch_add(a, v) atomic_fetch_add_explicit(&(a)->val, v, m_default_mem_model)
+
+// list counter with acquire-release semantics
+#define m_countr_acq_load(a)     atomic_load_explicit(&(a)->val, memory_order_acquire)
+#define m_countr_rel_store(a, v) atomic_store_explicit(&(a)->val, v, memory_order_release)
+#define m_countr_rr_cas(a, e, d)                                                   \
+    atomic_compare_exchange_strong_explicit(&(a)->val, e, d, memory_order_release, \
+                                            memory_order_relaxed)
 
 //--------------------------------------------------------------------------------------------------
 typedef struct {
@@ -30,15 +39,23 @@ typedef struct {
     atomic_compare_exchange_strong_explicit(&(a)->ptr, e, p, m_default_mem_model, \
                                             m_default_mem_model)
 // #define m_atomicptr_cas_copy(a, e, p) m_atomicptr_cas(&(a)->ptr, e, (p)->ptr)
+
 //--------------------------------------------------------------------------------------------------
 // Multiple Producers, Single Consumer queue
 typedef struct {
-    volatile int* h_ready_ptr;         //!< ready variable
-    volatile int* d_ready_ptr;  //!< device pointer to the ready variable
+    rmem_trigr_ptr h_ready_ptr;  //!< ready variable
+    rmem_trigr_ptr d_ready_ptr;  //!< device pointer to the ready variable
     atomic_ptr_t next;
 } rmem_qnode_t;  // node
 typedef struct {
-    countr_t* done;  // counter to decrease when task is executed, increased when task is enqueue
+    // progress count
+    countr_t ongoing; // +1 when submited, -1 when executed
+    // gpu triggered resources
+    countr_t trigr_count;
+    uint8_t* pool_bitmap;
+    rmem_trigr_ptr h_trigr_pool;
+    rmem_trigr_ptr d_trigr_pool;
+    // queue navigation
     atomic_ptr_t head;
     atomic_ptr_t tail;
     atomic_ptr_t prev;

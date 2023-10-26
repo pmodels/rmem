@@ -33,6 +33,7 @@ static void host_trigger_op(rmem_gpu_op_t op, const size_t n_msg, int* data, con
         }
         switch (op) {
             case RMEM_GPU_PUT: {
+                m_verb("triggering %p",trigr[i]);
                 m_rmem_trigger(trigr[i]);
             } break;
             case RMEM_GPU_P2P:

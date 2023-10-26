@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "rmem.h"
+#include "rmem_qlist.h"
 
 // gpu specific
 #include "gpu.h"
@@ -390,7 +391,7 @@ typedef struct {
 
     // implementation specifics
     struct {
-        rmem_qnode_t qnode;
+        rmem_lnode_t qnode;
         ofi_progress_t progress;  // used to trigger progress
         // data description and ofi msg
         struct {
@@ -411,7 +412,8 @@ typedef struct {
 // thread-based data structure, must stay valid accross the thread execution
 typedef struct {
     countr_t* do_progress;  //<! acts like a switch to activate or not the  progress in the list
-    rmem_qmpsc_t* workq;
+    // rmem_qmpsc_t* workq;
+    rmem_lmpsc_t* workq;
     ofi_rma_trx_t* data_trx;
     ofi_special_cq_t xctx;
     int n_tx;
@@ -440,12 +442,9 @@ typedef struct {
         ofi_rma_sync_t sync;
         // work queue
         pthread_t progress;
-        rmem_qmpsc_t qtrigr;
+        rmem_lmpsc_t qtrigr;
+        // rmem_qmpsc_t qtrigr;
         rmem_thread_arg_t thread_arg;
-        // gpu triggered resources
-        countr_t trigr_count;
-        rmem_trigr_ptr h_trigr_pool;
-        rmem_trigr_ptr d_trigr_pool;
     } ofi;
 } ofi_rmem_t;
 
@@ -495,11 +494,13 @@ int ofi_rma_put_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_com
 int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_comm_t* comm);
 // operation management
 int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_trigr_ptr* trigr, rmem_device_t dev);
+int ofi_rma_reset_queue(ofi_rmem_t* mem);
+
 int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev);
 int ofi_rma_wait(ofi_rma_t* p2p);
 int ofi_rma_free(ofi_rma_t* rma);
 
 
-int ofi_rma_start_from_task(rmem_qnode_t* task);
+int ofi_rma_start_from_task(rmem_lnode_t* task);
 
 #endif

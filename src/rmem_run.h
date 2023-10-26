@@ -10,7 +10,7 @@
 #define m_max_ttl_size (1 << 24)
 #define m_min_msg_size (1 << 20)
 
-#define m_min_msg        512
+#define m_min_msg        1
 #define m_min_size       1
 #define m_msg_idx(imsg)  ((log10(imsg) - log10(m_min_msg)) / log10(2))
 #define m_size_idx(imsg) ((log10(imsg) - log10(m_min_size)) / log10(2))

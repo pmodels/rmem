@@ -1,11 +1,8 @@
 #ifndef GPU_H_
 #define GPU_H_
 
-#define m_gpu_page_size (1 << 16)
-#define m_gpu_max_op    (m_gpu_page_size / sizeof(int))
+#include "rmem_trigr.h"
 
-// device pointer to trigger an operation
-typedef volatile int* rmem_trigr_ptr;
 
 //==================================================================================================
 // define stuff to be overwritten bellow by cuda or hip
@@ -145,12 +142,6 @@ typedef enum {
     RMEM_TRIGGER = 0,
     RMEM_AWARE,
 } rmem_device_t;
-
-#define m_rmem_trigger(trigr)                       \
-    do {                                            \
-        volatile int* rmem_trigger_trigr = (trigr); \
-        (*rmem_trigger_trigr)++;                    \
-    } while (0)
 
 //==================================================================================================
 // RMEM device functions

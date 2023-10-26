@@ -172,7 +172,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         .cq = mem->ofi.sync_trx->cq,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
     };
-    while (m_countr_load(mem->ofi.qtrigr.done) &&
+    while (m_countr_load(&mem->ofi.qtrigr.ongoing) &&
            (m_countr_load(m_rma_mepoch_local(mem)) < threshold)) {
         m_ofi_call(ofi_progress(&progress));
         sched_yield();
@@ -211,9 +211,6 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
                                            mem->ofi.sync.epch));
     }
     //----------------------------------------------------------------------------------------------
-    // reset the trigr window counter
-    m_countr_store(&mem->ofi.trigr_count, 0);
-    //----------------------------------------------------------------------------------------------
 #ifndef NDEBUG
     // no need to check the last rx/tx if AM message is used
     const bool check_last =
@@ -242,7 +239,7 @@ int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* com
         .cq = mem->ofi.sync_trx->cq,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
     };
-    while (m_countr_load(mem->ofi.qtrigr.done) &&
+    while (m_countr_load(&mem->ofi.qtrigr.ongoing) &&
            (m_countr_load(m_rma_mepoch_local(mem)) < threshold)) {
         m_ofi_call(ofi_progress(&progress));
         sched_yield();
@@ -253,8 +250,6 @@ int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* com
     m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx,
                                        mem->ofi.data_trx, mem->ofi.sync.epch));
     //----------------------------------------------------------------------------------------------
-    // reset the trigr window counter
-    m_countr_store(&mem->ofi.trigr_count, 0);
     m_verb("completed fast");
     //----------------------------------------------------------------------------------------------
     return m_success;

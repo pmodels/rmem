@@ -189,13 +189,26 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         PMI_Barrier();
     }
     //---------------------------------------------------------------------------------------------
-    // async progress
-    mem->ofi.qtrigr.done = malloc(sizeof(countr_t));
-    m_countr_init(mem->ofi.qtrigr.done);
-    m_atomicptr_init(&mem->ofi.qtrigr.head);
-    m_atomicptr_init(&mem->ofi.qtrigr.tail);
-    m_atomicptr_init(&mem->ofi.qtrigr.prev);
-    m_atomicptr_init(&mem->ofi.qtrigr.curnt);
+    // allocate trigr pool
+    // m_countr_init(&mem->ofi.qtrigr.trigr_count);
+    // // allocate the bitmap to track completion of the requests
+    // mem->ofi.qtrigr.pool_bitmap = malloc(m_gpu_n_trigr / 8 + (m_gpu_n_trigr % 8) > 0);
+    // if (M_HAVE_GPU) {
+    //     m_gpu_call(gpuHostAlloc((void**)&mem->ofi.qtrigr.h_trigr_pool, m_gpu_page_size,
+    //                             gpuHostAllocMapped));
+    //     m_gpu_call(gpuHostGetDevicePointer((void**)&mem->ofi.qtrigr.d_trigr_pool,
+    //                                        (void*)mem->ofi.qtrigr.h_trigr_pool, 0));
+    // } else {
+    //     mem->ofi.qtrigr.h_trigr_pool = malloc(m_gpu_page_size);
+    //     mem->ofi.qtrigr.d_trigr_pool = mem->ofi.qtrigr.h_trigr_pool;
+    // }
+    // // async progress
+    // m_countr_init(&mem->ofi.qtrigr.ongoing);
+    // m_atomicptr_init(&mem->ofi.qtrigr.head);
+    // m_atomicptr_init(&mem->ofi.qtrigr.tail);
+    // m_atomicptr_init(&mem->ofi.qtrigr.prev);
+    // m_atomicptr_init(&mem->ofi.qtrigr.curnt);
+    rmem_lmpsc_create(&mem->ofi.qtrigr);
     // create the thread
     pthread_attr_t pthread_attr;
     m_pthread_call(pthread_attr_init(&pthread_attr));
@@ -212,18 +225,6 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_pthread_call(pthread_attr_destroy(&pthread_attr));
     //---------------------------------------------------------------------------------------------
     // GPU
-    // allocate trigr pool
-    m_countr_init(&mem->ofi.trigr_count);
-    if (M_HAVE_GPU) {
-        m_gpu_call(
-            gpuHostAlloc((void**)&mem->ofi.h_trigr_pool, m_gpu_page_size, gpuHostAllocMapped));
-        m_gpu_call(gpuHostGetDevicePointer((void**)&mem->ofi.d_trigr_pool,
-                                           (void*)mem->ofi.h_trigr_pool, 0));
-    } else {
-        mem->ofi.h_trigr_pool = malloc(m_gpu_page_size);
-        mem->ofi.d_trigr_pool = mem->ofi.h_trigr_pool;
-    }
-
 #ifndef NDEBUG
     int device_count = 0;
     m_gpu_call(gpuGetDeviceCount(&device_count));
@@ -242,13 +243,13 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     void* retval = NULL;
     m_pthread_call(pthread_cancel(mem->ofi.progress));
     m_pthread_call(pthread_join(mem->ofi.progress, &retval));
-    free(mem->ofi.qtrigr.done);
-    free(mem->ofi.thread_arg.do_progress);
-    if (M_HAVE_GPU) {
-        m_gpu_call(gpuFreeHost((void*)mem->ofi.h_trigr_pool));
-    } else {
-        free((void*)mem->ofi.h_trigr_pool);
-    }
+    rmem_lmpsc_destroy(&mem->ofi.qtrigr);
+    // free(mem->ofi.thread_arg.do_progress);
+    // if (M_HAVE_GPU) {
+    //     m_gpu_call(gpuFreeHost((void*)mem->ofi.qtrigr.h_trigr_pool));
+    // } else {
+    //     free((void*)mem->ofi.qtrigr.h_trigr_pool);
+    // }
     //----------------------------------------------------------------------------------------------
     if (comm->prov_mode.rtr_mode == M_OFI_RTR_MSG || comm->prov_mode.dtc_mode == M_OFI_DTC_MSG) {
         ofi_rmem_am_free(mem, comm);
@@ -428,18 +429,15 @@ int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_co
 int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_trigr_ptr* trigr, rmem_device_t dev) {
     if (dev == RMEM_TRIGGER) {
         // get the pool counter
-        const size_t pool_idx = m_countr_fetch_add(&mem->ofi.trigr_count, 1);
-        m_assert(pool_idx < m_gpu_max_op, "we have reached maximum enqueuing capacity: %ld/%ld",
-                 pool_idx, m_gpu_max_op);
-        rma->ofi.qnode.h_ready_ptr = mem->ofi.h_trigr_pool + pool_idx;
-        rma->ofi.qnode.d_ready_ptr = mem->ofi.d_trigr_pool + pool_idx;
-        rma->ofi.qnode.h_ready_ptr[0] = 0;
+        // const size_t pool_idx = m_countr_fetch_add(&mem->ofi.qtrigr.trigr_count, 1);
+        // m_assert(pool_idx < m_gpu_n_trigr, "we have reached maximum enqueuing capacity: %ld/%ld",
+        //          pool_idx, m_gpu_max_op);
+        // rma->ofi.qnode.h_ready_ptr = mem->ofi.qtrigr.h_trigr_pool + pool_idx;
+        // rma->ofi.qnode.d_ready_ptr = mem->ofi.qtrigr.d_trigr_pool + pool_idx;
+        // trigr_init(&rma->ofi.qnode,rma->ofi.qnode.h_ready_ptr);
         // enqueue the operation
         m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
-        rmem_qmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
-
-        // return trigr_handle
-        *trigr = rma->ofi.qnode.d_ready_ptr;
+        *trigr = rmem_lmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
         m_verb("enqueuing: trigger value = %p", trigr[0]);
     } else {
         rma->ofi.qnode.h_ready_ptr = NULL;
@@ -449,13 +447,19 @@ int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_trigr_ptr* trigr, rmem
     //----------------------------------------------------------------------------------------------
     return m_success;
 }
+int ofi_rma_reset_queue(ofi_rmem_t* mem){
+    rmem_lmpsc_reset(&mem->ofi.qtrigr);
+    return m_success;
+}
 int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
     m_assert(!(rma->ofi.qnode.h_ready_ptr && rma->ofi.qnode.h_ready_ptr[0] == 0),
-             "the ready value must be 0 and not %d", rma->ofi.qnode.h_ready_ptr[0]);
+             "the ready value must be 0 and not %lld", rma->ofi.qnode.h_ready_ptr[0]);
     if (dev == RMEM_TRIGGER) {
+        m_verb("triggering %p",&rma->ofi.qnode);
         // trigger from the GPU, counters are incremented at enqueue time
         ofi_rma_start_gpu(rma->ofi.stream, rma->ofi.qnode.d_ready_ptr);
     } else {
+        m_verb("starting %p",&rma->ofi.qnode);
         // trigger from the host: increment the counters first
         m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
         m_rmem_call(ofi_rma_start_from_task(&rma->ofi.qnode));
@@ -473,7 +477,7 @@ int ofi_rma_free(ofi_rma_t* rma) {
 #define m_ofi_rma_task_offset(a) (offsetof(ofi_rma_t, ofi.a) - offsetof(ofi_rma_t, ofi.qnode))
 #define m_ofi_rma_task_structgetptr(T, name, a, task) \
     T* name = (T*)((uint8_t*)task + m_ofi_rma_task_offset(a));
-int ofi_rma_start_from_task(rmem_qnode_t* task) {
+int ofi_rma_start_from_task(rmem_lnode_t* task) {
     m_ofi_rma_task_structgetptr(struct fid_ep*, ep, ep, task);
     m_ofi_rma_task_structgetptr(fi_addr_t, addr, addr, task);
     //--------------------------------------------------------------------------------------

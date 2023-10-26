@@ -166,7 +166,9 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
     // retrieve useful parameters
     const int n_msg = m_msg_idx(param.n_msg) + 1;
     const int n_size = m_size_idx(param.msg_size) + 1;
+    m_assert(n_msg >= 0 && n_size >= 0,"the number of msgs and size must be >=0");
     size_t ttl_sample = n_msg * n_size;
+    
     ofi_comm_t* comm = param.comm;
     // allocate the results
     timings->avg = malloc(sizeof(double) * ttl_sample);
@@ -601,6 +603,7 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
         }
         m_gpu_call(gpuStreamSynchronize(d->stream));
     }
+    ofi_rma_reset_queue(param->mem);
     return time;
 }
 double rma_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
@@ -642,6 +645,7 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     }
     // send the starting time from the profiler
     ack_send_withtime(ack, &prof.t0);
+    ofi_rma_reset_queue(param->mem);
     return time;
 }
 double rma_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
