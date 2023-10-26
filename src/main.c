@@ -306,8 +306,8 @@ int main(int argc, char** argv) {
     // save the results per msg size
     const int n_size = log10(param.msg_size) / log10(2.0) + 1;
     const int n_msg = log10(param.n_msg) / log10(2.0) + 1;
-    for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
-        const int idx_msg = log10(imsg) / log10(2.0);
+    for (int imsg = m_min_msg; imsg <= param.n_msg; imsg *= 2) {
+        const int idx_msg = m_msg_idx(imsg);
         char fullname[128];
         snprintf(fullname, 128, "%s/r%d_msg%d_%s.txt", foldr_name, comm.rank, imsg,
                  ofi_name(&comm));
@@ -322,8 +322,8 @@ int main(int argc, char** argv) {
         }
         // for each message size
         size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
-        for (size_t msg_size = 1; msg_size <= max_msg_size; msg_size *= 2) {
-            const int idx_size = log10(msg_size) / log10(2.0);
+        for (size_t msg_size = m_min_size; msg_size <= max_msg_size; msg_size *= 2) {
+            const int idx_size = m_size_idx(msg_size);
             // get the idx
             int idx = idx_msg * n_size + idx_size;
             // load the results
@@ -367,8 +367,8 @@ int main(int argc, char** argv) {
     }
     //------------------------------------------------------------------------------------------
     // save the results per number of msgs
-    for (size_t msg_size = 1; msg_size <= param.msg_size; msg_size *= 2) {
-        const int idx_size = log10(msg_size) / log10(2.0);
+    for (size_t msg_size = m_min_size; msg_size <= param.msg_size; msg_size *= 2) {
+        const int idx_size = m_size_idx(msg_size);
         char fullname[128];
         snprintf(fullname, 128, "%s/r%d_size%ld_%s.txt", foldr_name, comm.rank, msg_size,
                  ofi_name(&comm));
@@ -377,12 +377,12 @@ int main(int argc, char** argv) {
         m_assert(file, "cannot open %s", fullname);
 
         // for each message size
-        for (int imsg = 1; imsg <= param.n_msg; imsg *= 2) {
+        for (int imsg = m_min_msg; imsg <= param.n_msg; imsg *= 2) {
             size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
             if (imsg * msg_size * sizeof(int) > max_msg_size) {
                 break;
             }
-            const int idx_msg = log10(imsg) / log10(2.0);
+            const int idx_msg = m_msg_idx(imsg);
             // get the idx
             int idx = idx_msg * n_size + idx_size;
             // load the results

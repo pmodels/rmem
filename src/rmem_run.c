@@ -16,10 +16,6 @@
 #define retry_max       10
 #define n_repeat_offset 10
 
-#define m_min_msg        1
-#define m_min_size       1
-#define m_msg_idx(imsg)  ((log10(imsg) - log10(m_min_msg)) / log10(2))
-#define m_size_idx(imsg) ((log10(imsg) - log10(m_min_size)) / log10(2))
 
 /**
  * @brief returns a random number [0; max[
@@ -199,10 +195,11 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
         const int idx_msg = m_msg_idx(imsg);
         const size_t max_msg_size = m_msg_size(imsg, param.msg_size, int);
         for (size_t msg_size = m_min_size; msg_size <= max_msg_size; msg_size *= 2) {
-            const int idx_size = m_msg_idx(msg_size) ;
-            // m_log("idx_size = %d, msg_size = %ld, max size = %ld", idx_size, msg_size,
+            const int idx_size = m_size_idx(msg_size) ;
+            // m_verb("idx_size = %d, msg_size = %ld, max size = %ld", idx_size, msg_size,
             //       max_msg_size);
             int idx = idx_msg * n_size + idx_size;
+            m_verb("idx = %d, idx_msg = %d, n_size = %d, idx_size = %d",idx,idx_msg,n_size,idx_size);
             run_param_t cparam = {
                 .msg_size = msg_size,
                 .comm = param.comm,
