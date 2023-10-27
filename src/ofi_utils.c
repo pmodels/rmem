@@ -288,7 +288,6 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     m_assert(!((*prov)->mode & FI_RX_CQ_DATA), "need to use FI_RX_CQ_DATA");
     m_assert(!((*prov)->mode & FI_ASYNC_IOV), "need to use FI_ASYNC_IOV");
     m_assert(!((*prov)->domain_attr->mr_mode & FI_MR_RAW), "need to use FI_MR_RAW");
-    (*prov)->domain_attr->mr_mode |= FI_MR_LOCAL;
 
     // improsing the modes must happen on (*prov), otherwise it's overwritten when done in hints
     m_verb("%s: is FI_MR_LOCAL required? %d", (*prov)->fabric_attr->prov_name,

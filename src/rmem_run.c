@@ -642,18 +642,36 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     rmem_prof_t prof = {.name = "send"};
     //------------------------------------------------
     // enqueue the requests
+    rmem_trigr_ptr* trigr = d->trigr;
+    if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
+        trigr = malloc(sizeof(rmem_trigr_ptr) * n_msg);
+    }
     for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_enqueue(param->mem, d->rma + j, NULL, device);
+        ofi_rma_enqueue(param->mem, d->rma + j, trigr + j, device);
+    }
+    if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
+        m_gpu_call(gpuMemcpySync((void*)d->trigr, trigr, n_msg * sizeof(rmem_trigr_ptr),
+                                 gpuMemcpyHostToDevice));
+        free((void*)trigr);
     }
     // send a readiness signal
     ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
     // compute the time difference
     ack_offset_sender(ack);
-    m_rmem_prof(prof, time) {
-        for (int j = 0; j < n_msg; ++j) {
-            ofi_rma_start(param->mem, d->rma + j, device);
+    if (device == RMEM_AWARE) {
+        m_rmem_prof(prof, time) {
+            for (int j = 0; j < n_msg; ++j) {
+                ofi_rma_start(param->mem, d->rma + j, device);
+            }
+            ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
         }
-        ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+    } else {
+        gpu_trigger_op(RMEM_GPU_PUT, n_msg, d->buf, param->msg_size, d->trigr, d->stream);
+        m_rmem_prof(prof, time) {
+            m_verb("rma_run_send_device: rmem_complete");
+            ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+        }
+        m_gpu_call(gpuStreamSynchronize(d->stream));
     }
     // send the starting time from the profiler
     ack_send_withtime(ack, &prof.t0);
@@ -662,6 +680,9 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
 }
 double rma_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
     return rma_fast_run_send_device(param, data, ack_ptr, RMEM_AWARE);
+}
+double rma_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_TRIGGER);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -726,4 +747,6 @@ double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     run_test_check(ttl_len, param->mem->buf);
     return sync_time;
 }
-
+double rma_fast_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return rma_fast_run_recv(param, data, ack_ptr);
+}
