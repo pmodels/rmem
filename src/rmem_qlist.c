@@ -113,7 +113,7 @@ rmem_trigr_ptr rmem_lmpsc_enq(rmem_lmpsc_t* q, rmem_lnode_t* elem) {
     return elem->d_ready_ptr;
 }
 
-#define m_n_release 100
+#define m_n_release 4
 void rmem_lmpsc_deq_ifready(rmem_lmpsc_t* q, rmem_lnode_t** elem, int* idx, int* cnt) {
     // prevents the reset while reading the list
     if (!(*cnt)) {

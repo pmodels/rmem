@@ -6,6 +6,7 @@
 #include "rmem_run_gpu.h"
 
 #include <math.h>
+#include <float.h>
 
 #include "pmi.h"
 #include "rmem_profile.h"
@@ -168,17 +169,17 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
     const int n_size = m_size_idx(param.msg_size) + 1;
     m_assert(n_msg >= 0 && n_size >= 0,"the number of msgs and size must be >=0");
     size_t ttl_sample = n_msg * n_size;
-    
+
     ofi_comm_t* comm = param.comm;
     // allocate the results
     timings->avg = malloc(sizeof(double) * ttl_sample);
     timings->ci = malloc(sizeof(double) * ttl_sample);
     // get the retry value
-    int* retry_ptr = malloc(sizeof(int));
+    int* retry_ptr = malloc(2 * sizeof(int));
     ofi_p2p_t p2p_retry = {
         .peer = peer(comm->rank, comm->size),
         .buf = retry_ptr,
-        .count = sizeof(int),
+        .count = 2 * sizeof(int),
         .tag = param.n_msg + 1,
     };
     if(is_sender(comm->rank)){
@@ -211,14 +212,16 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
             m_verb("memory %lu -----------------",msg_size);
             PMI_Barrier();
             double time[n_measure];
+            timings->avg[idx] = 0;
+            timings->ci[idx] = DBL_MAX;
             if (is_sender(comm->rank)) {
                 //---------------------------------------------------------------------------------
                 //- SENDER
                 //---------------------------------------------------------------------------------
                 sender->pre(&cparam, sender->data);
                 // loop
-                *retry_ptr = 1;
-                while (*retry_ptr) {
+                retry_ptr[0] = 1;
+                while (retry_ptr[0]) {
                     for (int it = -n_warmup; it < n_measure; ++it) {
                         time[(it >= 0) ? it : 0] = sender->run(&cparam, sender->data, &ack);
                     }
@@ -228,14 +231,18 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                     m_assert(idx < ttl_sample,
                              "ohoh: id = %d = %d * %d + %d, ttl_sample = %ld = %d * %d", idx,
                              idx_msg, n_size, idx_size, ttl_sample, n_msg, n_size);
-                    timings->avg[idx] = tavg;
-                    timings->ci[idx] = ci;
                     // get if we retry
                     ofi_p2p_start(&p2p_retry);
                     ofi_p2p_wait(&p2p_retry);
-                    m_verb("retry? %d", *retry_ptr);
+                    // decide if we keep the measure or not
+                    if (retry_ptr[1]) {
+                        timings->avg[idx] = tavg;
+                        timings->ci[idx] = ci;
+                    }
+                    m_verb("retry? %d, keep? %d", retry_ptr[0], retry_ptr[1]);
                 }
                 sender->post(&cparam, sender->data);
+                m_verb("\t%ld B in %.1f usec", msg_size * sizeof(int), timings->avg[idx]);
             } else {
                 //---------------------------------------------------------------------------------
                 //- RECVER
@@ -244,8 +251,8 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                 recver->pre(&cparam, recver->data);
                 m_verb("receiver->pre: done");
                 // profile stuff
-                *retry_ptr = 1;
-                while (*retry_ptr) {
+                retry_ptr[0] = 1;
+                while (retry_ptr[0]) {
                     for (int it = -n_warmup; it < n_measure; ++it) {
                         time[(it >= 0) ? it : 0] = recver->run(&cparam, recver->data, &ack);
                     }
@@ -253,18 +260,23 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
                     double tavg, ci;
                     rmem_get_ci(n_measure, time, &tavg, &ci);
                     m_verb("msg = %ld B: avg = %f, CI = %f, ratio = %f vs %f retry = %d/%d",
-                           msg_size, tavg, ci, ci / tavg, retry_threshold, *retry_ptr, retry_max);
-                    // store the results
+                           msg_size, tavg, ci, ci / tavg, retry_threshold, retry_ptr[0], retry_max);
                     m_assert(idx < ttl_sample, "ohoh: id = %d, ttl_sample = %ld", idx, ttl_sample);
-                    timings->avg[idx] = tavg;
-                    timings->ci[idx] = ci;
-                    // retry?
-                    if (*retry_ptr > retry_max || (ci / tavg) < retry_threshold) {
-                        *retry_ptr = 0;
+                    // keep the results?
+                    if (timings->ci[idx] > ci) {
+                        timings->avg[idx] = tavg;
+                        timings->ci[idx] = ci;
+                        retry_ptr[1] = 1;
                     } else {
-                        (*retry_ptr)++;
+                        retry_ptr[1] = 0;
                     }
-                    m_verb("retry? %d", *retry_ptr);
+                    // retry?
+                    if (retry_ptr[0] > retry_max || (ci / tavg) < retry_threshold) {
+                        retry_ptr[0] = 0;  // do not retry
+                    } else {
+                        retry_ptr[0]++;
+                    }
+                    m_verb("retry? %d keep? %d (ci = %f)", retry_ptr[0],retry_ptr[1],ci);
                     // send the information to the sender side
                     ofi_p2p_start(&p2p_retry);
                     ofi_p2p_wait(&p2p_retry);
