@@ -172,10 +172,10 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
 
     ofi_comm_t* comm = param.comm;
     // allocate the results
-    timings->avg = malloc(sizeof(double) * ttl_sample);
-    timings->ci = malloc(sizeof(double) * ttl_sample);
+    timings->avg = m_malloc(sizeof(double) * ttl_sample);
+    timings->ci = m_malloc(sizeof(double) * ttl_sample);
     // get the retry value
-    int* retry_ptr = malloc(2 * sizeof(int));
+    int* retry_ptr = m_malloc(2 * sizeof(int));
     ofi_p2p_t p2p_retry = {
         .peer = peer(comm->rank, comm->size),
         .buf = retry_ptr,
@@ -584,7 +584,7 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
     // back to the device
     rmem_trigr_ptr* trigr = d->trigr;
     if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
-        trigr = malloc(sizeof(rmem_trigr_ptr) * n_msg);
+        trigr = m_malloc(sizeof(rmem_trigr_ptr) * n_msg);
     }
     for (int j = 0; j < n_msg; ++j) {
         ofi_rma_enqueue(param->mem, d->rma + j, trigr + j, device);
@@ -644,7 +644,7 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     // enqueue the requests
     rmem_trigr_ptr* trigr = d->trigr;
     if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
-        trigr = malloc(sizeof(rmem_trigr_ptr) * n_msg);
+        trigr = m_malloc(sizeof(rmem_trigr_ptr) * n_msg);
     }
     for (int j = 0; j < n_msg; ++j) {
         ofi_rma_enqueue(param->mem, d->rma + j, trigr + j, device);

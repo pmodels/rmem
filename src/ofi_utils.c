@@ -217,7 +217,7 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
 
     // get the best provider's name
     struct fi_info* hints = fi_allocinfo();
-    hints->fabric_attr->prov_name = malloc(strlen(prov_name) + 1);
+    hints->fabric_attr->prov_name = m_malloc(strlen(prov_name) + 1);
     strcpy(hints->fabric_attr->prov_name, prov_name);
     fi_freeinfo(prov_list);  // no need of prov_list anymore
 

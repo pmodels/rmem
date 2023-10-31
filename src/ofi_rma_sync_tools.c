@@ -146,8 +146,8 @@ int ofi_rmem_am_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_ofi_call(fi_setopt(&mem->ofi.sync_trx->srx->fid, FI_OPT_ENDPOINT, FI_OPT_MIN_MULTI_RECV,
                          &optlen, sizeof(optlen)));
     // allocate the am resources
-    mem->ofi.sync.am.buf = malloc(m_ofi_am_buf_num * sizeof(ofi_am_buf_t));
-    mem->ofi.sync.am.cqdata = malloc(m_ofi_am_buf_num * sizeof(ofi_cqdata_t));
+    mem->ofi.sync.am.buf = m_malloc(m_ofi_am_buf_num * sizeof(ofi_am_buf_t));
+    mem->ofi.sync.am.cqdata = m_malloc(m_ofi_am_buf_num * sizeof(ofi_cqdata_t));
     // post the buf to the EP
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
@@ -156,7 +156,7 @@ int ofi_rmem_am_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     for (int i = 0; i < m_ofi_am_buf_num; ++i) {
         // register the am memory
         ofi_am_buf_t* am_buf = mem->ofi.sync.am.buf + i;
-        am_buf->buf = malloc(m_ofi_am_buf_size);
+        am_buf->buf = m_malloc(m_ofi_am_buf_size);
         m_rmem_call(ofi_util_mr_reg(am_buf->buf, m_ofi_am_buf_size, FI_RECV, comm, &am_buf->mr.mr,
                                     &am_buf->mr.desc, NULL));
         m_rmem_call(ofi_util_mr_bind(mem->ofi.sync_trx->ep, am_buf->mr.mr, NULL, comm));

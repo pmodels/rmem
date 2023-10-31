@@ -52,7 +52,7 @@ void rmem_lmpsc_create(rmem_lmpsc_t* q) {
         m_gpu_call(gpuHostAlloc((void**)&q->h_trigr_list, m_gpu_page_size, gpuHostAllocMapped));
         m_gpu_call(gpuHostGetDevicePointer((void**)&q->d_trigr_list, (void*)q->h_trigr_list, 0));
     } else {
-        q->h_trigr_list = malloc(m_gpu_page_size);
+        q->h_trigr_list = m_malloc(m_gpu_page_size);
         q->d_trigr_list = q->h_trigr_list;
     }
     // init the reset lock

@@ -26,6 +26,9 @@
 
 #define M_BACKTRACE_HISTORY 50
 
+// alignment on the cache line size
+#define m_alignment 64
+
 //==============================================================================
 void PrintBackTrace();
 
@@ -51,6 +54,12 @@ void PrintBackTrace();
         __typeof__(a) m_sign_a_ = (a);                           \
         __typeof__(a) m_sign_zero_ = 0;                          \
         (m_sign_zero_ < m_sign_a_) - (m_sign_a_ < m_sign_zero_); \
+    })
+
+#define m_malloc(s)                                                           \
+    ({                                                                        \
+        size_t m_malloc_size = ((size_t)s + (m_alignment - 1)) / m_alignment; \
+        aligned_alloc(m_alignment, m_malloc_size* m_alignment);               \
     })
 
 //==============================================================================

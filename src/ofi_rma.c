@@ -192,14 +192,14 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     // allocate trigr pool
     // m_countr_init(&mem->ofi.qtrigr.trigr_count);
     // // allocate the bitmap to track completion of the requests
-    // mem->ofi.qtrigr.pool_bitmap = malloc(m_gpu_n_trigr / 8 + (m_gpu_n_trigr % 8) > 0);
+    // mem->ofi.qtrigr.pool_bitmap = m_malloc(m_gpu_n_trigr / 8 + (m_gpu_n_trigr % 8) > 0);
     // if (M_HAVE_GPU) {
     //     m_gpu_call(gpuHostAlloc((void**)&mem->ofi.qtrigr.h_trigr_pool, m_gpu_page_size,
     //                             gpuHostAllocMapped));
     //     m_gpu_call(gpuHostGetDevicePointer((void**)&mem->ofi.qtrigr.d_trigr_pool,
     //                                        (void*)mem->ofi.qtrigr.h_trigr_pool, 0));
     // } else {
-    //     mem->ofi.qtrigr.h_trigr_pool = malloc(m_gpu_page_size);
+    //     mem->ofi.qtrigr.h_trigr_pool = m_malloc(m_gpu_page_size);
     //     mem->ofi.qtrigr.d_trigr_pool = mem->ofi.qtrigr.h_trigr_pool;
     // }
     // // async progress
@@ -218,7 +218,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         .xctx.epoch_ptr = mem->ofi.sync.epch,
         .n_tx = mem->ofi.n_tx,
     };
-    mem->ofi.thread_arg.do_progress = malloc(sizeof(countr_t));
+    mem->ofi.thread_arg.do_progress = m_malloc(sizeof(countr_t));
     m_countr_init(mem->ofi.thread_arg.do_progress);
     m_pthread_call(
         pthread_create(&mem->ofi.progress, &pthread_attr, &ofi_tthread_main, &mem->ofi.thread_arg));
