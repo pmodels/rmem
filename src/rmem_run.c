@@ -510,7 +510,7 @@ void rma_alloc(run_param_t* param, void* data) {
             free(tmp);
         } else {
             d->buf = tmp;
-            d->trigr = malloc(sizeof(rmem_trigr_ptr) * n_msg);
+            d->trigr = m_malloc(sizeof(rmem_trigr_ptr) * n_msg);
         }
     }
 }
@@ -633,11 +633,8 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     const int buddy = peer(param->comm->rank, param->comm->size);
 
     // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
-    if (param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL ||
-        param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) {
-        return 0.0;
-    }
-
+    bool do_real_fast = !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) &&
+                        !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     double time;
     rmem_prof_t prof = {.name = "send"};
     //------------------------------------------------
@@ -655,7 +652,11 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
         free((void*)trigr);
     }
     // send a readiness signal
-    ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
+    if (do_real_fast) {
+        ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
+    } else {
+        ofi_rmem_start(1, &buddy, param->mem, param->comm);
+    }
     // compute the time difference
     ack_offset_sender(ack);
     if (device == RMEM_AWARE) {
@@ -663,13 +664,21 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
             for (int j = 0; j < n_msg; ++j) {
                 ofi_rma_start(param->mem, d->rma + j, device);
             }
-            ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+            if (do_real_fast) {
+                ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+            } else {
+                ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+            }
         }
     } else {
         gpu_trigger_op(RMEM_GPU_PUT, n_msg, d->buf, param->msg_size, d->trigr, d->stream);
         m_rmem_prof(prof, time) {
             m_verb("rma_run_send_device: rmem_complete");
-            ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+            if (do_real_fast) {
+                ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+            } else {
+                ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+            }
         }
         m_gpu_call(gpuStreamSynchronize(d->stream));
     }
@@ -720,19 +729,25 @@ double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     const int buddy = peer(param->comm->rank, param->comm->size);
 
     // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
-    if (param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL ||
-        param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE) {
-        return 0.0;
-    }
+    bool do_real_fast = !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) &&
+                        !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
 
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
+    if (do_real_fast) {
+        ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
+    } else {
+        ofi_rmem_post(1, &buddy, param->mem, param->comm);
+    }
     // obtain the acknowledgment
     const double offset = ack_offset_recver(ack);
     m_rmem_prof(prof, time) {
-        ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
+        if (do_real_fast) {
+            ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
+        } else {
+            ofi_rmem_wait(1, &buddy, param->mem, param->comm);
+        }
     }
     // T sender = t recver + offset => T recver = T sender - offset
     // time elapsed = (T recver -  (T sender - offset))
