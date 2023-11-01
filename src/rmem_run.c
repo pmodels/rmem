@@ -391,7 +391,7 @@ static double p2p_run_send_common(run_param_t* param, void* data, void* ack_ptr,
         }
     } else {
         m_rmem_prof(prof, time) {
-            gpu_trigger_op(RMEM_GPU_P2P, n_msg, d->buf, param->msg_size, NULL, d->stream);
+            gpu_trigger_op(RMEM_GPU_P2P, start_id, n_msg, d->buf, param->msg_size, NULL, d->stream);
             m_gpu_call(gpuStreamSynchronize(d->stream));
             for (int j = 0; j < n_msg; ++j) {
                 const int id = (start_id + j) % n_msg;
@@ -594,6 +594,8 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
                                  gpuMemcpyHostToDevice));
         free((void*)trigr);
     }
+    // get the start id
+    const int start_id = rmem_get_rand(n_msg);
     // send a readiness signal triggers the time measurement on the recv
     ack_send(ack);
     // start the request
@@ -602,13 +604,14 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
         // only measure injection on the send side
         m_rmem_prof(prof, time) {
             for (int j = 0; j < n_msg; ++j) {
-                ofi_rma_start(param->mem, d->rma + j, RMEM_AWARE);
+                const int id = (start_id + j) % n_msg;
+                ofi_rma_start(param->mem, d->rma + id, RMEM_AWARE);
             }
             m_verb("rma_run_send_device: rmem_complete");
             ofi_rmem_complete(1, &buddy, param->mem, param->comm);
         }
     } else {
-        gpu_trigger_op(RMEM_GPU_PUT, n_msg, d->buf, param->msg_size, d->trigr, d->stream);
+        gpu_trigger_op(RMEM_GPU_PUT, start_id, n_msg, d->buf, param->msg_size, d->trigr, d->stream);
         m_rmem_prof(prof, time) {
             m_verb("rma_run_send_device: rmem_complete");
             ofi_rmem_complete(1, &buddy, param->mem, param->comm);
@@ -651,6 +654,8 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
                                  gpuMemcpyHostToDevice));
         free((void*)trigr);
     }
+    // get the start id
+    const int start_id = rmem_get_rand(n_msg);
     // send a readiness signal
     if (do_real_fast) {
         ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
@@ -662,7 +667,8 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     if (device == RMEM_AWARE) {
         m_rmem_prof(prof, time) {
             for (int j = 0; j < n_msg; ++j) {
-                ofi_rma_start(param->mem, d->rma + j, device);
+                const int id = (start_id + j) % n_msg;
+                ofi_rma_start(param->mem, d->rma + id, RMEM_AWARE);
             }
             if (do_real_fast) {
                 ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
@@ -671,7 +677,7 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
             }
         }
     } else {
-        gpu_trigger_op(RMEM_GPU_PUT, n_msg, d->buf, param->msg_size, d->trigr, d->stream);
+        gpu_trigger_op(RMEM_GPU_PUT, start_id, n_msg, d->buf, param->msg_size, d->trigr, d->stream);
         m_rmem_prof(prof, time) {
             m_verb("rma_run_send_device: rmem_complete");
             if (do_real_fast) {
