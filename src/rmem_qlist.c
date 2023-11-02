@@ -2,9 +2,21 @@
 #include "gpu.h"
 #include "rmem.h"
 
+#define m_max_n_trigr   (6144)
 #define m_gpu_page_size (1 << 16)
-#define m_gpu_n_trigr   (m_gpu_page_size / sizeof(uint64_t))
-#define m_gpu_n_bm (m_gpu_n_trigr / 8 + ((m_gpu_n_trigr % 8) > 0))
+
+/**
+ * @brief find the next closest length multiple of the page_size
+ */
+static size_t qlist_ttl_n_trigr() {
+    m_assert(!(m_gpu_page_size % sizeof(uint64_t)), "the gpu page should be a multiple of 8");
+    const size_t len = m_max_n_trigr * sizeof(uint64_t);
+    const size_t ttl_len = (len + m_gpu_page_size - 1) / m_gpu_page_size;
+    return (ttl_len * m_gpu_page_size) / sizeof(uint64_t);
+}
+static size_t qlist_size_bitmap(const size_t n_trigr) {
+    return (n_trigr / 8 + ((n_trigr % 8) > 0));
+}
 
 static uint8_t mask[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 
@@ -17,8 +29,6 @@ static void trigr_init(rmem_lnode_t* ptr, rmem_trigr_ptr val) {
 }
 static rmem_lnode_t* trigr_isready(rmem_trigr_ptr array, const size_t len, uint8_t* bitmap,
                                    int* idx) {
-    m_assert((*idx) / 8 < m_gpu_n_bm, "idx = %d vs n_bm = %ld, n_trigr = %ld", *idx, m_gpu_n_bm,
-             m_gpu_n_trigr);
     // get the index inside the uint8_t and the index of the 8 bit
     uint8_t ibit = (*idx) % 8;
     const uint8_t bit = bitmap[(*idx) / 8];
@@ -47,9 +57,11 @@ void rmem_lmpsc_create(rmem_lmpsc_t* q) {
     m_countr_init(&q->ongoing);
     m_countr_init(&q->list_count);
     // allocate the bitmap to track completion of the requests, pad if necessary
-    q->list_bm = calloc(m_gpu_n_bm, 1);
+    const int n_trigr = qlist_ttl_n_trigr();
+    q->list_bm = calloc(qlist_size_bitmap(n_trigr), 1);
     if (M_HAVE_GPU) {
-        m_gpu_call(gpuHostAlloc((void**)&q->h_trigr_list, m_gpu_page_size, gpuHostAllocMapped));
+        m_gpu_call(
+            gpuHostAlloc((void**)&q->h_trigr_list, n_trigr * sizeof(uint64_t), gpuHostAllocMapped));
         m_gpu_call(gpuHostGetDevicePointer((void**)&q->d_trigr_list, (void*)q->h_trigr_list, 0));
     } else {
         q->h_trigr_list = m_malloc(m_gpu_page_size);
@@ -82,7 +94,8 @@ void rmem_lmpsc_done(rmem_lmpsc_t* q, rmem_lnode_t* elem) {
  */
 static void rmem_lmpsc_requeue(rmem_lmpsc_t* q) {
     m_assert(m_countr_load(&q->ongoing) == 0, "cannot have ongoing operations on the list");
-    for (int i = 0; i < m_gpu_n_bm; i++) {
+    const int n_trigr = qlist_ttl_n_trigr();
+    for (int i = 0; i < qlist_size_bitmap(n_trigr); i++) {
         q->list_bm[i] = 0xff;
     }
 }
@@ -101,8 +114,9 @@ rmem_trigr_ptr rmem_lmpsc_enq(rmem_lmpsc_t* q, rmem_lnode_t* elem) {
     int pool_idx = m_countr_load(&q->list_count);
     do {
         // repeat while we don't have the right pool_idx
-        m_assert(pool_idx < m_gpu_n_trigr, "we have reached maximum enqueuing capacity: %d/%ld",
-                 pool_idx, m_gpu_n_trigr);
+        m_assert(pool_idx < qlist_ttl_n_trigr(),
+                 "we have reached maximum enqueuing capacity: %d/%ld", pool_idx,
+                 qlist_ttl_n_trigr());
         elem->h_ready_ptr = q->h_trigr_list + pool_idx;
         elem->d_ready_ptr = q->d_trigr_list + pool_idx;
         trigr_init(elem, elem->h_ready_ptr);
