@@ -377,7 +377,7 @@ int ofi_rmem_start_fiatomic(const int nrank, const int* rank, ofi_rmem_t* mem,
 /** @brief progress the cq in trx until the value of cntr has reached the threshold value
  * the epoch_ptr is used to handle special context when doing progress
  */
-int ofi_rmem_progress_wait(const int threshold, countr_t* cntr, int n_trx, ofi_rma_trx_t* trx,
+int ofi_rmem_progress_wait_noyield(const int threshold, countr_t* cntr, int n_trx, ofi_rma_trx_t* trx,
                            countr_t* epoch_ptr) {
     m_assert(n_trx > 0, "nothing to wait on");
     m_assert(trx, "nothing to wait on");
@@ -392,7 +392,6 @@ int ofi_rmem_progress_wait(const int threshold, countr_t* cntr, int n_trx, ofi_r
         progress.cq = trx[i].cq;
         m_ofi_call(ofi_progress(&progress));
         i = (i + 1) % (n_trx);
-        sched_yield();
     }
     // remove the values to the counter
     if (threshold) {

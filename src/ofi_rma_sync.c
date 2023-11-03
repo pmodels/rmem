@@ -182,7 +182,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     // if we are not fencing, progress every EP now, waiting for the completion
     // if we are fencing, then progress will be made later
     if (!is_fence) {
-        m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
+        m_rmem_call(ofi_rmem_progress_wait_noyield(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
                                            mem->ofi.data_trx, mem->ofi.sync.epch));
     }
 
@@ -207,7 +207,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         // make sure the ack are done, progress the sync only
         int to_wait_for = (is_fence) ? (threshold + nrank) : nrank;
         ofi_rma_trx_t* trx = (is_fence) ? mem->ofi.data_trx : mem->ofi.sync_trx;
-        m_rmem_call(ofi_rmem_progress_wait(to_wait_for, m_rma_mepoch_local(mem), 1, trx,
+        m_rmem_call(ofi_rmem_progress_wait_noyield(to_wait_for, m_rma_mepoch_local(mem), 1, trx,
                                            mem->ofi.sync.epch));
     }
     //----------------------------------------------------------------------------------------------
@@ -247,8 +247,8 @@ int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* com
     // disable progress in the helper thread
     m_countr_store(mem->ofi.thread_arg.do_progress, 0);
     // wait for completion of the requested operations
-    m_rmem_call(ofi_rmem_progress_wait(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx,
-                                       mem->ofi.data_trx, mem->ofi.sync.epch));
+    m_rmem_call(ofi_rmem_progress_wait_noyield(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx,
+                                               mem->ofi.data_trx, mem->ofi.sync.epch));
     //----------------------------------------------------------------------------------------------
     m_verb("completed fast");
     //----------------------------------------------------------------------------------------------
@@ -312,7 +312,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         case (M_OFI_RCMPL_CQ_DATA): {
             // WARNING: every put comes with data that will add 1 to the epoch[2] value
             // wait for it to go back up to 0
-            m_rmem_call(ofi_rmem_progress_wait(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
+            m_rmem_call(ofi_rmem_progress_wait_noyield(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
                                                mem->ofi.data_trx, mem->ofi.sync.epch));
         } break;
     };
@@ -364,7 +364,7 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
             // the number of calls to wait for
             m_countr_fetch_add(m_rma_mepoch_remote(mem), -ncalls);
             // wait for it to come down
-            m_rmem_call(ofi_rmem_progress_wait(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
+            m_rmem_call(ofi_rmem_progress_wait_noyield(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
                                                mem->ofi.data_trx, mem->ofi.sync.epch));
         } break;
     }
