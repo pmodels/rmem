@@ -39,7 +39,7 @@ void* ofi_tthread_main(void* arg) {
             m_verb("THREAD: new task done, counter is now %d", m_countr_load(&workq->ongoing));
         } else if (m_countr_load(thread_arg->do_progress) && m_countr_load(&workq->ongoing)) {
             // make progress if allowed AND we have outgoing operations
-            for (int i = 0; i < thread_arg->n_tx; ++i) {
+            for (int i = 0; i < thread_arg->n_tx+1; ++i) {
                 progress.cq = thread_arg->data_trx[i].cq;
                 m_ofi_call(ofi_progress(&progress));
             }

@@ -174,7 +174,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     };
     while (m_countr_load(&mem->ofi.qtrigr.ongoing) &&
            (m_countr_load(m_rma_mepoch_local(mem)) < threshold)) {
-        m_ofi_call(ofi_progress(&progress));
+        // m_ofi_call(ofi_progress(&progress));
         sched_yield();
     }
     // disable progress in the helper thread
@@ -241,7 +241,7 @@ int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* com
     };
     while (m_countr_load(&mem->ofi.qtrigr.ongoing) &&
            (m_countr_load(m_rma_mepoch_local(mem)) < threshold)) {
-        m_ofi_call(ofi_progress(&progress));
+        // m_ofi_call(ofi_progress(&progress));
         sched_yield();
     }
     // disable progress in the helper thread
