@@ -68,12 +68,12 @@ typedef enum {
 #define gpuMalloc               hipMalloc
 #define gpuFree                 hipFree
 #define gpuFreeHost             hipFreeHost
-#define gpuHostAlloc            hipHostAlloc
+#define gpuHostAlloc            hipHostMalloc
 #define gpuHostRegister         hipHostRegister
 #define gpuHostUnregister       hipHostUnregister
 #define gpuHostGetDevicePointer hipHostGetDevicePointer
 #define gpuHostRegisterMapped   hipHostRegisterMapped
-#define gpuHostAllocMapped      hipHostAllocMapped
+#define gpuHostAllocMapped      hipHostMallocMapped
 #define gpuMemcpyHostToDevice   hipMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost   hipMemcpyDeviceToHost
 #define gpuMemcpyAsync          hipMemcpyAsync
