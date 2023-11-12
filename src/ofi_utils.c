@@ -460,8 +460,10 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
             flags |= FI_RMA_EVENT;
         }
         // get device and iface
-        int device = 0; // always 0, we don't support multiple GPUs under the same rank
         enum fi_hmem_iface iface;
+        int device = 0;  // always 0, we don't support multiple GPUs under the same rank
+        int handle = 0;  // usually the same as device, might be different if the handle is obtained
+                         // with gpuDeviceGet
         gpuMemoryType_t mtype = gpuMemoryType(buf);
         switch (mtype) {
             case (gpuMemoryTypeSystem):
@@ -470,13 +472,16 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
             case (gpuMemoryTypeHost):
                 iface = FI_HMEM_GPU;
                 flags |= FI_HMEM_HOST_ALLOC;
+                m_gpu_call(gpuDeviceGet(&handle, 0));
                 break;
             case (gpuMemoryTypeDevice):
                 iface = FI_HMEM_GPU;
                 flags |= FI_HMEM_DEVICE_ONLY;
+                m_gpu_call(gpuDeviceGet(&handle, 0));
                 break;
             case (gpuMemoryTypeManaged):
                 iface = FI_HMEM_GPU;
+                m_assert(false, "I cannot handle managed memory");
                 break;
         };
         // register
@@ -496,7 +501,7 @@ int ofi_util_mr_reg(void* buf, size_t count, uint64_t access, ofi_comm_t* comm,
             .requested_key =rkey,
             .context = NULL,
             .iface = iface,
-            .device = device,
+            .device = handle,
         };
         m_verb("registering memory: key = %llu, flags & FI_RMA_EVENT? %d", rkey,
                (flags & FI_RMA_EVENT) > 0);

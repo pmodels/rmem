@@ -37,6 +37,7 @@
 #define gpuMemcpyHostToDevice   cudaMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost   cudaMemcpyDeviceToHost
 #define gpuMemcpyAsync          cudaMemcpyAsync
+#define gpuDeviceGet            cuDeviceGet
 
 // stream
 #define gpuStreamCreate      cudaStreamCreate
@@ -76,6 +77,7 @@ typedef enum {
 #define gpuMemcpyHostToDevice   hipMemcpyHostToDevice
 #define gpuMemcpyDeviceToHost   hipMemcpyDeviceToHost
 #define gpuMemcpyAsync          hipMemcpyAsync
+#define gpuDeviceGet            hipDeviceGet
 
 // stream
 #define gpuStreamCreate      hipStreamCreate
