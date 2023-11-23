@@ -9,6 +9,7 @@
 #include "pmi_utils.h"
 #include "rdma/fabric.h"
 #include "rdma/fi_domain.h"
+#include <rdma/fi_trigger.h>
 
 #if __has_include("rdma/fi_cxi_ext.h")
 #include "rdma/fi_cxi_ext.h"
@@ -61,6 +62,24 @@ int ofi_ctx_init(const int comm_size, struct fi_info* prov, struct fid_domain* d
 
     // enable the endpoint
     m_ofi_call(fi_enable((*ctx)->p2p_ep));
+
+    // get the maximum of triggered opt (not used, curiosity only)
+    // see https://ofiwg.github.io/libfabric/main/man/fi_endpoint.3.html
+    size_t opt_len = 0;
+#if (FI_CXI_DOM_OPS)
+    if (strcmp(ofi->prov->domain_attr->name, "cxi")) {
+        m_log("[INFO] using CXI hybrid MR");
+        struct fi_cxi_dom_ops* dom_ops;
+        m_ofi_call(fi_open_ops(&ofi->domain->fid, FI_CXI_DOM_OPS_ID, 0, (void**)&dom_ops, NULL));
+        m_ofi_call(dom_ops->get_dwq_depth(&ofi->domain->fid, &opt_len));
+    }
+#else
+    int res = fi_getopt(&(*ctx)->p2p_ep->fid, FI_OPT_ENDPOINT, FI_OPT_XPU_TRIGGER, NULL, &opt_len);
+    if (res == -FI_EOPNOTSUPP) {
+        opt_len = 0;
+    }
+#endif
+    m_log("GPU triggering supported: %ld requests", opt_len);
 
     //----------------------------------------------------------------------------------------------
     // fill the address vector, needs an ep to be connected

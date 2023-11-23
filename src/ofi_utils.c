@@ -282,6 +282,17 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     m_ofi_test_info(hints, tx_attr->comp_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->comp_order, FI_ORDER_NONE);
 
+    //----------------------------------------------------------------------------------------------
+    // go over the provs and select the best NIC
+    for (struct fi_info* cprov = hints; cprov; cprov = cprov->next) {
+        if (cprov->nic) {
+            m_log("prov %s has NIC %s with bw = %ld", cprov->fabric_attr->name,
+                  cprov->nic->device_attr->name, cprov->nic->link_attr->speed);
+        } else {
+            m_log("no NIC information");
+        }
+    }
+    //----------------------------------------------------------------------------------------------
     // check the mode arguments now, fail is some modes are required
     m_ofi_call(fi_getinfo(ofi_ver, NULL, NULL, 0ULL, hints, prov));
     m_assert(*prov, "The provider list is empty");
