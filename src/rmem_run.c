@@ -14,9 +14,8 @@
 #define n_measure       50
 #define n_warmup        5
 #define retry_threshold 0.025
-#define retry_max       10
+#define retry_max       1
 #define n_repeat_offset 10
-
 
 /**
  * @brief returns a random number [0; max[

@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
     // run parameter
     run_param_t param = {
         .msg_size = 1 << 20,
-        .n_msg = 64, 
+        .n_msg = 128, 
         .comm = &comm, 
         .mem = &rma_mem
     };
