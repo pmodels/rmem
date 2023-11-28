@@ -350,7 +350,6 @@ typedef struct {
     ofi_cqdata_t read_cqdata; //!< cqdata used to read the value
 } ofi_mem_sig_t;
 
-
 #define m_rma_epoch_post(e)    (e + 0)                 // posted
 #define m_rma_epoch_cmpl(e)    (e + 1)                 // completed
 #define m_rma_epoch_remote(e)  (e + 2)                 // remote fi_write
@@ -372,7 +371,7 @@ typedef struct {
  */
 typedef struct {
     countr_t epch[m_rma_n_epoch];
-    countr_t* icntr;       //!< array of fi_write counter (for each rank)
+    int* icntr;            //!< array of fi_write counter (for each rank)
     ofi_mem_sig_t ps_sig;  //!< atomic sync for RTR
     struct {
         ofi_am_buf_t* buf;     //!< active messaging buffer

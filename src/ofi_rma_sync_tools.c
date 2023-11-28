@@ -40,12 +40,11 @@ static int ofi_rmem_post_send(const int nrank, const int* rank, ofi_rmem_t* mem,
     return m_success;
 }
 static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* mem,
-                                  ofi_comm_t* comm, int* ttl_data, rmem_ack_t ack) {
+                                  ofi_comm_t* comm, rmem_ack_t ack) {
     // get the remote completion mode
     const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     const bool is_dcmpl = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     // count the number of calls issued for each of the ranks and notify them
-    *ttl_data = 0;
     const uint64_t flag = (is_fence) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : FI_TRANSMIT_COMPLETE;
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
@@ -53,10 +52,9 @@ static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* 
     };
     for (int i = 0; i < nrank; ++i) {
         int issued_rank = 0;
-        // if we are delivery complete, this is no needed and saves an atomic operation
+        // if we are delivery complete, this is no needed
         if (!is_dcmpl && !is_fence) {
-            issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
-            *ttl_data += issued_rank;
+            issued_rank = mem->ofi.sync.icntr[rank[i]];
         }
 
         // if using fence, we need to fence ALL of the data_trx, if not we only issue on the sync
@@ -192,11 +190,10 @@ int ofi_rmem_am_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
 int ofi_rmem_post_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     return ofi_rmem_post_send(nrank, rank, mem, comm, M_RMEM_ACK_AM);
 }
-int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
-                             int* ttl_data) {
+int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_FENCE,
              "we cannot used MSG to close a FENCE completion tracking mode");
-    return ofi_rmem_complete_send(nrank, rank, mem, comm, ttl_data, M_RMEM_ACK_AM);
+    return ofi_rmem_complete_send(nrank, rank, mem, comm, M_RMEM_ACK_AM);
 }
 
 //==================================================================================================
@@ -205,9 +202,8 @@ int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, 
 int ofi_rmem_post_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     return ofi_rmem_post_send(nrank, rank, mem, comm, M_RMEM_ACK_TAGGED);
 }
-int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
-                              int* ttl_data) {
-    return ofi_rmem_complete_send(nrank, rank, mem, comm, ttl_data, M_RMEM_ACK_TAGGED);
+int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
+    return ofi_rmem_complete_send(nrank, rank, mem, comm, M_RMEM_ACK_TAGGED);
 }
 int ofi_rmem_start_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
                                  ofi_comm_t* comm) {
@@ -402,3 +398,24 @@ int ofi_rmem_progress_wait_noyield(const int threshold, countr_t* cntr, int n_tr
 }
 
 //==================================================================================================
+// ISSUE DTC tool functions
+//==================================================================================================
+int ofi_rmem_issue_dtc(rmem_complete_ack_t* ack) {
+    // acknowledgement is submitted to the
+    // send the ack if not delivery complete, if a fence is needed, it's added to the flag
+    // directly in the call to (t)send
+    switch (ack->comm->prov_mode.dtc_mode) {
+        case (M_OFI_DTC_NULL):
+            m_assert(0, "should not be NULL here");
+            break;
+        case (M_OFI_DTC_TAGGED):
+            m_rmem_call(ofi_rmem_complete_fitsend(ack->nrank, ack->rank, ack->mem, ack->comm));
+            break;
+        case (M_OFI_DTC_MSG):
+            m_rmem_call(ofi_rmem_complete_fisend(ack->nrank, ack->rank, ack->mem, ack->comm));
+            break;
+    };
+    return m_success;
+}
+
+// end-of-file

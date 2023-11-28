@@ -5,6 +5,7 @@
 #include "ofi.h"
 #include "rmem_qlist.h"
 #include "rmem_utils.h"
+#include "ofi_rma_sync_tools.h"
 
 #define N_CANCEL            1000
 #define m_ofi_rma_offset(a) (offsetof(ofi_rma_t, ofi.a) - offsetof(ofi_rma_t, ofi.qnode))
@@ -34,7 +35,17 @@ void* ofi_tthread_main(void* arg) {
         rmem_lmpsc_deq_ifready(workq, &task, &search_idx, &idequeue);
         if (task) {
             m_assert(task->h_ready_ptr[0], "the task is not ready");
-            ofi_rma_start_from_task(task);
+            // choose the right action to take
+            switch (task->kind) {
+                case (LNODE_KIND_RMA): {
+                    ofi_rma_start_from_task(task);
+                } break;
+                case (LNODE_KIND_COMPL): {
+                    ofi_rmem_issue_dtc((rmem_complete_ack_t*)task);
+                } break;
+                default:
+                    m_assert(false, "unknown kind argument");
+            }
             rmem_lmpsc_done(workq, task);
             m_verb("THREAD: new task done, counter is now %d", m_countr_load(&workq->ongoing));
         } else if (m_countr_load(thread_arg->do_progress) && m_countr_load(&workq->ongoing)) {

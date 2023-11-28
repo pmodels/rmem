@@ -26,10 +26,7 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
     }
 
     // allocate the counters tracking the number of issued calls
-    mem->ofi.sync.icntr = calloc(comm->size, sizeof(countr_t));
-    for (int i = 0; i < comm->size; ++i) {
-        m_countr_init(mem->ofi.sync.icntr + i);
-    }
+    mem->ofi.sync.icntr = calloc(comm->size, sizeof(int));
 
     //---------------------------------------------------------------------------------------------
     // register the memory given by the user
@@ -354,6 +351,7 @@ static int ofi_rma_init(ofi_rma_t* rma, ofi_rmem_t* mem, const int ctx_id, ofi_c
     //----------------------------------------------------------------------------------------------
     // setup the ready flag to 1 to avoid issues
     rma->ofi.qnode.h_ready_ptr = 0;
+    rma->ofi.qnode.kind = LNODE_KIND_RMA;
     //----------------------------------------------------------------------------------------------
     // flag
     const bool do_inject = false; //(rma->count < comm->prov->tx_attr->inject_size);
@@ -428,15 +426,8 @@ int ofi_rma_rput_init(ofi_rma_t* put, ofi_rmem_t* pmem, const int ctx_id, ofi_co
 }
 int ofi_rma_enqueue(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_trigr_ptr* trigr, rmem_device_t dev) {
     if (dev == RMEM_TRIGGER) {
-        // get the pool counter
-        // const size_t pool_idx = m_countr_fetch_add(&mem->ofi.qtrigr.trigr_count, 1);
-        // m_assert(pool_idx < m_gpu_n_trigr, "we have reached maximum enqueuing capacity: %ld/%ld",
-        //          pool_idx, m_gpu_max_op);
-        // rma->ofi.qnode.h_ready_ptr = mem->ofi.qtrigr.h_trigr_pool + pool_idx;
-        // rma->ofi.qnode.d_ready_ptr = mem->ofi.qtrigr.d_trigr_pool + pool_idx;
-        // trigr_init(&rma->ofi.qnode,rma->ofi.qnode.h_ready_ptr);
         // enqueue the operation
-        m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
+        mem->ofi.sync.icntr[rma->peer]++;
         *trigr = rmem_lmpsc_enq(&mem->ofi.qtrigr, &rma->ofi.qnode);
         m_verb("enqueuing: trigger value = %p", trigr[0]);
     } else {
@@ -461,7 +452,7 @@ int ofi_rma_start(ofi_rmem_t* mem, ofi_rma_t* rma, rmem_device_t dev) {
     } else {
         m_verb("starting %p",&rma->ofi.qnode);
         // trigger from the host: increment the counters first
-        m_countr_fetch_add(&mem->ofi.sync.icntr[rma->peer], 1);
+        mem->ofi.sync.icntr[rma->peer]++;
         m_rmem_call(ofi_rma_start_from_task(&rma->ofi.qnode));
     }
     return m_success;
@@ -500,7 +491,7 @@ int ofi_rma_start_from_task(rmem_lnode_t* task) {
         .data = *msg_data,
         .context = &msg_cq->ctx,
     };
-    m_verb("THREAD: doing it on EP %p", *ep);
+    m_verb("THREAD: doing RMA on EP %p", *ep);
     m_ofi_call_again(fi_writemsg(*ep, &msg, *msg_flags), rma_prog);
     // if we had to get a cq entry and the inject, mark is as done
     if ((*msg_flags) & FI_INJECT && (*msg_flags) & FI_COMPLETION) {

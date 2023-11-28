@@ -22,6 +22,15 @@
 #endif
 
 //==================================================================================================
+typedef struct {
+    const int nrank;
+    const int* rank;
+    ofi_rmem_t* mem;
+    ofi_comm_t* comm;
+} rmem_complete_ack_t;
+int ofi_rmem_issue_dtc(rmem_complete_ack_t* ack);
+
+//==================================================================================================
 int ofi_rmem_am_init(ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_am_free(ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_am_repost(ofi_cqdata_t* cqdata, ofi_progress_t* progress);
@@ -36,10 +45,8 @@ int ofi_rmem_post_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_
 int ofi_rmem_post_fiatomic(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 
 //==================================================================================================
-int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
-                              int* ttl_data);
-int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm,
-                             int* ttl_data);
+int ofi_rmem_complete_fitsend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
+int ofi_rmem_complete_fisend(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 int ofi_rmem_wait_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm);
 //==================================================================================================
 int ofi_rmem_progress_wait_noyield(const int threshold, countr_t* cntr, int n_trx, ofi_rma_trx_t* trx,

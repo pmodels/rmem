@@ -68,6 +68,11 @@ int ofi_rmem_post_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_co
     return m_success;
 }
 //==================================================================================================
+/**
+ * @brief start the exposure epoch
+ *
+ * This is a blocking function, it waits for the "post" call on the target side
+ */
 int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
 #ifndef NDEBUG
     m_verb("starting");
@@ -122,7 +127,7 @@ int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_c
     m_rmem_call(ofi_rmem_start(nrank, rank, mem, comm));
     // reset the value of icntr, it's needed if we use the fast completion mechanism
     for (int i = 0; i < nrank; ++i) {
-        m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
+        mem->ofi.sync.icntr[rank[i]] = 0;
     }
     return m_success;
 }
@@ -130,39 +135,30 @@ int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_c
 //==================================================================================================
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("completing");
-    m_verb("completing: has prov FI_FENCE? %d",(comm->prov->caps & FI_FENCE)>0);
+    m_verb("completing: has prov FI_FENCE? %d", (comm->prov->caps & FI_FENCE) > 0);
     const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     const bool is_deliv = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
+    rmem_complete_ack_t ack = {
+        .nrank = nrank,
+        .rank = rank,
+        .mem = mem,
+        .comm = comm,
+    };
     //----------------------------------------------------------------------------------------------
-    // issue the ack
+    // issue the ack, if we are not fencing or using delivery complete
     int ttl_data = 0;
     int ttl_sync = 0;
-    if (is_deliv || is_fence) {
-        // just read the number of calls to wait for and reset them to 0
-        for (int i = 0; i < nrank; ++i) {
-            int issued_rank = m_countr_exchange(&mem->ofi.sync.icntr[rank[i]], 0);
-            ttl_data += issued_rank;
-        }
-        ttl_sync = 0;
-    } else {
-        // send the ack if not delivery complete, if a fence is needed, it's added to the flag
-        // directly in the call to (t)send
+    if (!is_deliv && !is_fence) {
         ttl_sync = nrank;
-        switch (comm->prov_mode.dtc_mode) {
-            case (M_OFI_DTC_NULL):
-                m_assert(0, "should not be NULL here");
-                break;
-            case (M_OFI_DTC_TAGGED):
-                m_rmem_call(ofi_rmem_complete_fitsend(nrank, rank, mem, comm, &ttl_data));
-                break;
-            case (M_OFI_DTC_MSG):
-                m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
-                break;
-        };
+        m_rmem_call(ofi_rmem_issue_dtc(&ack));
     }
 
     //----------------------------------------------------------------------------------------------
-    // get the correct threshold value depending if we have a signal or not
+    // just read the number of calls to wait for and reset them to 0
+    for (int i = 0; i < nrank; ++i) {
+        ttl_data += mem->ofi.sync.icntr[rank[i]];
+        mem->ofi.sync.icntr[rank[i]] = 0;
+    }
     int threshold = ttl_sync + ttl_data;
     m_verb("complete: waiting for %d syncs and %d calls, total %d to complete", ttl_sync, ttl_data,
            threshold);
@@ -174,7 +170,6 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     };
     while (m_countr_load(&mem->ofi.qtrigr.ongoing) &&
            (m_countr_load(m_rma_mepoch_local(mem)) < threshold)) {
-        // m_ofi_call(ofi_progress(&progress));
         sched_yield();
     }
     // disable progress in the helper thread
@@ -182,33 +177,23 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     // if we are not fencing, progress every EP now, waiting for the completion
     // if we are fencing, then progress will be made later
     if (!is_fence) {
-        m_rmem_call(ofi_rmem_progress_wait_noyield(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx + 1,
-                                           mem->ofi.data_trx, mem->ofi.sync.epch));
+        m_rmem_call(ofi_rmem_progress_wait_noyield(threshold, m_rma_mepoch_local(mem),
+                                                   mem->ofi.n_tx + 1, mem->ofi.data_trx,
+                                                   mem->ofi.sync.epch));
     }
-
     //----------------------------------------------------------------------------------------------
     // send the ack if delivery complete
     if (is_deliv || is_fence) {
-        // as we have already used the values in icntr, it's gonna be 0.
-        // this is expected as there is no calls to wait for on the target side
-        switch (comm->prov_mode.dtc_mode) {
-            case (M_OFI_DTC_NULL):
-                m_assert(0, "should not be NULL here");
-                break;
-            case (M_OFI_DTC_TAGGED):
-                m_rmem_call(ofi_rmem_complete_fitsend(nrank, rank, mem, comm, &ttl_data));
-                break;
-            case (M_OFI_DTC_MSG):
-                m_rmem_call(ofi_rmem_complete_fisend(nrank, rank, mem, comm, &ttl_data));
-                break;
-        };
+        // send the acknowledgement
+        m_rmem_call(ofi_rmem_issue_dtc(&ack));
         m_verb("completing the delivery complete ack: %d, current = %d", nrank,
                m_countr_load(m_rma_mepoch_local(mem)));
+
         // make sure the ack are done, progress the sync only
         int to_wait_for = (is_fence) ? (threshold + nrank) : nrank;
         ofi_rma_trx_t* trx = (is_fence) ? mem->ofi.data_trx : mem->ofi.sync_trx;
         m_rmem_call(ofi_rmem_progress_wait_noyield(to_wait_for, m_rma_mepoch_local(mem), 1, trx,
-                                           mem->ofi.sync.epch));
+                                                   mem->ofi.sync.epch));
     }
     //----------------------------------------------------------------------------------------------
 #ifndef NDEBUG
@@ -241,7 +226,6 @@ int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* com
     };
     while (m_countr_load(&mem->ofi.qtrigr.ongoing) &&
            (m_countr_load(m_rma_mepoch_local(mem)) < threshold)) {
-        // m_ofi_call(ofi_progress(&progress));
         sched_yield();
     }
     // disable progress in the helper thread

@@ -6,10 +6,22 @@
 #include "rmem.h"
 #include "rmem_trigr.h"
 
+#define m_rmem_lnode_kind_null  0x00
+#define m_rmem_lnode_kind_rma   0x01
+#define m_rmem_lnode_kind_wait  0x02
+#define m_rmem_lnode_kind_compl 0x04
+
+typedef enum {
+    LNODE_KIND_NULL,
+    LNODE_KIND_RMA,
+    LNODE_KIND_COMPL,
+} rmem_lnode_kind_t;
+
 // Multiple Producers, Single Consumer queue - based on a single list
 typedef struct {
     rmem_trigr_ptr h_ready_ptr;  //!< ready variable
     rmem_trigr_ptr d_ready_ptr;  //!< device pointer to the ready variable
+    rmem_lnode_kind_t kind;      //!< kind of operation on the node
 } rmem_lnode_t;                  // node
 //
 typedef struct {
@@ -20,8 +32,8 @@ typedef struct {
     uint8_t* list_bm;  // bitmap
     rmem_trigr_ptr h_trigr_list;
     rmem_trigr_ptr d_trigr_list;
-    pthread_mutex_t reset; // lock to reset the list
-} rmem_lmpsc_t;  // queue
+    pthread_mutex_t reset;  // lock to reset the list
+} rmem_lmpsc_t;             // queue
 
 //
 void rmem_lmpsc_create(rmem_lmpsc_t* q);
