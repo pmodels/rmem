@@ -139,6 +139,7 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     const bool is_deliv = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     rmem_complete_ack_t ack = {
+        .node = {0},
         .nrank = nrank,
         .rank = rank,
         .mem = mem,
@@ -150,10 +151,15 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     int ttl_sync = 0;
     if (!is_deliv && !is_fence) {
         ttl_sync = nrank;
-        m_rmem_call(ofi_rmem_issue_dtc(&ack));
+        // if we are still busy in the list, we enqueue the operation, if not, we do it right away
+        if (m_countr_load(&mem->ofi.qtrigr.ongoing)) {
+            ack.node.kind = LNODE_KIND_COMPL;
+            // the enqueue returns the device pointer but we need the host pointer
+            rmem_trigr_ptr trigr_device = rmem_lmpsc_enq_val(&mem->ofi.qtrigr, &ack.node, 1);
+        } else {
+            m_rmem_call(ofi_rmem_issue_dtc(&ack));
+        }
     }
-
-    //----------------------------------------------------------------------------------------------
     // just read the number of calls to wait for and reset them to 0
     for (int i = 0; i < nrank; ++i) {
         ttl_data += mem->ofi.sync.icntr[rank[i]];
@@ -163,17 +169,15 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     m_verb("complete: waiting for %d syncs and %d calls, total %d to complete", ttl_sync, ttl_data,
            threshold);
 
-    // wait for the queue to have processed all the calls enqueued
-    ofi_progress_t progress = {
-        .cq = mem->ofi.sync_trx->cq,
-        .xctx.epoch_ptr = mem->ofi.sync.epch,
-    };
-    while (m_countr_load(&mem->ofi.qtrigr.ongoing) &&
-           (m_countr_load(m_rma_mepoch_local(mem)) < threshold)) {
+    //----------------------------------------------------------------------------------------------
+    // wait for the queue to have processed all the calls enqueued, progress is made in the async
+    // thread while there still are stuff in the queue
+    while (m_countr_load(&mem->ofi.qtrigr.ongoing)) {
         sched_yield();
     }
     // disable progress in the helper thread
     m_countr_store(mem->ofi.thread_arg.do_progress, 0);
+
     // if we are not fencing, progress every EP now, waiting for the completion
     // if we are fencing, then progress will be made later
     if (!is_fence) {
@@ -224,8 +228,7 @@ int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* com
         .cq = mem->ofi.sync_trx->cq,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
     };
-    while (m_countr_load(&mem->ofi.qtrigr.ongoing) &&
-           (m_countr_load(m_rma_mepoch_local(mem)) < threshold)) {
+    while (m_countr_load(&mem->ofi.qtrigr.ongoing)) {
         sched_yield();
     }
     // disable progress in the helper thread

@@ -1,6 +1,7 @@
 #ifndef OFI_RMA_SYNC_TOOLS_
 #define OFI_RMA_SYNC_TOOLS_
 #include "ofi.h"
+#include "rmem_qlist.h"
 
 #ifndef NDEBUG
 #define m_mem_check_empty_cq(cq)                                                    \
@@ -23,6 +24,7 @@
 
 //==================================================================================================
 typedef struct {
+    rmem_lnode_t node;
     const int nrank;
     const int* rank;
     ofi_rmem_t* mem;

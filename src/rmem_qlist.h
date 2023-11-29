@@ -42,6 +42,7 @@ void rmem_lmpsc_reset(rmem_lmpsc_t* q);
 void rmem_lmpsc_done(rmem_lmpsc_t* q, rmem_lnode_t* elem);
 
 rmem_trigr_ptr rmem_lmpsc_enq(rmem_lmpsc_t* q, rmem_lnode_t* elem);
+rmem_trigr_ptr rmem_lmpsc_enq_val(rmem_lmpsc_t* q, rmem_lnode_t* elem, bool value);
 
 void rmem_lmpsc_deq_ifready(rmem_lmpsc_t* q, rmem_lnode_t** elem, int* idx, int* cnt);
 void rmem_lmpsc_test_cancel(rmem_lmpsc_t* q, int* cnt);

@@ -20,11 +20,11 @@ static size_t qlist_ttl_n_trigr() {
 static uint8_t mask[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 
 // init the trigr with the value of the pointer, as stored in the list
-static void trigr_init(rmem_lnode_t* ptr, rmem_trigr_ptr val) {
+static void trigr_init(rmem_lnode_t* ptr, rmem_trigr_ptr val, bool init_val) {
     // a trigr is ready if the pointer value is odd
     uint64_t uptr = (uint64_t)ptr;
     m_assert((uptr % 2) == 0, "an odd pointer = %p cannot be transformed into a trigger", ptr);
-    *val = uptr;
+    *val = uptr + init_val;
 }
 
 /**
@@ -126,10 +126,23 @@ void rmem_lmpsc_reset(rmem_lmpsc_t* q) {
 /**
  * @brief enqueue an elem to the list (lockfree & thread-safe function)
  *
- * @returns the (device) trigr handle to be used for that element
+ * is the 
+ *
+ * @returns the device trigr handle to be used for that element
  *
  */
 rmem_trigr_ptr rmem_lmpsc_enq(rmem_lmpsc_t* q, rmem_lnode_t* elem) {
+    return rmem_lmpsc_enq_val(q,elem,0);
+}
+/**
+ * @brief enqueue an elem to the list (lockfree & thread-safe function) and set the initial value
+ *
+ * is the
+ *
+ * @returns the device trigr handle to be used for that element
+ *
+ */
+rmem_trigr_ptr rmem_lmpsc_enq_val(rmem_lmpsc_t* q, rmem_lnode_t* elem, bool value) {
     // notify a new operation arrives to the queue
     m_countr_fetch_add(&q->ongoing, +1);
     // get the current pool counter
@@ -141,9 +154,10 @@ rmem_trigr_ptr rmem_lmpsc_enq(rmem_lmpsc_t* q, rmem_lnode_t* elem) {
                  qlist_ttl_n_trigr());
         elem->h_ready_ptr = q->h_trigr_list + pool_idx;
         elem->d_ready_ptr = q->d_trigr_list + pool_idx;
-        trigr_init(elem, elem->h_ready_ptr);
+        // TODO not sure this is right as it might lead to wrong result if
+        trigr_init(elem, elem->h_ready_ptr, value);
     } while (m_countr_rr_cas(&q->list_count, &pool_idx, pool_idx + 1));
-    m_verb("THREAD: enqueuing opeation %p, trigr = %lld", elem,*elem->d_ready_ptr);
+    m_verb("THREAD: enqueuing opeation %p, trigr = %lld", elem, *elem->d_ready_ptr);
 
     // return the handle
     return elem->d_ready_ptr;

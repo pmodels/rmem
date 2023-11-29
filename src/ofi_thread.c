@@ -41,6 +41,7 @@ void* ofi_tthread_main(void* arg) {
                     ofi_rma_start_from_task(task);
                 } break;
                 case (LNODE_KIND_COMPL): {
+                    // the task is a node but the address is the same for a complete_ack_t
                     ofi_rmem_issue_dtc((rmem_complete_ack_t*)task);
                 } break;
                 default:
