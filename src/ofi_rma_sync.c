@@ -125,7 +125,8 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
 int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     // start as normal, progress has been activated
     m_rmem_call(ofi_rmem_start(nrank, rank, mem, comm));
-    // reset the value of icntr, it's needed if we use the fast completion mechanism
+    // we have to reset the values of icntr (set at enqueue or previous iteration)
+    // we cannot do it in complete because we don't have the rank list
     for (int i = 0; i < nrank; ++i) {
         mem->ofi.sync.icntr[rank[i]] = 0;
     }
@@ -147,7 +148,6 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     };
     //----------------------------------------------------------------------------------------------
     // issue the ack, if we are not fencing or using delivery complete
-    int ttl_data = 0;
     int ttl_sync = 0;
     if (!is_deliv && !is_fence) {
         ttl_sync = nrank;
@@ -161,9 +161,9 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         }
     }
     // just read the number of calls to wait for and reset them to 0
+    int ttl_data = 0;
     for (int i = 0; i < nrank; ++i) {
         ttl_data += mem->ofi.sync.icntr[rank[i]];
-        mem->ofi.sync.icntr[rank[i]] = 0;
     }
     int threshold = ttl_sync + ttl_data;
     m_verb("complete: waiting for %d syncs and %d calls, total %d to complete", ttl_sync, ttl_data,
@@ -198,6 +198,11 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         ofi_rma_trx_t* trx = (is_fence) ? mem->ofi.data_trx : mem->ofi.sync_trx;
         m_rmem_call(ofi_rmem_progress_wait_noyield(to_wait_for, m_rma_mepoch_local(mem), 1, trx,
                                                    mem->ofi.sync.epch));
+    }
+    //----------------------------------------------------------------------------------------------
+    // reset the value of icntr, they are not needed anymore
+    for (int i = 0; i < nrank; ++i) {
+        mem->ofi.sync.icntr[rank[i]] = 0;
     }
     //----------------------------------------------------------------------------------------------
 #ifndef NDEBUG
