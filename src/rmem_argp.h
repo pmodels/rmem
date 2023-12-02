@@ -47,6 +47,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         case 'c':
             if (0 == strcmp(arg, "fence")) {
                 arguments->mode.rcmpl_mode = M_OFI_RCMPL_FENCE;
+            } else if (0 == strcmp(arg, "order")) {
+                arguments->mode.rcmpl_mode = M_OFI_RCMPL_ORDER;
             } else if (0 == strcmp(arg, "cq_data")) {
                 arguments->mode.rcmpl_mode = M_OFI_RCMPL_CQ_DATA;
             } else if (0 == strcmp(arg, "counter")) {
@@ -77,6 +79,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         case 'd':
             if (0 == strcmp(arg, "am")) {
                 arguments->mode.dtc_mode = M_OFI_DTC_MSG;
+            } else if (0 == strcmp(arg, "cq_data")) {
+                arguments->mode.dtc_mode = M_OFI_DTC_CQDATA;
             } else if (0 == strcmp(arg, "tag")) {
                 arguments->mode.dtc_mode = M_OFI_DTC_TAGGED;
             } else {

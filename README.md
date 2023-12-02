@@ -78,12 +78,14 @@ the ready-to-receive protocol is used to expose readiness to reception by the ta
 ### down-to-close (`-d`)
 - `am`: will use `fi_send` and pre-posted buffers at the sender
 - `tag`: will use `fi_tsend` and `fi_trecv`. The main performance bottleneck is unexpected messages
+- `cq_data` for ordered network (IB), uses `fi_cq_data` to close the epoch
 
 ### remote completion (`-c`)
 - `delivery complete` uses `FI_DELIVERY_COMPLETE` on the payload
 - `fence` uses a fence to issue the down-to-close acknowledgment
 - `cq_data` uses `FI_CQ_DATA` to track remote completion
 - `counter` uses `FI_REMOTE_COUNTER` to track remote completion using remote counters
+- `order` for ordered network (IB), must be used with `-d cq_data`
 
 ### Usability:
 Different networks have different capabilities, here is a list of them (v1.19):

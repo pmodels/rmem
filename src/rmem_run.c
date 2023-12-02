@@ -636,6 +636,7 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
 
     // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
     bool do_real_fast = !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) &&
+                        !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_ORDER) &&
                         !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     double time;
     rmem_prof_t prof = {.name = "send"};
@@ -735,6 +736,7 @@ double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
 
     // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
     bool do_real_fast = !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) &&
+                        !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_ORDER) &&
                         !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
 
     double time;

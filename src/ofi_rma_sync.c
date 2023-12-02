@@ -136,7 +136,7 @@ int ofi_rmem_start_fast(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_c
 //==================================================================================================
 int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_verb("completing");
-    m_verb("completing: has prov FI_FENCE? %d", (comm->prov->caps & FI_FENCE) > 0);
+    const bool is_order = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_ORDER);
     const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     const bool is_deliv = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     rmem_complete_ack_t ack = {
@@ -147,9 +147,11 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         .comm = comm,
     };
     //----------------------------------------------------------------------------------------------
-    // issue the ack, if we are not fencing or using delivery complete
+    // issue the ack, if we are not fencing or using delivery complete or order, we can issue the
+    // ack early if we are fencing, we have to wait for the completion of the operations enqueued in
+    // the list
     int ttl_sync = 0;
-    if (!is_deliv && !is_fence) {
+    if (!is_deliv && !is_fence && !is_order) {
         ttl_sync = nrank;
         // if we are still busy in the list, we enqueue the operation, if not, we do it right away
         if (m_countr_load(&mem->ofi.qtrigr.ongoing)) {
@@ -178,24 +180,24 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
     // disable progress in the helper thread
     m_countr_store(mem->ofi.thread_arg.do_progress, 0);
 
-    // if we are not fencing, progress every EP now, waiting for the completion
-    // if we are fencing, then progress will be made later
-    if (!is_fence) {
+    // if we are not fencing and not ordering, progress every EP now, waiting for the completion
+    // if we are fencing or ordering, then progress will be made later
+    if (!is_fence && !is_order) {
         m_rmem_call(ofi_rmem_progress_wait_noyield(threshold, m_rma_mepoch_local(mem),
                                                    mem->ofi.n_tx + 1, mem->ofi.data_trx,
                                                    mem->ofi.sync.epch));
     }
     //----------------------------------------------------------------------------------------------
     // send the ack if delivery complete
-    if (is_deliv || is_fence) {
+    if (is_deliv || is_fence || is_order) {
         // send the acknowledgement
         m_rmem_call(ofi_rmem_issue_dtc(&ack));
         m_verb("completing the delivery complete ack: %d, current = %d", nrank,
                m_countr_load(m_rma_mepoch_local(mem)));
 
         // make sure the ack are done, progress the sync only
-        int to_wait_for = (is_fence) ? (threshold + nrank) : nrank;
-        ofi_rma_trx_t* trx = (is_fence) ? mem->ofi.data_trx : mem->ofi.sync_trx;
+        int to_wait_for = (is_fence || is_order) ? (threshold + nrank) : nrank;
+        ofi_rma_trx_t* trx = (is_fence || is_order) ? mem->ofi.data_trx : mem->ofi.sync_trx;
         m_rmem_call(ofi_rmem_progress_wait_noyield(to_wait_for, m_rma_mepoch_local(mem), 1, trx,
                                                    mem->ofi.sync.epch));
     }
@@ -223,6 +225,8 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
 int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_FENCE,
              "cannot complete fast with a fence mode");
+    m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_ORDER,
+             "cannot complete fast with a order mode");
     m_assert(comm->prov_mode.rcmpl_mode != M_OFI_RCMPL_DELIV_COMPL,
              "cannot complete fast with a delivery complete mode");
     m_verb("completing-fast: %d calls, already done: %d", threshold,
@@ -283,9 +287,11 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
         case (M_OFI_RCMPL_NULL):
             m_assert(0, "null is not supported here");
             break;
+        case (M_OFI_RCMPL_ORDER):
         case (M_OFI_RCMPL_FENCE):
         case (M_OFI_RCMPL_DELIV_COMPL):
             // nothing to do:
+            // - ordering: reception of ack notifies completion of the RDMA calls (same as fence)
             // - delivery complete: the ack is sent once completion is satisfied
             // - fence: the completion of the ack indicates completion of the RMA with the ack
             // completion semantics: see TARGET COMPLETION SEMANTICS at
@@ -297,7 +303,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
             // remote(mem), so the value will always be negative here.
             int threshold = -1 * m_countr_exchange(m_rma_mepoch_remote(mem), 0);
             // the counter is linked to the MR so waiting on it will trigger progress
-            m_assert(threshold >=0,"the threshold = %d must be >=0",threshold);
+            m_assert(threshold >= 0, "the threshold = %d must be >=0", threshold);
             m_ofi_call(fi_cntr_wait(mem->ofi.rcntr, threshold, -1));
             m_ofi_call(fi_cntr_set(mem->ofi.rcntr, 0));
         } break;
@@ -305,7 +311,7 @@ int ofi_rmem_wait(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t*
             // WARNING: every put comes with data that will add 1 to the epoch[2] value
             // wait for it to go back up to 0
             m_rmem_call(ofi_rmem_progress_wait_noyield(0, m_rma_mepoch_remote(mem), mem->ofi.n_tx,
-                                               mem->ofi.data_trx, mem->ofi.sync.epch));
+                                                       mem->ofi.data_trx, mem->ofi.sync.epch));
         } break;
     };
     //----------------------------------------------------------------------------------------------
@@ -337,6 +343,7 @@ int ofi_rmem_wait_fast(const int ncalls, ofi_rmem_t* mem, ofi_comm_t* comm) {
         case (M_OFI_RCMPL_NULL):
             m_assert(0, "null is not supported here");
             break;
+        case (M_OFI_RCMPL_ORDER):
         case (M_OFI_RCMPL_FENCE):
         case (M_OFI_RCMPL_DELIV_COMPL):
             m_assert(ncalls == 0,

@@ -170,8 +170,9 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
             ccq->kind = m_ofi_cq_kind_sync;
             ccq->epoch_ptr = mem->ofi.sync.epch;
             m_verb("registering sync memory [%d,%d]", i, j);
-            m_rmem_call(ofi_util_mr_reg(&ccq->sync.data, sizeof(uint64_t), FI_SEND | FI_RECV, comm,
-                                        &ccq->sync.mr.mr, &ccq->sync.mr.desc, NULL));
+            m_rmem_call(ofi_util_mr_reg(&ccq->sync.data, sizeof(uint64_t),
+                                        FI_SEND | FI_RECV | FI_WRITE, comm, &ccq->sync.mr.mr,
+                                        &ccq->sync.mr.desc, NULL));
             m_rmem_call(ofi_util_mr_bind(mem->ofi.sync_trx->ep, ccq->sync.mr.mr, NULL, comm));
             m_rmem_call(ofi_util_mr_enable(ccq->sync.mr.mr, comm, NULL));
         }
@@ -241,7 +242,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_pthread_call(pthread_cancel(mem->ofi.progress));
     m_pthread_call(pthread_join(mem->ofi.progress, &retval));
     rmem_lmpsc_destroy(&mem->ofi.qtrigr);
-    // free(mem->ofi.thread_arg.do_progress);
+    free(mem->ofi.thread_arg.do_progress);
     // if (M_HAVE_GPU) {
     //     m_gpu_call(gpuFreeHost((void*)mem->ofi.qtrigr.h_trigr_pool));
     // } else {

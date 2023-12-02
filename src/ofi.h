@@ -159,6 +159,7 @@ static inline uint64_t ofi_set_tag(const int ctx_id, const int tag) {
 typedef enum {
     M_OFI_RCMPL_NULL,
     M_OFI_RCMPL_FENCE,
+    M_OFI_RCMPL_ORDER,
     M_OFI_RCMPL_CQ_DATA,
     M_OFI_RCMPL_DELIV_COMPL,
     M_OFI_RCMPL_REMOTE_CNTR,
@@ -179,6 +180,7 @@ typedef enum {
     M_OFI_DTC_NULL,
     M_OFI_DTC_MSG,
     M_OFI_DTC_TAGGED,
+    M_OFI_DTC_CQDATA,
 } ofi_dtc_mode_t;
 /**
  * @brief operational mode: define how the provider is going to operate

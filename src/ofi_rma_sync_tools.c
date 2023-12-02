@@ -1,5 +1,6 @@
 #include "ofi_rma_sync_tools.h"
 #include "ofi_utils.h"
+#include "rdma/fabric.h"
 
 //==================================================================================================
 // COMMON TAGGEG and AM MSG
@@ -276,6 +277,59 @@ int ofi_rmem_wait_fitrecv(const int nrank, const int* rank, ofi_rmem_t* mem,
 }
 
 //==================================================================================================
+// RMA with CQ_DATA
+//==================================================================================================
+int ofi_rmem_complete_fiwrite(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t* comm) {
+    // get the remote completion mode
+    // count the number of calls issued for each of the ranks and notify them
+    ofi_progress_t progress = {
+        .cq = mem->ofi.sync_trx->cq,
+        .xctx.epoch_ptr = mem->ofi.sync.epch,
+    };
+    for (int i = 0; i < nrank; ++i) {
+        // if using fence, we need to fence ALL of the data_trx, if not we only issue on the sync
+        // to avoid duplication of all the resources we forbid the user to use more than one data
+        // trx when using the fence
+        m_assert(mem->ofi.n_tx == 1, "you cannot rely on ordering with more than 1 data TRX");
+        ofi_rma_trx_t* trx = mem->ofi.data_trx;
+
+        // notify
+        ofi_cqdata_t* cqd = mem->ofi.sync.cqdata_cw + i;
+        cqd->kind = m_ofi_cq_kind_null | m_ofi_cq_inc_local;
+        cqd->sync.data = 0;
+        cqd->epoch_ptr = mem->ofi.sync.epch;
+        // get the cq data
+        m_verb("cqdata ctx %p, kind = local %d, epoch_ptr = %p", &cqd->ctx,
+               cqd->kind & m_ofi_cq_inc_local, cqd->epoch_ptr);
+        m_verb("complete_send: I have done %d write to %d, value sent = %llu",
+               mem->ofi.sync.icntr[rank[i]], i, cqd->sync.data);
+        // we use the user's MR but it doesn't matter as we provide a 0 length buffer
+        struct iovec iov = {
+            .iov_base = &cqd->sync.data,
+            .iov_len = 0,
+        };
+        struct fi_rma_iov riov = {
+            .addr = mem->ofi.mr.base_list[rank[i]],
+            .len = 0,
+            .key = mem->ofi.mr.key_list[rank[i]],
+        };
+        struct fi_msg_rma msg = {
+            .msg_iov = &iov,
+            .desc = &cqd->sync.mr.desc,
+            .iov_count = 1,
+            .addr = trx->addr[rank[i]],
+            .context = &cqd->ctx,
+            .rma_iov = &riov,
+            .rma_iov_count = 1,
+            .data = m_ofi_data_set_cmpl,  //| m_ofi_data_set_nops(issued_rank),
+        };
+        const uint64_t flag = FI_TRANSMIT_COMPLETE | FI_REMOTE_CQ_DATA;
+        m_verb("complete using fi_writemsg with EP %p", trx->ep);
+        m_ofi_call_again(fi_writemsg(trx->ep, &msg, flag), &progress);
+    }
+    return m_success;
+}
+//==================================================================================================
 // ATOMICS
 //==================================================================================================
 int ofi_rmem_post_fiatomic(const int nrank, const int* rank, ofi_rmem_t* mem,
@@ -413,6 +467,9 @@ int ofi_rmem_issue_dtc(rmem_complete_ack_t* ack) {
             break;
         case (M_OFI_DTC_MSG):
             m_rmem_call(ofi_rmem_complete_fisend(ack->nrank, ack->rank, ack->mem, ack->comm));
+            break;
+        case (M_OFI_DTC_CQDATA):
+            m_rmem_call(ofi_rmem_complete_fiwrite(ack->nrank, ack->rank, ack->mem, ack->comm));
             break;
     };
     return m_success;

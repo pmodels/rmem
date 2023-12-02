@@ -15,12 +15,13 @@ typedef uint8_t ofi_cap_t;
 #define M_OFI_PROV_HAS_ATOMIC    0x02  // 0000 0010
 #define M_OFI_PROV_HAS_CQ_DATA   0x04  // 0000 0100
 #define M_OFI_PROV_HAS_RMA_EVENT 0x08  // 0000 1000
+#define M_OFI_PROV_HAS_ORDER     0x10  // 0001 0000
 
-#define m_ofi_prov_has_fence(a)     ((a)&M_OFI_PROV_HAS_FENCE)
-#define m_ofi_prov_has_atomic(a)    ((a)&M_OFI_PROV_HAS_ATOMIC)
-#define m_ofi_prov_has_cq_data(a)   ((a)&M_OFI_PROV_HAS_CQ_DATA)
-#define m_ofi_prov_has_rma_event(a) ((a)&M_OFI_PROV_HAS_RMA_EVENT)
-
+#define m_ofi_prov_has_order(a)     ((a) & M_OFI_PROV_HAS_ORDER)
+#define m_ofi_prov_has_fence(a)     ((a) & M_OFI_PROV_HAS_FENCE)
+#define m_ofi_prov_has_atomic(a)    ((a) & M_OFI_PROV_HAS_ATOMIC)
+#define m_ofi_prov_has_cq_data(a)   ((a) & M_OFI_PROV_HAS_CQ_DATA)
+#define m_ofi_prov_has_rma_event(a) ((a) & M_OFI_PROV_HAS_RMA_EVENT)
 
 int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode);
 int ofi_util_new_ep(const bool new_ctx, struct fi_info* prov, struct fid_domain* dom,

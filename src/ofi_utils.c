@@ -62,7 +62,7 @@ static int ofi_prov_score(char* provname, ofi_cap_t* caps) {
         return 3;
     } else if (0 == strcmp(provname, "verbs;ofi_rxm")) {
         if (caps) {
-            *caps = M_OFI_PROV_HAS_ATOMIC | M_OFI_PROV_HAS_CQ_DATA
+            *caps = M_OFI_PROV_HAS_ORDER | M_OFI_PROV_HAS_CQ_DATA
 #if (!M_FORCE_MR_LOCAL)
                     | M_OFI_PROV_HAS_ATOMIC
 #endif
@@ -131,14 +131,19 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
     // [4] down-to-close
     if (mode->dtc_mode) {
         switch (mode->dtc_mode) {
-            case (M_OFI_RTR_NULL):
+            case (M_OFI_DTC_NULL):
                 m_assert(0, "null is not supported here");
                 break;
-            case M_OFI_RTR_MSG:
+            case M_OFI_DTC_MSG:
                 m_verb("PROV MODE - DTC: doing msgs");
                 *ofi_cap |= FI_MSG;
                 break;
-            case M_OFI_RTR_TAGGED:
+            case M_OFI_DTC_CQDATA:
+                m_verb("PROV MODE - DTC: doing cqdata");
+                m_assert(m_ofi_prov_has_order(*prov_cap), "provider needs ordered capability");
+                m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
+                break;
+            case M_OFI_DTC_TAGGED:
                 m_verb("PROV MODE - DTC: doing tagged");
                 *ofi_cap |= FI_TAGGED;
                 break;
@@ -158,6 +163,13 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
             case M_OFI_RCMPL_CQ_DATA:
                 m_verb("PROV MODE - RCMPL: doing cq data");
                 m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
+                break;
+            case M_OFI_RCMPL_ORDER:
+                m_verb("PROV MODE - RCMPL: doing ordering");
+                m_assert(m_ofi_prov_has_order(*prov_cap), "provider needs ordered capability");
+                m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
+                // make sure the right DTC is set
+                m_assert(mode->dtc_mode == M_OFI_DTC_CQDATA, "the DTC protocol must be CQDATA");
                 break;
             case M_OFI_RCMPL_REMOTE_CNTR:
                 m_verb("PROV MODE - RCMPL: doing remote counter");

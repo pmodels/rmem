@@ -59,6 +59,9 @@ void print_info(char* foldr_name, char* prov_name, ofi_mode_t* mode) {
         case (M_OFI_RCMPL_NULL):
             m_assert(0, "null is not supported here");
             break;
+        case (M_OFI_RCMPL_ORDER):
+            fprintf(file, "\t- remote completion: ORDER\n");
+            break;
         case (M_OFI_RCMPL_CQ_DATA):
             fprintf(file, "\t- remote completion: CQ_DATA\n");
             break;
