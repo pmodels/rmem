@@ -100,7 +100,8 @@ static int ofi_prov_score(char* provname, ofi_cap_t* caps) {
 /**
  * @brief given a provider's capability set, determine the best modes to use
  */
-static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_cap) {
+static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_cap,
+                         uint64_t* msg_order) {
     //----------------------------------------------------------------------------------------------
     // [1] ready-to-receive
     if (mode->rtr_mode) {
@@ -142,6 +143,8 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
                 m_verb("PROV MODE - DTC: doing cqdata");
                 m_assert(m_ofi_prov_has_order(*prov_cap), "provider needs ordered capability");
                 m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
+                m_assert(mode->rcmpl_mode == M_OFI_RCMPL_ORDER, "th RCMPL protocol must be ORDER");
+                *msg_order |= FI_ORDER_WAW;
                 break;
             case M_OFI_DTC_TAGGED:
                 m_verb("PROV MODE - DTC: doing tagged");
@@ -170,6 +173,7 @@ static int ofi_prov_mode(ofi_cap_t* prov_cap, ofi_mode_t* mode, uint64_t* ofi_ca
                 m_assert(m_ofi_prov_has_cq_data(*prov_cap), "provider needs cq data capabilities");
                 // make sure the right DTC is set
                 m_assert(mode->dtc_mode == M_OFI_DTC_CQDATA, "the DTC protocol must be CQDATA");
+                *msg_order |= FI_ORDER_WAW;
                 break;
             case M_OFI_RCMPL_REMOTE_CNTR:
                 m_verb("PROV MODE - RCMPL: doing remote counter");
@@ -236,7 +240,8 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     //----------------------------------------------------------------------------------------------
     // get the operational modes
     uint64_t mycap = FI_MSG | FI_TAGGED | FI_RMA | FI_DIRECTED_RECV;
-    m_rmem_call(ofi_prov_mode(&prov_cap, prov_mode, &mycap));
+    uint64_t msg_order = FI_ORDER_NONE;
+    m_rmem_call(ofi_prov_mode(&prov_cap, prov_mode, &mycap, &msg_order));
 
     //----------------------------------------------------------------------------------------------
     // basic requirement are the modes and the caps
@@ -289,8 +294,8 @@ int ofi_util_get_prov(struct fi_info** prov, ofi_mode_t* prov_mode) {
     m_ofi_test_info(hints, domain_attr->control_progress, FI_PROGRESS_MANUAL);
 #endif
     // no order required
-    m_ofi_test_info(hints, tx_attr->msg_order, FI_ORDER_NONE);
-    m_ofi_test_info(hints, rx_attr->msg_order, FI_ORDER_NONE);
+    m_ofi_test_info(hints, tx_attr->msg_order, msg_order);
+    m_ofi_test_info(hints, rx_attr->msg_order, msg_order);
     m_ofi_test_info(hints, tx_attr->comp_order, FI_ORDER_NONE);
     m_ofi_test_info(hints, rx_attr->comp_order, FI_ORDER_NONE);
 

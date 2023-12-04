@@ -450,6 +450,8 @@ int main(int argc, char** argv) {
     if (pgpu_time.ci) free(pgpu_time.ci);
     if (pfast_time.avg) free(pfast_time.avg);
     if (pfast_time.ci) free(pfast_time.ci);
+    if (pfast_gpu_time.avg) free(pfast_gpu_time.avg);
+    if (pfast_gpu_time.ci) free(pfast_gpu_time.ci);
 
     m_rmem_call(ofi_finalize(&comm));
     return EXIT_SUCCESS;

@@ -166,7 +166,8 @@ void run_test(run_t* sender, run_t* recver, run_param_t param, run_time_t* timin
     // retrieve useful parameters
     const int n_msg = m_msg_idx(param.n_msg) + 1;
     const int n_size = m_size_idx(param.msg_size) + 1;
-    m_assert(n_msg >= 0 && n_size >= 0,"the number of msgs and size must be >=0");
+    m_assert(n_msg >= 0 && n_size >= 0, "the number of msgs = %d and size = %d must be >=0", n_msg,
+             n_size);
     size_t ttl_sample = n_msg * n_size;
 
     ofi_comm_t* comm = param.comm;
