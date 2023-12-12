@@ -112,7 +112,8 @@ int ofi_rmem_start(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_comm_t
             break;
     }
     // activate progress in the helper thread
-    m_countr_store(mem->ofi.thread_arg.do_progress, 1);
+    // m_countr_store(mem->ofi.thread_arg.do_progress, 1);
+    pthread_mutex_unlock(mem->ofi.thread_arg.do_progress);
 #ifndef NDEBUG
     m_verb("started");
     if (check_last) {
@@ -178,7 +179,8 @@ int ofi_rmem_complete(const int nrank, const int* rank, ofi_rmem_t* mem, ofi_com
         sched_yield();
     }
     // disable progress in the helper thread
-    m_countr_store(mem->ofi.thread_arg.do_progress, 0);
+    // m_countr_store(mem->ofi.thread_arg.do_progress, 0);
+    pthread_mutex_lock(mem->ofi.thread_arg.do_progress);
 
     // if we are not fencing and not ordering, progress every EP now, waiting for the completion
     // if we are fencing or ordering, then progress will be made later
@@ -241,7 +243,8 @@ int ofi_rmem_complete_fast(const int threshold, ofi_rmem_t* mem, ofi_comm_t* com
         sched_yield();
     }
     // disable progress in the helper thread
-    m_countr_store(mem->ofi.thread_arg.do_progress, 0);
+    // m_countr_store(mem->ofi.thread_arg.do_progress, 0);
+    pthread_mutex_lock(mem->ofi.thread_arg.do_progress);
     // wait for completion of the requested operations
     m_rmem_call(ofi_rmem_progress_wait_noyield(threshold, m_rma_mepoch_local(mem), mem->ofi.n_tx,
                                                mem->ofi.data_trx, mem->ofi.sync.epch));

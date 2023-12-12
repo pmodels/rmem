@@ -146,7 +146,7 @@ rmem_trigr_ptr rmem_lmpsc_enq_val(rmem_lmpsc_t* q, rmem_lnode_t* elem, bool valu
     // notify a new operation arrives to the queue
     m_countr_fetch_add(&q->ongoing, +1);
     // get the current pool counter
-    int pool_idx = m_countr_load(&q->list_count);
+    int pool_idx = m_countr_acq_load(&q->list_count);
     do {
         // repeat while we don't have the right pool_idx
         m_assert(pool_idx < qlist_ttl_n_trigr(),

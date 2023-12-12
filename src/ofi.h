@@ -412,7 +412,7 @@ typedef struct {
 
 // thread-based data structure, must stay valid accross the thread execution
 typedef struct {
-    countr_t* do_progress;  //<! acts like a switch to activate or not the  progress in the list
+    pthread_mutex_t* do_progress;  //<! acts like a switch to activate or not the  progress in the list
     // rmem_qmpsc_t* workq;
     rmem_lmpsc_t* workq;
     ofi_rma_trx_t* data_trx;

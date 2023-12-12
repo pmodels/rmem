@@ -216,8 +216,12 @@ int ofi_rmem_init(ofi_rmem_t* mem, ofi_comm_t* comm) {
         .xctx.epoch_ptr = mem->ofi.sync.epch,
         .n_tx = mem->ofi.n_tx,
     };
-    mem->ofi.thread_arg.do_progress = m_malloc(sizeof(countr_t));
-    m_countr_init(mem->ofi.thread_arg.do_progress);
+
+    // create and lock the progress on the thread
+    mem->ofi.thread_arg.do_progress = m_malloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(mem->ofi.thread_arg.do_progress, NULL);
+    pthread_mutex_lock(mem->ofi.thread_arg.do_progress);
+    // m_countr_init(mem->ofi.thread_arg.do_progress);
     m_pthread_call(
         pthread_create(&mem->ofi.progress, &pthread_attr, &ofi_tthread_main, &mem->ofi.thread_arg));
     m_pthread_call(pthread_attr_destroy(&pthread_attr));
@@ -242,6 +246,7 @@ int ofi_rmem_free(ofi_rmem_t* mem, ofi_comm_t* comm) {
     m_pthread_call(pthread_cancel(mem->ofi.progress));
     m_pthread_call(pthread_join(mem->ofi.progress, &retval));
     rmem_lmpsc_destroy(&mem->ofi.qtrigr);
+    pthread_mutex_destroy(mem->ofi.thread_arg.do_progress);
     free(mem->ofi.thread_arg.do_progress);
     // if (M_HAVE_GPU) {
     //     m_gpu_call(gpuFreeHost((void*)mem->ofi.qtrigr.h_trigr_pool));
@@ -492,7 +497,7 @@ int ofi_rma_start_from_task(rmem_lnode_t* task) {
         .data = *msg_data,
         .context = &msg_cq->ctx,
     };
-    m_verb("THREAD: doing RMA on EP %p", *ep);
+    m_verb("THREAD: doing RMA on EP %p, size = %ld", *ep,msg_iov->iov_len);
     m_ofi_call_again(fi_writemsg(*ep, &msg, *msg_flags), rma_prog);
     // if we had to get a cq entry and the inject, mark is as done
     if ((*msg_flags) & FI_INJECT && (*msg_flags) & FI_COMPLETION) {
