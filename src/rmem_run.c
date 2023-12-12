@@ -31,10 +31,10 @@ static int rmem_get_rand(const int max) {
 static void run_test_check(const size_t ttl_len, int* buf) {
     //------------------------------------------------
     // check the result
-    int* tmp;
+    volatile int* tmp;
     if (M_HAVE_GPU) {
         tmp = calloc(ttl_len, sizeof(int));
-        m_gpu_call(gpuMemcpySync(tmp, buf, ttl_len * sizeof(int), gpuMemcpyDeviceToHost));
+        m_gpu_call(gpuMemcpySync((int*)tmp, buf, ttl_len * sizeof(int), gpuMemcpyDeviceToHost));
     } else {
         tmp = buf;
     }
@@ -51,8 +51,8 @@ static void run_test_check(const size_t ttl_len, int* buf) {
     }
     if (M_HAVE_GPU) {
         // copies all the zeros back
-        m_gpu_call(gpuMemcpySync(buf, tmp, ttl_len * sizeof(int), gpuMemcpyHostToDevice));
-        free(tmp);
+        m_gpu_call(gpuMemcpySync(buf, (int*)tmp, ttl_len * sizeof(int), gpuMemcpyHostToDevice));
+        free((void*)tmp);
     }
 }
 //==================================================================================================
