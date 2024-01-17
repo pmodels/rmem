@@ -17,10 +17,17 @@ typedef struct {
 #define m_countr_store(a, v)     atomic_store_explicit(&(a)->val, v, m_default_mem_model)
 #define m_countr_exchange(a, v)  atomic_exchange_explicit(&(a)->val, v, m_default_mem_model)
 #define m_countr_fetch_add(a, v) atomic_fetch_add_explicit(&(a)->val, v, m_default_mem_model)
+#define m_countr_cas(a, e, d)                                                     \
+    atomic_compare_exchange_strong_explicit(&(a)->val, e, d, m_default_mem_model, \
+                                            m_default_mem_model)
+#define m_countr_wcas(a, e, d)                                                     \
+    atomic_compare_exchange_weak_explicit(&(a)->val, e, d, m_default_mem_model, \
+                                            m_default_mem_model)
 
 // list counter with acquire-release semantics
 #define m_countr_acq_load(a)     atomic_load_explicit(&(a)->val, memory_order_acquire)
 #define m_countr_rel_store(a, v) atomic_store_explicit(&(a)->val, v, memory_order_release)
+#define m_countr_rel_fetch_add(a, v) atomic_fetch_add_explicit(&(a)->val, v, memory_order_release)
 #define m_countr_rr_cas(a, e, d)                                                   \
     atomic_compare_exchange_strong_explicit(&(a)->val, e, d, memory_order_release, \
                                             memory_order_relaxed)

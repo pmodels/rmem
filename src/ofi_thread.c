@@ -26,9 +26,9 @@ void* ofi_tthread_main(void* arg) {
         .xctx.epoch_ptr = thread_arg->xctx.epoch_ptr,
     };
 
-    int icancel = 0;
-    int idequeue = 0;
-    int search_idx = 0;
+    int icancel = 0;     // count the number of iterations between cancelation test
+    int idequeue = 0;    // count the number of iterations between the lock/unlock
+    int search_idx = 0;  // index on which item to search next
     while (1) {
         // try to dequeue an element
         rmem_lnode_t* task;

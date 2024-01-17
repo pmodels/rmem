@@ -25,10 +25,10 @@ typedef struct {
 } rmem_lnode_t;                  // node
 //
 typedef struct {
-    // progress count
+    // progress count: number of operations not performed yet
     countr_t ongoing;  // +1 when submited, -1 when executed
     // gpu triggered resources
-    countr_t list_count;
+    countr_t list_count; //<! count the number of operations currently enqueued (done or not)
     uint8_t* list_bm;  // bitmap
     rmem_trigr_ptr h_trigr_list;
     rmem_trigr_ptr d_trigr_list;

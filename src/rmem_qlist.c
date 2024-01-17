@@ -20,7 +20,10 @@ static size_t qlist_ttl_n_trigr() {
 static uint8_t mask[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 
 // init the trigr with the value of the pointer, as stored in the list
-static void trigr_init(rmem_lnode_t* ptr, rmem_trigr_ptr val, bool init_val) {
+/**
+ * @brief set the value of rmem_trigr_ptr to `val = (uint64_t)ptr + init_val`
+ */
+static void trigr_init(rmem_trigr_ptr val, rmem_lnode_t* ptr, bool init_val) {
     // a trigr is ready if the pointer value is odd
     uint64_t uptr = (uint64_t)ptr;
     m_assert((uptr % 2) == 0, "an odd pointer = %p cannot be transformed into a trigger", ptr);
@@ -143,21 +146,25 @@ rmem_trigr_ptr rmem_lmpsc_enq(rmem_lmpsc_t* q, rmem_lnode_t* elem) {
  *
  */
 rmem_trigr_ptr rmem_lmpsc_enq_val(rmem_lmpsc_t* q, rmem_lnode_t* elem, bool value) {
-    // notify a new operation arrives to the queue
-    m_countr_fetch_add(&q->ongoing, +1);
-    // get the current pool counter
-    int pool_idx = m_countr_acq_load(&q->list_count);
+    // get the current pool counter, use relaxed ordering
+    int pool_idx = m_countr_load(&q->list_count);
+    // repeat while we don't have the right pool_idx
     do {
-        // repeat while we don't have the right pool_idx
         m_assert(pool_idx < qlist_ttl_n_trigr(),
                  "we have reached maximum enqueuing capacity: %d/%ld", pool_idx,
                  qlist_ttl_n_trigr());
+        // elem is local (only!) so we just get the next available pointers
         elem->h_ready_ptr = q->h_trigr_list + pool_idx;
         elem->d_ready_ptr = q->d_trigr_list + pool_idx;
-        // TODO not sure this is right as it might lead to wrong result if
-        trigr_init(elem, elem->h_ready_ptr, value);
-    } while (m_countr_rr_cas(&q->list_count, &pool_idx, pool_idx + 1));
+        // check if we have secured the spot, use relaxed ordering
+    } while (m_countr_wcas(&q->list_count, &pool_idx, pool_idx + 1));
+
+    // once the spot is secured, we can update the list entry
+    trigr_init(elem->h_ready_ptr, elem, value);
     m_verb("THREAD: enqueuing opeation %p, trigr = %lld", elem, *elem->d_ready_ptr);
+
+    // notify a new operation is available on the queue, release the memory operations done before
+    m_countr_rel_fetch_add(&q->ongoing, +1);
 
     // return the handle
     return elem->d_ready_ptr;
@@ -172,12 +179,18 @@ rmem_trigr_ptr rmem_lmpsc_enq_val(rmem_lmpsc_t* q, rmem_lnode_t* elem, bool valu
  */
 void rmem_lmpsc_deq_ifready(rmem_lmpsc_t* q, rmem_lnode_t** elem, int* idx, int* cnt) {
     // prevents the reset while reading the list
+    // note: do we need this even if we are not actually reading the list?
     if (!(*cnt)) {
         pthread_mutex_lock(&q->reset);
     }
+    // acquire q->ongoing to make sure all the enqueue operations are visible in memory
+    // if ongoing is 0, nothing to be found
+    if (!m_countr_acq_load(&q->ongoing)) {
+        goto not_found;
+    }
     // we read the list_count value only once. not super optimized for a general case but good for a
     // case where the list is fixed when dequeueing
-    int curr_count = m_countr_acq_load(&q->list_count);
+    int curr_count = m_countr_load(&q->list_count);
     while (*idx < curr_count) {
         // get the number of bits to read: if we have less than 8 bits to read
         rmem_lnode_t* task = trigr_isready(q->h_trigr_list, curr_count, q->list_bm, idx);
@@ -188,7 +201,8 @@ void rmem_lmpsc_deq_ifready(rmem_lmpsc_t* q, rmem_lnode_t** elem, int* idx, int*
             goto unlock;
         }
     }
-    // if we reach this, we haven't foutn any ready operation preset the output
+    // if we reach this, we haven't found any ready operation
+not_found:
     *idx = 0;
     *elem = NULL;
 unlock:
@@ -196,6 +210,7 @@ unlock:
     // queue. Unlocking allows for reset
     *cnt = ((*cnt) + 1) % m_n_release;
     // if the next enter we are going to lock the list, then unlock it first
+    // note: if we remove the locking all the iterations, then this has to change
     if (!(*cnt)) {
         pthread_mutex_unlock(&q->reset);
     }
