@@ -611,12 +611,13 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
             ofi_rmem_complete(1, &buddy, param->mem, param->comm);
         }
     } else {
-        gpu_trigger_op(RMEM_GPU_PUT, start_id, n_msg, d->buf, param->msg_size, d->trigr, d->stream);
         m_rmem_prof(prof, time) {
+            gpu_trigger_op(RMEM_GPU_PUT, start_id, n_msg, d->buf, param->msg_size, d->trigr,
+                           d->stream);
+            m_gpu_call(gpuStreamSynchronize(d->stream));
             m_verb("rma_run_send_device: rmem_complete");
             ofi_rmem_complete(1, &buddy, param->mem, param->comm);
         }
-        m_gpu_call(gpuStreamSynchronize(d->stream));
     }
     ofi_rma_reset_queue(param->mem);
     return time;
@@ -678,8 +679,10 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
             }
         }
     } else {
-        gpu_trigger_op(RMEM_GPU_PUT, start_id, n_msg, d->buf, param->msg_size, d->trigr, d->stream);
         m_rmem_prof(prof, time) {
+            gpu_trigger_op(RMEM_GPU_PUT, start_id, n_msg, d->buf, param->msg_size, d->trigr,
+                           d->stream);
+            m_gpu_call(gpuStreamSynchronize(d->stream));
             m_verb("rma_run_send_device: rmem_complete");
             if (do_real_fast) {
                 ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
@@ -687,7 +690,6 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
                 ofi_rmem_complete(1, &buddy, param->mem, param->comm);
             }
         }
-        m_gpu_call(gpuStreamSynchronize(d->stream));
     }
     // send the starting time from the profiler
     ack_send_withtime(ack, &prof.t0);
