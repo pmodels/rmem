@@ -365,7 +365,8 @@ void p2p_post_send(run_param_t* param, void* data) {
 void p2p_post_recv(run_param_t* param, void* data) {
     p2p_dealloc(param,data);
 }
-static double p2p_run_send_common(run_param_t* param, void* data, void* ack_ptr,rmem_device_t dev) {
+static double p2p_run_send_common(run_param_t* param, void* data, void* ack_ptr, rmem_device_t dev,
+                                  rmem_protocol_t protocol) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
     ack_t* ack = (ack_t*)ack_ptr;
     ofi_p2p_t* p2p = d->p2p;
@@ -382,7 +383,7 @@ static double p2p_run_send_common(run_param_t* param, void* data, void* ack_ptr,
     if (dev == RMEM_AWARE) {
         m_rmem_prof(prof, time) {
             for (int j = 0; j < n_msg; ++j) {
-                const int id = (start_id + j)%n_msg;
+                const int id = (start_id + j) % n_msg;
                 ofi_p2p_start(p2p + id);
             }
             for (int j = 0; j < n_msg; ++j) {
@@ -406,13 +407,8 @@ static double p2p_run_send_common(run_param_t* param, void* data, void* ack_ptr,
     ack_send_withtime(ack, &prof.t0);
     return time;
 }
-double p2p_run_send(run_param_t* param, void* data, void* ack_ptr) {
-    return p2p_run_send_common(param, data, ack_ptr, RMEM_AWARE);
-}
-double p2p_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return p2p_run_send_common(param, data, ack_ptr, RMEM_TRIGGER);
-}
-double p2p_run_recv(run_param_t* param, void* data, void* ack_ptr) {
+static double p2p_run_recv_common(run_param_t* param, void* data, void* ack_ptr, rmem_device_t dev,
+                                  rmem_protocol_t protocol) {
     run_p2p_data_t* d = (run_p2p_data_t*)data;
     ack_t* ack = (ack_t*)ack_ptr;
     ofi_p2p_t* p2p = d->p2p;
@@ -423,52 +419,18 @@ double p2p_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     double time;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
-    const double offset = ack_offset_recver(ack);
-    m_rmem_prof(prof, time) {
+    if (protocol == RMEM_FAST) {
         for (int j = 0; j < n_msg; ++j) {
             ofi_p2p_start(p2p + j);
         }
-        for (int j = 0; j < n_msg; ++j) {
-            ofi_p2p_wait(p2p + j);
-        }
-    }
-    // T sender = t recver + offset => T recver = T sender - offset
-    // time elapsed = (T recver -  (T sender - offset))
-    struct timespec tsend;
-    ack_wait_withtime(ack, &tsend);
-    double sync_time = m_get_wtimes(tsend, prof.t1) + offset;
-    m_verb("estimated time of comms = %f vs previously measured one %f, offset is %f", sync_time,
-           time, offset);
-
-    //------------------------------------------------
-    // check the result
-    run_test_check(ttl_len, d->buf);
-    return sync_time;
-}
-double p2p_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return p2p_run_recv(param, data, ack_ptr);
-}
-
-//============ p2p fast
-double p2p_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
-    return p2p_run_send(param, data, ack_ptr);
-}
-double p2p_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
-    run_p2p_data_t* d = (run_p2p_data_t*)data;
-    ack_t* ack = (ack_t*)ack_ptr;
-    ofi_p2p_t* p2p = d->p2p;
-    const int n_msg = param->n_msg;
-    const size_t msg_size = param->msg_size;
-    const size_t ttl_len = n_msg * msg_size;
-
-    double time;
-    rmem_prof_t prof = {.name = "recv"};
-    //------------------------------------------------
-    for (int j = 0; j < n_msg; ++j) {
-        ofi_p2p_start(p2p + j);
     }
     const double offset = ack_offset_recver(ack);
     m_rmem_prof(prof, time) {
+        if (protocol == RMEM_DEFAULT) {
+            for (int j = 0; j < n_msg; ++j) {
+                ofi_p2p_start(p2p + j);
+            }
+        }
         for (int j = 0; j < n_msg; ++j) {
             ofi_p2p_wait(p2p + j);
         }
@@ -485,6 +447,31 @@ double p2p_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
     // check the result
     run_test_check(ttl_len, d->buf);
     return sync_time;
+}
+double p2p_run_send(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_send_common(param, data, ack_ptr, RMEM_AWARE, RMEM_DEFAULT);
+}
+double p2p_run_recv(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_recv_common(param, data, ack_ptr, RMEM_AWARE, RMEM_DEFAULT);
+}
+double p2p_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_send_common(param, data, ack_ptr, RMEM_TRIGGER, RMEM_DEFAULT);
+}
+double p2p_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_recv_common(param, data, ack_ptr, RMEM_TRIGGER, RMEM_DEFAULT);
+}
+//============ p2p fast
+double p2p_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_send_common(param, data, ack_ptr, RMEM_AWARE, RMEM_FAST);
+}
+double p2p_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_recv_common(param, data, ack_ptr, RMEM_AWARE, RMEM_FAST);
+}
+double p2p_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_send_common(param, data, ack_ptr, RMEM_TRIGGER, RMEM_FAST);
+}
+double p2p_fast_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return p2p_run_recv_common(param, data, ack_ptr, RMEM_TRIGGER, RMEM_FAST);
 }
 //==================================================================================================
 //= RMA
@@ -504,7 +491,9 @@ void rma_alloc(run_param_t* param, void* data) {
         }
         m_gpu_call(gpuStreamCreate(&d->stream));
         if (M_HAVE_GPU) {
+            // allocate the triggers
             m_gpu_call(gpuMalloc((void**)&d->trigr, n_msg * sizeof(rmem_trigr_ptr)));
+            // allocate buffer on device + copy info into it
             m_gpu_call(gpuMalloc((void**)&d->buf, ttl_len * sizeof(int)));
             m_gpu_call(gpuMemcpySync(d->buf, tmp, ttl_len * sizeof(int), gpuMemcpyHostToDevice));
             free(tmp);
@@ -568,7 +557,8 @@ void rma_post(run_param_t* param, void* data) {
 }
 
 //--------------------------------------------------------------------------------------------------
-static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr, rmem_device_t device) {
+static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
+                                  rmem_device_t device, rmem_protocol_t protocol) {
     m_verb("rma_run_send_device: entering");
     run_rma_data_t* d = (run_rma_data_t*)data;
     ack_t* ack = (ack_t*)ack_ptr;
@@ -577,6 +567,10 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
     const size_t ttl_len = n_msg * msg_size;
     const int buddy = peer(param->comm->rank, param->comm->size);
 
+    // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
+    bool do_real_fast = !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) &&
+                        !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_ORDER) &&
+                        !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     double time;
     rmem_prof_t prof = {.name = "send"};
     //-------------------------------------------------
@@ -596,10 +590,22 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
     }
     // get the start id
     const int start_id = rmem_get_rand(n_msg);
-    // send a readiness signal triggers the time measurement on the recv
-    ack_send(ack);
-    // start the request
-    ofi_rmem_start(1, &buddy, param->mem, param->comm);
+
+    if (protocol == RMEM_FAST) {
+        // if we use fast, first do the start, then sync with the receiver
+        if (do_real_fast) {
+            ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
+        } else {
+            ofi_rmem_start(1, &buddy, param->mem, param->comm);
+        }
+        // the time is measured similarly to the p2p using the offset
+        ack_offset_sender(ack);
+    } else if (protocol == RMEM_DEFAULT) {
+        // send a readiness signal triggers the time measurement on the recv
+        ack_send(ack);
+        // start the request
+        ofi_rmem_start(1, &buddy, param->mem, param->comm);
+    }
     if (device == RMEM_AWARE) {
         // only measure injection on the send side
         m_rmem_prof(prof, time) {
@@ -608,29 +614,118 @@ static double rma_run_send_common(run_param_t* param, void* data, void* ack_ptr,
                 ofi_rma_start(param->mem, d->rma + id, RMEM_AWARE);
             }
             m_verb("rma_run_send_device: rmem_complete");
-            ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+            if (protocol == RMEM_FAST && do_real_fast) {
+                ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+            } else {
+                ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+            }
         }
     } else {
         m_rmem_prof(prof, time) {
             gpu_trigger_op(RMEM_GPU_PUT, start_id, n_msg, d->buf, param->msg_size, d->trigr,
                            d->stream);
-            m_gpu_call(gpuStreamSynchronize(d->stream));
             m_verb("rma_run_send_device: rmem_complete");
-            ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+            if (protocol == RMEM_FAST && do_real_fast) {
+                ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+            } else {
+                ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+            }
+            m_gpu_call(gpuStreamSynchronize(d->stream));
         }
+    }
+    if (protocol == RMEM_FAST) {
+        // send the starting time from the profiler
+        ack_send_withtime(ack, &prof.t0);
     }
     ofi_rma_reset_queue(param->mem);
     return time;
 }
-double rma_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_run_send_common(param, data, ack_ptr, RMEM_TRIGGER);
-}
 double rma_run_send(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_run_send_common(param, data, ack_ptr, RMEM_AWARE);
+    return rma_run_send_common(param, data, ack_ptr, RMEM_AWARE, RMEM_DEFAULT);
 }
-double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rmem_device_t device) {
+double rma_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return rma_run_send_common(param, data, ack_ptr, RMEM_TRIGGER, RMEM_DEFAULT);
+}
+double rma_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
+    return rma_run_send_common(param, data, ack_ptr, RMEM_AWARE, RMEM_FAST);
+}
+double rma_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return rma_run_send_common(param, data, ack_ptr, RMEM_TRIGGER, RMEM_FAST);
+}
+// double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rmem_device_t device) {
+//     run_rma_data_t* d = (run_rma_data_t*)data;
+//     ack_t* ack = (ack_t*) ack_ptr;
+//     const int n_msg = param->n_msg;
+//     const size_t msg_size = param->msg_size;
+//     const size_t ttl_len = n_msg * msg_size;
+//     const int buddy = peer(param->comm->rank, param->comm->size);
+//
+//     // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
+//     bool do_real_fast = !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) &&
+//                         !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_ORDER) &&
+//                         !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
+//     double time;
+//     rmem_prof_t prof = {.name = "send"};
+//     //------------------------------------------------
+//     // enqueue the requests
+//     rmem_trigr_ptr* trigr = d->trigr;
+//     if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
+//         trigr = m_malloc(sizeof(rmem_trigr_ptr) * n_msg);
+//     }
+//     for (int j = 0; j < n_msg; ++j) {
+//         ofi_rma_enqueue(param->mem, d->rma + j, trigr + j, device);
+//     }
+//     if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
+//         m_gpu_call(gpuMemcpySync((void*)d->trigr, trigr, n_msg * sizeof(rmem_trigr_ptr),
+//                                  gpuMemcpyHostToDevice));
+//         free((void*)trigr);
+//     }
+//     // get the start id
+//     const int start_id = rmem_get_rand(n_msg);
+//     // send a readiness signal
+//     if (do_real_fast) {
+//         ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
+//     } else {
+//         ofi_rmem_start(1, &buddy, param->mem, param->comm);
+//     }
+//     // compute the time difference
+//     ack_offset_sender(ack);
+//     if (device == RMEM_AWARE) {
+//         m_rmem_prof(prof, time) {
+//             for (int j = 0; j < n_msg; ++j) {
+//                 const int id = (start_id + j) % n_msg;
+//                 ofi_rma_start(param->mem, d->rma + id, RMEM_AWARE);
+//             }
+//             if (do_real_fast) {
+//                 ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+//             } else {
+//                 ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+//             }
+//         }
+//     } else {
+//         m_rmem_prof(prof, time) {
+//             gpu_trigger_op(RMEM_GPU_PUT, start_id, n_msg, d->buf, param->msg_size, d->trigr,
+//                            d->stream);
+//             m_gpu_call(gpuStreamSynchronize(d->stream));
+//             m_verb("rma_run_send_device: rmem_complete");
+//             if (do_real_fast) {
+//                 ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
+//             } else {
+//                 ofi_rmem_complete(1, &buddy, param->mem, param->comm);
+//             }
+//         }
+//     }
+//     // send the starting time from the profiler
+//     ack_send_withtime(ack, &prof.t0);
+//     ofi_rma_reset_queue(param->mem);
+//     return time;
+// }
+
+//--------------------------------------------------------------------------------------------------
+static double rma_run_recv_common(run_param_t* param, void* data, void* ack_ptr, rmem_device_t dev,
+                           rmem_protocol_t protocol) {
     run_rma_data_t* d = (run_rma_data_t*)data;
-    ack_t* ack = (ack_t*) ack_ptr;
+    ack_t* ack = (ack_t*)ack_ptr;
     const int n_msg = param->n_msg;
     const size_t msg_size = param->msg_size;
     const size_t ttl_len = n_msg * msg_size;
@@ -640,138 +735,97 @@ double rma_fast_run_send_device(run_param_t* param, void* data,void* ack_ptr,rme
     bool do_real_fast = !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) &&
                         !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_ORDER) &&
                         !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
-    double time;
-    rmem_prof_t prof = {.name = "send"};
-    //------------------------------------------------
-    // enqueue the requests
-    rmem_trigr_ptr* trigr = d->trigr;
-    if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
-        trigr = m_malloc(sizeof(rmem_trigr_ptr) * n_msg);
-    }
-    for (int j = 0; j < n_msg; ++j) {
-        ofi_rma_enqueue(param->mem, d->rma + j, trigr + j, device);
-    }
-    if (gpuMemoryType((void*)d->trigr) != gpuMemoryTypeSystem) {
-        m_gpu_call(gpuMemcpySync((void*)d->trigr, trigr, n_msg * sizeof(rmem_trigr_ptr),
-                                 gpuMemcpyHostToDevice));
-        free((void*)trigr);
-    }
-    // get the start id
-    const int start_id = rmem_get_rand(n_msg);
-    // send a readiness signal
-    if (do_real_fast) {
-        ofi_rmem_start_fast(1, &buddy, param->mem, param->comm);
-    } else {
-        ofi_rmem_start(1, &buddy, param->mem, param->comm);
-    }
-    // compute the time difference
-    ack_offset_sender(ack);
-    if (device == RMEM_AWARE) {
-        m_rmem_prof(prof, time) {
-            for (int j = 0; j < n_msg; ++j) {
-                const int id = (start_id + j) % n_msg;
-                ofi_rma_start(param->mem, d->rma + id, RMEM_AWARE);
-            }
-            if (do_real_fast) {
-                ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
-            } else {
-                ofi_rmem_complete(1, &buddy, param->mem, param->comm);
-            }
-        }
-    } else {
-        m_rmem_prof(prof, time) {
-            gpu_trigger_op(RMEM_GPU_PUT, start_id, n_msg, d->buf, param->msg_size, d->trigr,
-                           d->stream);
-            m_gpu_call(gpuStreamSynchronize(d->stream));
-            m_verb("rma_run_send_device: rmem_complete");
-            if (do_real_fast) {
-                ofi_rmem_complete_fast(n_msg, param->mem, param->comm);
-            } else {
-                ofi_rmem_complete(1, &buddy, param->mem, param->comm);
-            }
-        }
-    }
-    // send the starting time from the profiler
-    ack_send_withtime(ack, &prof.t0);
-    ofi_rma_reset_queue(param->mem);
-    return time;
-}
-double rma_fast_run_send(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_AWARE);
-}
-double rma_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_fast_run_send_device(param, data, ack_ptr, RMEM_TRIGGER);
-}
-
-//--------------------------------------------------------------------------------------------------
-double rma_run_recv(run_param_t* param, void* data, void* ack_ptr) {
-    run_rma_data_t* d = (run_rma_data_t*)data;
-    ack_t* ack = (ack_t*)ack_ptr;
-    const int n_msg = param->n_msg;
-    const size_t msg_size = param->msg_size;
-    const size_t ttl_len = n_msg * msg_size;
-    const int buddy = peer(param->comm->rank, param->comm->size);
-
-    double time;
+    double time, time_result;
     rmem_prof_t prof = {.name = "recv"};
     //------------------------------------------------
     // wait for the readiness signal
-    ack_wait(ack);
-    m_rmem_prof(prof, time) {
-        ofi_rmem_post(1, &buddy, param->mem, param->comm);
-        ofi_rmem_wait(1, &buddy, param->mem, param->comm);
-    }
-    //------------------------------------------------
-    // check the result
-    run_test_check(ttl_len, param->mem->buf);
-    return time;
-}
-double rma_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_run_recv(param, data, ack_ptr);
-}
-double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
-    run_rma_data_t* d = (run_rma_data_t*)data;
-    ack_t* ack = (ack_t*)ack_ptr;
-    const int n_msg = param->n_msg;
-    const size_t msg_size = param->msg_size;
-    const size_t ttl_len = n_msg * msg_size;
-    const int buddy = peer(param->comm->rank, param->comm->size);
-
-    // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
-    bool do_real_fast = !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) &&
-                        !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_ORDER) &&
-                        !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
-
-    double time;
-    rmem_prof_t prof = {.name = "recv"};
-    //------------------------------------------------
-    if (do_real_fast) {
-        ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
-    } else {
-        ofi_rmem_post(1, &buddy, param->mem, param->comm);
-    }
-    // obtain the acknowledgment
-    const double offset = ack_offset_recver(ack);
-    m_rmem_prof(prof, time) {
-        if (do_real_fast) {
-            ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
-        } else {
+    if (protocol == RMEM_DEFAULT) {
+        ack_wait(ack);
+        m_rmem_prof(prof, time) {
+            ofi_rmem_post(1, &buddy, param->mem, param->comm);
             ofi_rmem_wait(1, &buddy, param->mem, param->comm);
         }
+        time_result = time;
+    } else if (protocol == RMEM_FAST) {
+        if (do_real_fast) {
+            ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
+        } else {
+            ofi_rmem_post(1, &buddy, param->mem, param->comm);
+        }
+        // obtain the acknowledgment
+        const double offset = ack_offset_recver(ack);
+        m_rmem_prof(prof, time) {
+            if (do_real_fast) {
+                ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
+            } else {
+                ofi_rmem_wait(1, &buddy, param->mem, param->comm);
+            }
+        }
+        // T sender = t recver + offset => T recver = T sender - offset
+        // time elapsed = (T recver -  (T sender - offset))
+        struct timespec tsend;
+        ack_wait_withtime(ack, &tsend);
+        time_result = m_get_wtimes(tsend, prof.t1) + offset;
+        m_verb("estimated time of comms = %f vs previously measured one %f, offset is %f",
+               time_result, time, offset);
     }
-    // T sender = t recver + offset => T recver = T sender - offset
-    // time elapsed = (T recver -  (T sender - offset))
-    struct timespec tsend;
-    ack_wait_withtime(ack, &tsend);
-    double sync_time = m_get_wtimes(tsend, prof.t1) + offset;
-    m_verb("estimated time of comms = %f vs previously measured one %f, offset is %f", sync_time,
-           time, offset);
-
     //------------------------------------------------
     // check the result
     run_test_check(ttl_len, param->mem->buf);
-    return sync_time;
+    return time_result;
+}
+double rma_run_recv(run_param_t* param, void* data, void* ack_ptr) {
+    return rma_run_recv_common(param, data, ack_ptr, RMEM_AWARE, RMEM_DEFAULT);
+}
+double rma_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
+    return rma_run_recv_common(param, data, ack_ptr, RMEM_TRIGGER, RMEM_DEFAULT);
+}
+double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
+    return rma_run_recv_common(param, data, ack_ptr, RMEM_AWARE, RMEM_FAST);
 }
 double rma_fast_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr) {
-    return rma_fast_run_recv(param, data, ack_ptr);
+    return rma_run_recv_common(param, data, ack_ptr, RMEM_TRIGGER, RMEM_FAST);
 }
+// double rma_fast_run_recv(run_param_t* param, void* data, void* ack_ptr) {
+//     run_rma_data_t* d = (run_rma_data_t*)data;
+//     ack_t* ack = (ack_t*)ack_ptr;
+//     const int n_msg = param->n_msg;
+//     const size_t msg_size = param->msg_size;
+//     const size_t ttl_len = n_msg * msg_size;
+//     const int buddy = peer(param->comm->rank, param->comm->size);
+//
+//     // we cannot do the fast completion with FENCE or DELIVERY COMPLETE
+//     bool do_real_fast = !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL) &&
+//                         !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_ORDER) &&
+//                         !(param->comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
+//
+//     double time;
+//     rmem_prof_t prof = {.name = "recv"};
+//     //------------------------------------------------
+//     if (do_real_fast) {
+//         ofi_rmem_post_fast(1, &buddy, param->mem, param->comm);
+//     } else {
+//         ofi_rmem_post(1, &buddy, param->mem, param->comm);
+//     }
+//     // obtain the acknowledgment
+//     const double offset = ack_offset_recver(ack);
+//     m_rmem_prof(prof, time) {
+//         if (do_real_fast) {
+//             ofi_rmem_wait_fast(n_msg, param->mem, param->comm);
+//         } else {
+//             ofi_rmem_wait(1, &buddy, param->mem, param->comm);
+//         }
+//     }
+//     // T sender = t recver + offset => T recver = T sender - offset
+//     // time elapsed = (T recver -  (T sender - offset))
+//     struct timespec tsend;
+//     ack_wait_withtime(ack, &tsend);
+//     double sync_time = m_get_wtimes(tsend, prof.t1) + offset;
+//     m_verb("estimated time of comms = %f vs previously measured one %f, offset is %f", sync_time,
+//            time, offset);
+//
+//     //------------------------------------------------
+//     // check the result
+//     run_test_check(ttl_len, param->mem->buf);
+//     return sync_time;
+// }

@@ -125,7 +125,6 @@ int main(int argc, char** argv) {
             .buf = calloc(ttl_len, sizeof(int)),
             .count = ttl_len * sizeof(int),
         };
-
 #endif
     }
     ofi_rmem_init(&rma_mem, param.comm);
@@ -195,6 +194,28 @@ int main(int argc, char** argv) {
             m_log("<p2p preposted>");
         }
         run_test(&p2pf_send, &p2pf_recv, param, &p2pf_time);
+    }
+    //----------------------------------------------------------------------------------------------
+    // P2P FAST
+    run_time_t p2pfgpu_time = {0};
+    {
+        run_p2p_data_t p2pfgpu_data;
+        run_t p2pf_send = {
+            .data = &p2pfgpu_data,
+            .pre = &p2p_pre_send,
+            .run = &p2p_fast_run_send_gpu,
+            .post = &p2p_post_send,
+        };
+        run_t p2pf_recv = {
+            .data = &p2pfgpu_data,
+            .pre = &p2p_pre_recv,
+            .run = &p2p_fast_run_recv_gpu,
+            .post = &p2p_post_recv,
+        };
+        if (!comm.rank) {
+            m_log("<p2p preposted triggered>");
+        }
+        run_test(&p2pf_send, &p2pf_recv, param, &p2pfgpu_time);
     }
     //----------------------------------------------------------------------------------------------
     // PUT
@@ -366,6 +387,8 @@ int main(int argc, char** argv) {
             const double ci_p2pgpu = m_run_time(p2pgpu_time.ci);
             const double ti_pfgpu = m_run_time(pfast_gpu_time.avg);
             const double ci_pfgpu = m_run_time(pfast_gpu_time.ci);
+            const double ti_p2pfgpu = m_run_time(p2pfgpu_time.avg);
+            const double ci_p2pfgpu = m_run_time(p2pfgpu_time.ci);
             if (!is_sender(comm.rank)) {
                 m_log(
                     "time/msg (%ld B/msg - %d msgs):\n"
@@ -375,7 +398,8 @@ int main(int argc, char** argv) {
                     "\tPUT TRIGR      = %f +-[%f] (ratio = %f)\n"
                     "\tP2P FAST       = %f +-[%f] (ratio = %f)\n"
                     "\tPUT FAST       = %f +-[%f] (ratio = %f)\n"
-                    "\tPUT FAST TRGR  = %f +-[%f] (ratio = %f)\n",
+                    "\tPUT FAST TRGR  = %f +-[%f] (ratio = %f)\n"
+                    "\tP2P FAST TRGR  = %f +-[%f] (ratio = %f)\n",
                     msg_size * sizeof(int), imsg,
                     ti_p2p, ci_p2p,
                     ti_put, ci_put, ti_put / ti_p2p,
@@ -383,12 +407,14 @@ int main(int argc, char** argv) {
                     ti_pgpu, ci_pgpu, ti_pgpu / ti_p2p,
                     ti_p2pf, ci_p2pf, ti_p2pf / ti_p2p,
                     ti_fast, ci_fast, ti_fast / ti_p2p,
-                    ti_pfgpu,ci_pfgpu,ti_pfgpu/ti_p2p);
+                    ti_pfgpu,ci_pfgpu,ti_pfgpu/ti_p2p,
+                    ti_p2pfgpu,ci_p2pfgpu,ti_p2pfgpu/ti_p2p);
             }
             // write to csv
-            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", msg_size * sizeof(int),
-                    ti_p2p, ti_put, ti_pgpu, ti_fast, ti_p2pf, ti_p2pgpu, ti_pfgpu, ci_p2p, ci_put,
-                    ci_pgpu, ci_fast, ci_p2pf, ci_p2pgpu, ci_pfgpu);
+            fprintf(file, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
+                    msg_size * sizeof(int), ti_p2p, ti_put, ti_pgpu, ti_fast, ti_p2pf, ti_p2pgpu,
+                    ti_pfgpu, ti_p2pfgpu, ci_p2p, ci_put, ci_pgpu, ci_fast, ci_p2pf, ci_p2pgpu,
+                    ci_pfgpu, ci_p2pfgpu);
             // bump the index
             idx++;
         }
@@ -429,10 +455,12 @@ int main(int argc, char** argv) {
             const double ci_p2pgpu = m_run_time(p2pgpu_time.ci);
             const double ti_pfgpu = m_run_time(pfast_gpu_time.avg);
             const double ci_pfgpu = m_run_time(pfast_gpu_time.ci);
+            const double ti_p2pfgpu = m_run_time(p2pfgpu_time.avg);
+            const double ci_p2pfgpu = m_run_time(p2pfgpu_time.ci);
             // write to csv
-            fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p, ti_put,
-                    ti_pgpu, ti_fast, ti_p2pf, ti_p2pgpu, ti_pfgpu, ci_p2p, ci_put, ci_pgpu,
-                    ci_fast, ci_p2pf, ci_p2pgpu, ci_pfgpu);
+            fprintf(file, "%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", imsg, ti_p2p,
+                    ti_put, ti_pgpu, ti_fast, ti_p2pf, ti_p2pgpu, ti_pfgpu, ti_p2pfgpu, ci_p2p,
+                    ci_put, ci_pgpu, ci_fast, ci_p2pf, ci_p2pgpu, ci_pfgpu, ci_p2pfgpu);
             // bump the index
             idx++;
         }
@@ -442,6 +470,8 @@ int main(int argc, char** argv) {
     if (p2p_time.ci) free(p2p_time.ci);
     if (p2pf_time.avg) free(p2pf_time.avg);
     if (p2pf_time.ci) free(p2pf_time.ci);
+    if (p2pfgpu_time.avg) free(p2pfgpu_time.avg);
+    if (p2pfgpu_time.ci) free(p2pfgpu_time.ci);
     if (p2pgpu_time.avg) free(p2pgpu_time.avg);
     if (p2pgpu_time.ci) free(p2pgpu_time.ci);
     if (put_time.avg) free(put_time.avg);

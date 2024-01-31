@@ -74,6 +74,8 @@ double p2p_run_send_gpu(run_param_t* param, void* data, void* ack);
 double p2p_run_recv_gpu(run_param_t* param, void* data, void* ack);
 double p2p_fast_run_send(run_param_t* param, void* data, void* ack);
 double p2p_fast_run_recv(run_param_t* param, void* data, void* ack);
+double p2p_fast_run_send_gpu(run_param_t* param, void* data, void* ack_ptr);
+double p2p_fast_run_recv_gpu(run_param_t* param, void* data, void* ack_ptr);
 
 //--------------------------------------------------------------------------------------------------
 // PRE
