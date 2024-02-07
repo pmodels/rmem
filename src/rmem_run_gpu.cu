@@ -16,7 +16,8 @@ extern "C" void cuda_trigger_op(rmem_gpu_op_t op, const size_t start, const size
                                 const size_t len, rmem_trigr_ptr* trigr, gpuStream_t stream) {
     for (int ii = 0; ii < n_msg; ++ii) {
         const int id = (start + ii) % n_msg;
-        cuda_trigger_op_device<<<1, 1, 0, stream>>>(data + id * len, len, 1 + id * len, trigr + id,
+        rmem_trigr_ptr* curr_trigr = (trigr) ? (trigr + id) : NULL;
+        cuda_trigger_op_device<<<1, 1, 0, stream>>>(data + id * len, len, 1 + id * len, curr_trigr,
                                                     op);
     }
 }

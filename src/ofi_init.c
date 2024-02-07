@@ -18,16 +18,18 @@
 // allow CXI extensions
 //----------------------------------------
 #if defined(FI_CXI_DOM_OPS_3) || defined(FI_CXI_DOM_OPS_4)
-#define FI_CXI_DOM_OPS 1
 // choose the extension ID
 #if defined(FI_CXI_DOM_OPS_3)
+#define FI_CXI_DOM_OPS 3
 #define FI_CXI_DOM_OPS_ID FI_CXI_DOM_OPS_3
 #elif defined(FI_CXI_DOM_OPS_4)
-#define FI_CXI_DOM_OPS_ID FI_CXI_DOM_OPS_3
+#define FI_CXI_DOM_OPS 4
+#define FI_CXI_DOM_OPS_ID FI_CXI_DOM_OPS_4
 #endif
 //----------------------------------------
 #else
 #define FI_CXI_DOM_OPS 0
+#define FI_CXI_DOM_OPS_ID FI_CXI_DOM_OPS_0
 #endif
 
 
@@ -66,12 +68,12 @@ int ofi_ctx_init(const int comm_size, struct fi_info* prov, struct fid_domain* d
     // get the maximum of triggered opt (not used, curiosity only)
     // see https://ofiwg.github.io/libfabric/main/man/fi_endpoint.3.html
     size_t opt_len = 0;
-#if (FI_CXI_DOM_OPS)
-    if (strcmp(ofi->prov->domain_attr->name, "cxi")) {
+#if (FI_CXI_DOM_OPS >= 4)
+    if (strcmp(prov->domain_attr->name, "cxi")) {
         m_log("[INFO] using CXI hybrid MR");
         struct fi_cxi_dom_ops* dom_ops;
-        m_ofi_call(fi_open_ops(&ofi->domain->fid, FI_CXI_DOM_OPS_ID, 0, (void**)&dom_ops, NULL));
-        m_ofi_call(dom_ops->get_dwq_depth(&ofi->domain->fid, &opt_len));
+        m_ofi_call(fi_open_ops(&dom->fid, FI_CXI_DOM_OPS_ID, 0, (void**)&dom_ops, NULL));
+        m_ofi_call(dom_ops->get_dwq_depth(&dom->fid, &opt_len));
     }
 #else
     int res = fi_getopt(&(*ctx)->p2p_ep->fid, FI_OPT_ENDPOINT, FI_OPT_XPU_TRIGGER, NULL, &opt_len);
@@ -123,7 +125,7 @@ int ofi_init(ofi_comm_t* ofi) {
     m_ofi_call(fi_domain(ofi->fabric, ofi->prov, &ofi->domain, NULL));
 
     // if cxi, enable the hybrid MR
-#if (FI_CXI_DOM_OPS)
+#if (FI_CXI_DOM_OPS >= 3)
     if (strcmp(ofi->prov->domain_attr->name, "cxi")) {
         m_log("[INFO] using CXI hybrid MR");
         struct fi_cxi_dom_ops* dom_ops;
