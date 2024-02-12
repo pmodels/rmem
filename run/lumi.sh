@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --time=00:10:00
+#SBATCH --time=04:00:00
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --account=project_465000723
@@ -7,7 +7,10 @@
 #--------------------------------------------
 ##SBATCH --partition=small
 #--------------------------------------------
-#SBATCH --partition=dev-g
+##SBATCH --time=01:00:00
+##SBATCH --partition=dev-g
+#SBATCH --time=06:00:00
+#SBATCH --partition=standard-g
 #SBATCH --gpus-per-task=1
 #--------------------------------------------
 
@@ -40,7 +43,7 @@ export ASAN_OPTIONS=protect_shadow_gap=0:use_sigaltstack=0
 export TSAN_OPTIONS=second_deadlock_stack=1
 #-------------------------------------------------------------------------------
 export FI_HMEM_CUDA_USE_GDRCOPY=1
-#export FI_CXI_OPTIMIZED_MRS=0
+export FI_CXI_OPTIMIZED_MRS=1
 #export FI_LOG_LEVEL=Debug
 #export FI_CXI_RDZV_THRESHOLD=4096
 #export HYDRA_TOPO_DEBUG=1
@@ -65,14 +68,32 @@ cp -r ${HOME_DIR}/Makefile .
 MPI_OPT="-n 2 -ppn 1 -l --bind-to core:2"
 #-------------------------------------------------------------------------------
 export PMI_DIR=${DBS_DIR}
-#for device in 0 1; do
-for device in 1; do
+#for ofi_lib in 0 1; do
+for ofi_lib in 0 ; do
+#for cxi_disable_idc in 0 1; do
+for cxi_disable_idc in 0 ; do
+for device in 0 1; do
+#for device in 1; do
+    export FI_CXI_DISABLE_NON_INJECT_MSG_IDC=${cxi_disable_idc}
     export USE_HIP=${device}
     make clean
-    #make info debug
-    make info verbose
+    #---------------------------------------------------------------------------
+    if [ ${ofi_lib} = 1 ]; then
+        module unload libfabric
+        export OFI_DIR=${HOME}/libfabric/_inst
+        export OFI_LIB=${OFI_DIR}/lib
+    else
+        module load libfabric
+        export OFI_DIR=/opt/cray/libfabric/1.15.2.0/
+        export OFI_LIB=${OFI_DIR}/lib64
+    fi
+    #---------------------------------------------------------------------------
+    #make info asan
+    #make info verbose
     #make info fast
+    make info fast
     ldd rmem
+    ${HOME}/libtree/libtree rmem
     #test delivery
     declare -a test=(
         "-r am -d am -c delivery"
@@ -81,9 +102,11 @@ for device in 1; do
         #"-r am -d tag -c delivery"
     )
     for RMEM_OPT in "${test[@]}"; do
-        echo "==> ${MPI_OPT} with ${RMEM_OPT} - HIP? ${USE_HIP}"
+        echo "==> ${MPI_OPT} with ${RMEM_OPT} - HIP? ${USE_HIP} - OFI? ${OFI_DIR} - DISABLE IDC? ${cxi_disable_idc}"
         FI_PROVIDER="cxi" ${MPI_DIR}/bin/mpiexec ${MPI_OPT} ./rmem ${RMEM_OPT}
     done
+done
+done
 done
 
 #echo "--------------------------------------------------"
