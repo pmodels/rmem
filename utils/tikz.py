@@ -79,13 +79,14 @@ col_gru["purple"][2]="C2A5CF"
 #===============================================================================
 
 AXIS = Enum('AXIS',['loglog', 'xlog', 'ylog','xy'])
-RMEM = Enum('RMEM',['p2p', 'put', 'put_trigr', 'put_fast', 'p2p_fast', 'p2p_trigr', 'put_trigr_fast'])
+RMEM = Enum('RMEM',['p2p', 'put', 'put_trigr', 'put_fast', 'p2p_fast', 'p2p_trigr', 'put_trigr_fast', 'p2p_trigr_fast'])
 LINESTYLE = Enum('LINESTYLE',['solid', 'dashed'])
-MARKSTYLE = Enum('MARKSTYLE',['square', 'star', 'circle'])
-PLOT = Enum('PLOT',['latency', 'ratio_map'])
+MARKSTYLE = Enum('MARKSTYLE',['square', 'circle', 'diamond','triangle','pentagon'])
+PLOT = Enum('PLOT',['latency', 'ratio_map', 'msg'])
+TYPE = Enum('TYPE',['plot', 'reset'])
 
 class plot:
-  def __init__(self,folder,data,data_list,prov,msg,p2p_idx=0,name="",break_line=False,injection=False,bandwidth=200,case=[RMEM.p2p,RMEM.p2p_fast,RMEM.put,RMEM.put_fast],legend=[""]):
+  def __init__(self,folder,data,data_list,prov,msg,p2p_idx=0,name="",break_line=False,injection=False,bandwidth=200,case=[RMEM.p2p,RMEM.p2p_fast,RMEM.put,RMEM.put_fast],legend=[""],linestyle=None,type=TYPE.plot):
     self.folder_dir = folder
     self.data_dir = data
     self.data_list = data_list
@@ -101,6 +102,10 @@ class plot:
     self.break_line = break_line
     self.bandwidth=bandwidth
     self.llist = legend
+    self.linestyle = linestyle
+    self.type = type
+    self.max_mark = 4
+    
 
 # hexa code, no '#' in front!
 # from https://personal.sron.nl/~pault/#tab:blindvision
@@ -114,6 +119,7 @@ colors[RMEM.put_fast] = col_gru["magenta"]
 colors[RMEM.p2p_fast] = col_gru["blue"]
 colors[RMEM.p2p_trigr] = col_pault["cyan"]
 colors[RMEM.put_trigr_fast] = col_pault["red"]
+colors[RMEM.p2p_trigr_fast] = col_pault["blue"]
 
 colgen=dict()
 colgen["teal"] = col_gru["teal"]
@@ -144,6 +150,7 @@ idx_list[RMEM.put_fast] = 4
 idx_list[RMEM.p2p_fast] = 5
 idx_list[RMEM.p2p_trigr] = 6
 idx_list[RMEM.put_trigr_fast] = 7
+idx_list[RMEM.p2p_trigr_fast] = 8
 
 colors_idx = dict()
 colors_idx[RMEM.p2p] =0
@@ -153,8 +160,19 @@ colors_idx[RMEM.put_fast] = 0
 colors_idx[RMEM.p2p_fast] = 0
 colors_idx[RMEM.p2p_trigr] =0
 colors_idx[RMEM.put_trigr_fast] =0
+colors_idx[RMEM.p2p_trigr_fast] =0
 
-_linewidth = 0.75
+_linewidth = 0.95
+
+mark_idx = int()
+mark_list=dict()
+mark_list[0] = MARKSTYLE.circle
+mark_list[1] = MARKSTYLE.square
+mark_list[2] = MARKSTYLE.diamond
+mark_list[3] = MARKSTYLE.triangle
+mark_list[4] = MARKSTYLE.pentagon
+mark_list[5] = MARKSTYLE.circle
+mark_list[6] = MARKSTYLE.circle
 
 def leg_2_colkey(leg):
     if leg.find("p2p")>=0:
@@ -167,11 +185,14 @@ def leg_2_colkey(leg):
         return "magenta"
     elif leg.find("fence")>=0:
         return "green"
+    elif leg.find("order")>=0:
+        return "green"
     else:
         print(f"col 2 leg failed with {leg}")
         return "grey"
 
 def rmem_2_legend(case):
+    print(f"looking for a legend for {case}")
     if(case == RMEM.p2p):
         return "p2p"
     elif(case == RMEM.put):
@@ -186,6 +207,8 @@ def rmem_2_legend(case):
         return "p2p trigger"
     elif(case == RMEM.put_trigr_fast):
         return "put trigger fast"
+    elif(case == RMEM.p2p_trigr_fast):
+        return "p2p trigger fast"
     
 def rmem_2_linestyle(case):
     if (case == RMEM.p2p_fast or case == RMEM.put_fast):
@@ -209,14 +232,22 @@ def linestyle_2_tikz(line):
         return "solid"
     elif (line == LINESTYLE.dashed):
         return "dashed"
-    
+
+# ['square', 'circle', 'diamond','triangle','pentagon'])
 def markstyle_2_tikz(mark):
     if (mark == MARKSTYLE.square):
-        return "mark=square"
-    elif (mark == MARKSTYLE.star):
-        return "mark=*"
+        return "mark=square*"
     elif (mark == MARKSTYLE.circle):
+        return "mark=*"
+    elif (mark == MARKSTYLE.diamond):
+        return "mark=diamond*"
+    elif (mark == MARKSTYLE.triangle):
+        return "mark=triangle*"
+    elif (mark == MARKSTYLE.pentagon):
+        return "mark=pentagon*"
+    else:
         return "mark=o"
+
     
 #===============================================================================
 def tikz_plot(filename,plot_list,header="",standalone=True,kind=PLOT.latency):
@@ -225,15 +256,31 @@ def tikz_plot(filename,plot_list,header="",standalone=True,kind=PLOT.latency):
         colors_idx[key]=0
     for key in colgen_idx:
         colgen_idx[key]=0
+    # reset mark counter
+    global mark_idx
+    mark_idx = 0
 
     # default tikz opts
     tikz_opt = f"{header}"
+                
     if(kind is PLOT.latency):
         tikz_opt = tikz_opt + "," + \
-            "xlabel={msg size [B]},"\
+            "xlabel={msg size [B]},\n"\
+            "ylabel={time/msg [$\mu$s]},\n"\
+            "major grid style={thick},ymajorgrids=true,yminorgrids=true,\n"\
+            "xtick={4,32,256,2048,16384,262144,4194304},\n"\
+            "xticklabels={4,32,256,2ki,16ki,262ki,4Mi},\n"\
+    
+    elif(kind is PLOT.msg):
+        tikz_opt = tikz_opt + "," + \
+            "xlabel={number of msgs},"\
             "ylabel={time/msg [$\mu$s]},"\
-            "xtick={4,32,256,2048,16384,262144,4194304},"\
-            "xticklabels={4,32,256,2ki,16ki,262ki,4Mi},"\
+            "xtick={1,4,16,64,256,1024},"\
+            "xticklabels={1,4,16,64,256,1024},"\
+            "legend style={anchor=north east,at={(0.99,0.99)},},"\
+            "log ticks with fixed point,"\
+            "major grid style={thick},ymajorgrids=true,yminorgrids=true,\n"\
+            # "ymin=0.2,"\
             
     elif(kind is PLOT.ratio_map):
         tikz_opt = tikz_opt + "," + \
@@ -241,6 +288,7 @@ def tikz_plot(filename,plot_list,header="",standalone=True,kind=PLOT.latency):
             "ylabel={msg },"\
             "xtick={4,32,256,2048,16384,262144,4194304},"\
             "xticklabels={4,32,256,2ki,16ki,262ki,4Mi},"\
+            "major grid style={thick},ymajorgrids=true,yminorgrids=true,\n"\
             
     #---------------------------------------------------------------------------
     # open the file and write the header if needed
@@ -261,6 +309,18 @@ def tikz_plot(filename,plot_list,header="",standalone=True,kind=PLOT.latency):
     plot_idx = 0
     raw=dict()
     for plot in plot_list:
+        print(f"plot type = {plot.type}")
+        if(plot.type is TYPE.reset):
+            print(f"--- RESET COUNTERS ---")
+            # reset color counters
+            for key in colors_idx:
+                colors_idx[key]=0
+            for key in colgen_idx:
+                colgen_idx[key]=0
+            # reset mark counter
+            mark_idx = 0
+            # 
+            continue
         leg_idx = 0
         #-----------------------------------------------------------------------
         # if standalone, create a new plot
@@ -268,8 +328,9 @@ def tikz_plot(filename,plot_list,header="",standalone=True,kind=PLOT.latency):
             title=plot.name
             tikz_axis_open(file,f"{title}",tikz_opt=tikz_opt,kind=kind)
         #-----------------------------------------------------------------------
-        if(kind is PLOT.latency):
-            tikz_plot_latency(plot,file,leg_idx)
+        if(kind is PLOT.latency or kind is PLOT.msg):
+            print(f"doing plot with kind = {kind}")
+            tikz_plot_latency_msg(plot,file,leg_idx,kind=kind)
         elif(kind is PLOT.ratio_map):
             tikz_plot_ratio(plot,file)
         #-----------------------------------------------------------------------
@@ -333,7 +394,10 @@ def tikz_plot_ratio(plot,tikz_file,time_ref=RMEM.p2p):
             # tikz_file.write(f"point meta max={max(1,max_val)},\n")
             tikz_file.write("};\n")
 
-def tikz_plot_latency(plot,file,leg_idx):
+def tikz_plot_latency_msg(plot,file,leg_idx,kind=PLOT.latency):
+    global mark_idx
+    global mark_list
+    print(f"mark_idx is now {mark_idx}")
     for prov in plot.prov_list:
             for msg in plot.msg_list:
                 for case in plot.case_list:
@@ -341,8 +405,11 @@ def tikz_plot_latency(plot,file,leg_idx):
                     # P2P
                     #-----------------------------------------------------------
                     if(case == RMEM.p2p or case==RMEM.p2p_fast) and (plot.p2p_idx >=0):
-                        data_file = f"{plot.folder_dir}/{plot.data_dir}/data_{plot.p2p_idx}/r1_msg{msg}_{prov}.txt"
-                        
+                        if kind is PLOT.latency:
+                            data_file = f"{plot.folder_dir}/{plot.data_dir}/data_{plot.p2p_idx}/r1_msg{msg}_{prov}.txt"
+                        elif kind is PLOT.msg:
+                            data_file = f"{plot.folder_dir}/{plot.data_dir}/data_{plot.p2p_idx}/r1_size{msg}_{prov}.txt"
+                        print(f"doing plot with kind = {kind}, data file = {data_file}")
                         # get the legend either from the legend list of from the automatic conversion
                         if(leg_idx < len(plot.llist)):
                             legend = plot.llist[leg_idx]
@@ -352,9 +419,16 @@ def tikz_plot_latency(plot,file,leg_idx):
                         col_key = leg_2_colkey(f"{rmem_2_legend(case)}")
                         color = colgen[col_key][colgen_idx[col_key]]
                         colgen_idx[col_key]=colgen_idx[col_key]+1
-                        linestyle = rmem_2_linestyle(case)
+                        if plot.linestyle:
+                            linestyle = plot.linestyle
+                        else:
+                            linestyle = rmem_2_linestyle(case)
+                        markstyle = mark_list[mark_idx]
+                        print(f"markstyle = {markstyle}")
+                        # loop over the mark_idx
+                        mark_idx = (mark_idx + 1)%plot.max_mark
                         print(f"doing case {case} from data_{plot.p2p_idx}: {legend} from {data_file}")
-                        tikz_addplot(file,0,idx_list[case],data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color)
+                        tikz_addplot(file,0,idx_list[case],data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color, marker=markstyle)
                         leg_idx = leg_idx +1;
                     #-----------------------------------------------------------
                     # RMA
@@ -362,7 +436,12 @@ def tikz_plot_latency(plot,file,leg_idx):
                     else:
                         for data in plot.data_list:
                             data_folder = f"{plot.folder_dir}/{plot.data_dir}/data_{data}"
-                            data_file = f"{data_folder}/r1_msg{msg}_{prov}.txt"
+                            # data_file = f"{data_folder}/r1_msg{msg}_{prov}.txt"
+                            if kind is PLOT.latency:
+                                data_file = f"{data_folder}/r1_msg{msg}_{prov}.txt"
+                            elif kind is PLOT.msg:
+                                data_file = f"{data_folder}/r1_size{msg}_{prov}.txt"
+                            print(f"doing plot with kind = {kind}, data file = {data_file}")
                             rma = tikz_read_info(data_folder)
                             case_name = rmem_2_legend(case)
                             # get the legend
@@ -375,13 +454,21 @@ def tikz_plot_latency(plot,file,leg_idx):
                             #     continue
                             # color = colors[case][colors_idx[case]]
                             # get the color + linestyle
+                            col_lookingfor = f"{rmem_2_legend(case)} - {rma}"
+                            print(f"looking for color for {col_lookingfor}")
                             col_key = leg_2_colkey(f"{rmem_2_legend(case)} - {rma}")
                             color = colgen[col_key][colgen_idx[col_key]]
                             colgen_idx[col_key]=colgen_idx[col_key]+1
-                            linestyle = rmem_2_linestyle(case)
+                            if plot.linestyle:
+                                linestyle = plot.linestyle
+                            else:
+                                linestyle = rmem_2_linestyle(case)
+                            markstyle = mark_list[mark_idx]
+                            print(f"markstyle = {markstyle}")
+                            mark_idx = (mark_idx + 1)%plot.max_mark
                             # tikz_addplot(file,0,idx_list[case],data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color)
                             print(f"doing case {case} from data_{data}: {legend} from {data_file}")
-                            tikz_addplot(file,0,idx_list[case],data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color)
+                            tikz_addplot(file,0,idx_list[case],data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color, marker=markstyle)
                             leg_idx = leg_idx +1;
         
 
@@ -412,13 +499,13 @@ def tikz_addplot(tikz_file,x_idx,y_idx, datafile,
     # else:
     #     color_string = ""
     tikz_line = linestyle_2_tikz(linestyle)
-    tikz_mark = linestyle_2_tikz(marker)
+    tikz_mark = markstyle_2_tikz(marker)
     #---------------------------------------------------------------------------
     # do it!
     if(do_injection):
         dataf = datafile.replace("r1","r0")
         datafile = dataf
-    tikz_file.write(f"\\addplot+[{tikz_line},{color_string},line width={_linewidth}pt] table[col sep=comma, x index={x_idx}, y index={y_idx}] {{{datafile}}};\n")
+    tikz_file.write(f"\\addplot+[{tikz_line},{color_string},{tikz_mark},line width={_linewidth}pt, mark size={1.5*_linewidth}pt, mark options={{fill=none}}] table[col sep=comma, x index={x_idx}, y index={y_idx}] {{{datafile}}};\n")
     if(bool(legend)):
         tikz_file.write(f"\\addlegendentryexpanded{{{legend}}};\n")
     #     # tikz_line = linestyle_2_tikz(LINESTYLE.dashed)
@@ -448,13 +535,15 @@ def tikz_header(tikz_file,tikz_opt="",kind=PLOT.latency):
     tikz_file.write("}\n")
     tikz_file.write("\\pgfplotscreateplotcyclelist{marklist}{\n")
     tikz_file.write("    {mark=o},\n")
-    tikz_file.write("    {mark=*},\n")
-    tikz_file.write("    {mark=square}% <-- don't add a comma here\n")
+    tikz_file.write("    {mark=x},\n")
+    tikz_file.write("    {mark=square},\n")
+    tikz_file.write("    {mark=triangle},\n")
+    tikz_file.write("    {mark=diamond}% <-- don't add a comma here\n")
     tikz_file.write("}\n")
     tikz_file.write("%------------------------------------------------------------------------------------------------\n")
     tikz_file.write("\\pgfplotsset{every axis/.append style={\n")
     tikz_file.write("log basis x=2,\n")
-    if(kind is PLOT.latency):
+    if(kind is PLOT.latency or kind is PLOT.msg):
         tikz_file.write("% grid on\n")
         tikz_file.write("ymajorgrids=true,\n")
         tikz_file.write("xmajorgrids=true,\n")
@@ -466,8 +555,8 @@ def tikz_header(tikz_file,tikz_opt="",kind=PLOT.latency):
         tikz_file.write("% position the legend\n")
         tikz_file.write("log ticks with fixed point,\n")
         tikz_file.write("legend pos=north west,\n")
+        # tikz_file.write("legend style={fill opacity=0.8, draw opacity=1, text opacity=1, draw=lightgray204,font={\\picfont\\tiny}},\n")
         tikz_file.write("legend cell align={left},\n")
-        tikz_file.write("legend style={fill opacity=0.8, draw opacity=1, text opacity=1, draw=lightgray204,font={\\picfont\\tiny}},\n")
         tikz_file.write("mark size = 0.5pt,\n")
         tikz_file.write("cycle list name = colorlist,\n")
         tikz_file.write("cycle multi list = {\n")
@@ -497,7 +586,7 @@ def tikz_footer(tikz_file):
 
 def tikz_axis_open(tikz_file,title,tikz_opt="",kind=PLOT.latency):
     opt = tikz_opt
-    if(kind is PLOT.latency):
+    if(kind is PLOT.latency or kind is PLOT.msg):
         axis=AXIS.loglog
     else:
         axis=AXIS.loglog
@@ -550,6 +639,8 @@ def tikz_read_info(folder):
                 key = key + " - rcntr"
             elif line.find("FENCE")>=0:
                 key = key + " - fence"
+            elif line.find("ORDER")>=0:
+                key = key + " - order"
             else:
                 AssertionError("unknown")
     file.close()
