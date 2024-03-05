@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, UChicago Argonne, LLC
+ *	See COPYRIGHT in top-level directory
+ */
 #ifndef RMEM_ARGP_H_
 #define RMEM_ARGP_H_
 

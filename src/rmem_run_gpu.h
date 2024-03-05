@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, UChicago Argonne, LLC
+ *	See COPYRIGHT in top-level directory
+ */
 #ifndef RMEM_RUN_GPU_H__
 #define RMEM_RUN_GPU_H__
 

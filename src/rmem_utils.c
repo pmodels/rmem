@@ -1,5 +1,5 @@
 /*
- * Copyright (C) by Argonne National Laboratory
+ * Copyright (c) 2024, UChicago Argonne, LLC
  *	See COPYRIGHT in top-level directory
  */
 #include "rmem.h"

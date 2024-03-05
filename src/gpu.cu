@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, UChicago Argonne, LLC
+ *	See COPYRIGHT in top-level directory
+ */
 extern "C" {
 #include "gpu.h"
 }

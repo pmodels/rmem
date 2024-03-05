@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, UChicago Argonne, LLC
+ *	See COPYRIGHT in top-level directory
+ */
 #ifndef OFI_RMA_SYNC_TOOLS_
 #define OFI_RMA_SYNC_TOOLS_
 #include "ofi.h"
