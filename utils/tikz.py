@@ -1,6 +1,9 @@
 import numpy as np
 import matplotlib as mpl
 from enum import Enum
+import os
+import uuid
+import string
 
 #===============================================================================
 
@@ -86,7 +89,7 @@ PLOT = Enum('PLOT',['latency', 'ratio_map', 'msg'])
 TYPE = Enum('TYPE',['plot', 'reset'])
 
 class plot:
-  def __init__(self,folder,data,data_list,prov,msg,p2p_idx=0,name="",break_line=False,injection=False,bandwidth=200,case=[RMEM.p2p,RMEM.p2p_fast,RMEM.put,RMEM.put_fast],legend=[""],linestyle=None,type=TYPE.plot):
+  def __init__(self,folder,data,data_list,prov,msg,p2p_idx=0,name="",break_line=False,injection=False,bandwidth=200,case=[RMEM.p2p,RMEM.p2p_fast,RMEM.put,RMEM.put_fast],legend=[""],linestyle=None,type=TYPE.plot,res_dir="data_figures"):
     self.folder_dir = folder
     self.data_dir = data
     self.data_list = data_list
@@ -105,6 +108,7 @@ class plot:
     self.linestyle = linestyle
     self.type = type
     self.max_mark = 4
+    self.res_dir=res_dir
     
 
 # hexa code, no '#' in front!
@@ -266,7 +270,7 @@ def tikz_plot(filename,plot_list,header="",standalone=True,kind=PLOT.latency):
     if(kind is PLOT.latency):
         tikz_opt = tikz_opt + "," + \
             "xlabel={msg size [B]},\n"\
-            "ylabel={time/msg [$\mu$s]},\n"\
+            "ylabel={time/msg [$\\mu$s]},\n"\
             "major grid style={thick},ymajorgrids=true,yminorgrids=true,\n"\
             "xtick={4,32,256,2048,16384,262144,4194304},\n"\
             "xticklabels={4,32,256,2ki,16ki,262ki,4Mi},\n"\
@@ -274,7 +278,7 @@ def tikz_plot(filename,plot_list,header="",standalone=True,kind=PLOT.latency):
     elif(kind is PLOT.msg):
         tikz_opt = tikz_opt + "," + \
             "xlabel={number of msgs},"\
-            "ylabel={time/msg [$\mu$s]},"\
+            "ylabel={time/msg [$\\mu$s]},"\
             "xtick={1,4,16,64,256,1024},"\
             "xticklabels={1,4,16,64,256,1024},"\
             "legend style={anchor=north east,at={(0.99,0.99)},},"\
@@ -401,14 +405,15 @@ def tikz_plot_latency_msg(plot,file,leg_idx,kind=PLOT.latency):
     for prov in plot.prov_list:
             for msg in plot.msg_list:
                 for case in plot.case_list:
+                    if kind is PLOT.latency:
+                        data_file = f"r1_msg{msg}_{prov}.txt"
+                    elif kind is PLOT.msg:
+                        data_file = f"r1_size{msg}_{prov}.txt"
                     #-----------------------------------------------------------
                     # P2P
                     #-----------------------------------------------------------
                     if(case == RMEM.p2p or case==RMEM.p2p_fast) and (plot.p2p_idx >=0):
-                        if kind is PLOT.latency:
-                            data_file = f"{plot.folder_dir}/{plot.data_dir}/data_{plot.p2p_idx}/r1_msg{msg}_{prov}.txt"
-                        elif kind is PLOT.msg:
-                            data_file = f"{plot.folder_dir}/{plot.data_dir}/data_{plot.p2p_idx}/r1_size{msg}_{prov}.txt"
+                        data_folder = f"{plot.folder_dir}/{plot.data_dir}/data_{plot.p2p_idx}"
                         print(f"doing plot with kind = {kind}, data file = {data_file}")
                         # get the legend either from the legend list of from the automatic conversion
                         if(leg_idx < len(plot.llist)):
@@ -428,7 +433,7 @@ def tikz_plot_latency_msg(plot,file,leg_idx,kind=PLOT.latency):
                         # loop over the mark_idx
                         mark_idx = (mark_idx + 1)%plot.max_mark
                         print(f"doing case {case} from data_{plot.p2p_idx}: {legend} from {data_file}")
-                        tikz_addplot(file,0,idx_list[case],data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color, marker=markstyle)
+                        tikz_addplot(file,0,idx_list[case],plot.res_dir,data_folder,data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color, marker=markstyle)
                         leg_idx = leg_idx +1;
                     #-----------------------------------------------------------
                     # RMA
@@ -437,10 +442,6 @@ def tikz_plot_latency_msg(plot,file,leg_idx,kind=PLOT.latency):
                         for data in plot.data_list:
                             data_folder = f"{plot.folder_dir}/{plot.data_dir}/data_{data}"
                             # data_file = f"{data_folder}/r1_msg{msg}_{prov}.txt"
-                            if kind is PLOT.latency:
-                                data_file = f"{data_folder}/r1_msg{msg}_{prov}.txt"
-                            elif kind is PLOT.msg:
-                                data_file = f"{data_folder}/r1_size{msg}_{prov}.txt"
                             print(f"doing plot with kind = {kind}, data file = {data_file}")
                             rma = tikz_read_info(data_folder)
                             case_name = rmem_2_legend(case)
@@ -468,7 +469,7 @@ def tikz_plot_latency_msg(plot,file,leg_idx,kind=PLOT.latency):
                             mark_idx = (mark_idx + 1)%plot.max_mark
                             # tikz_addplot(file,0,idx_list[case],data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color)
                             print(f"doing case {case} from data_{data}: {legend} from {data_file}")
-                            tikz_addplot(file,0,idx_list[case],data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color, marker=markstyle)
+                            tikz_addplot(file,0,idx_list[case],plot.res_dir,data_folder,data_file,legend=legend,do_injection=plot.do_injection,linestyle=linestyle,color=color, marker=markstyle)
                             leg_idx = leg_idx +1;
         
 
@@ -478,7 +479,7 @@ def tikz_plot_latency_msg(plot,file,leg_idx,kind=PLOT.latency):
 
 _color_id = int(0)
 
-def tikz_addplot(tikz_file,x_idx,y_idx, datafile,
+def tikz_addplot(tikz_file,x_idx,y_idx,res_folder, datafolder, datafile,
             do_injection=False,
             legend="",
             linestyle=LINESTYLE.solid,
@@ -501,11 +502,22 @@ def tikz_addplot(tikz_file,x_idx,y_idx, datafile,
     tikz_line = linestyle_2_tikz(linestyle)
     tikz_mark = markstyle_2_tikz(marker)
     #---------------------------------------------------------------------------
+    # get the unique file_id
+    # unique_id = uuid.uuid4().hex[:8]
+    tikz_file_name = tikz_file.name
+    my_unique_data = f"{res_folder}/FILE_{tikz_file_name.split("/")[-1]}_DATA{_color_id}_{datafile}"
+    my_unique_data = my_unique_data.replace(";","")
+    my_source_data = datafile.replace(";","\;")
+    cpy_res = os.system(f"cp {datafolder}/{my_source_data} {my_unique_data}")
+    print(f"CMD: cp {datafolder}/{my_source_data} {my_unique_data}")
+    print(f"copying {datafolder}/{my_source_data} into {my_unique_data} with output = {cpy_res}")
+
     # do it!
     if(do_injection):
         dataf = datafile.replace("r1","r0")
         datafile = dataf
-    tikz_file.write(f"\\addplot+[{tikz_line},{color_string},{tikz_mark},line width={_linewidth}pt, mark size={1.5*_linewidth}pt, mark options={{fill=none}}] table[col sep=comma, x index={x_idx}, y index={y_idx}] {{{datafile}}};\n")
+    tikz_file.write(f"\\addplot+[{tikz_line},{color_string},{tikz_mark},line width={_linewidth}pt, mark size={1.5*_linewidth}pt, mark options={{fill=none}}] table[col sep=comma, x index={x_idx}, y index={y_idx}] {{{my_unique_data}}};\n")
+    
     if(bool(legend)):
         tikz_file.write(f"\\addlegendentryexpanded{{{legend}}};\n")
     #     # tikz_line = linestyle_2_tikz(LINESTYLE.dashed)
@@ -593,7 +605,7 @@ def tikz_axis_open(tikz_file,title,tikz_opt="",kind=PLOT.latency):
         opt = opt + "enlargelimits=false, axis on top,colorbar,"
     global _color_id
     _color_id = 0
-    tikz_file.write("\\begin{tikzpicture}\n\pgfplotsset{compat=1.18}\n")
+    tikz_file.write("\\begin{tikzpicture}\n\\pgfplotsset{compat=1.18}\n")
     if(len(title)):
         opt = opt + f"title={{{title}}},\n"
     tikz_file.write(f"\\begin{{{axis_2_tikz(axis)}}}[{opt}]\n")
