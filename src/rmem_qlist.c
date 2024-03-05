@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, UChicago Argonne, LLC
+ *	See COPYRIGHT in top-level directory
+ */
 #include "rmem_qlist.h"
 #include "gpu.h"
 #include "rmem.h"

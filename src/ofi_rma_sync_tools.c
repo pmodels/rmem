@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, UChicago Argonne, LLC
+ *	See COPYRIGHT in top-level directory
+ */
 #include "ofi_rma_sync_tools.h"
 #include "ofi_utils.h"
 #include "rdma/fabric.h"

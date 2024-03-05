@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, UChicago Argonne, LLC
+ *	See COPYRIGHT in top-level directory
+ */
 #include "hip/hip_runtime.h"
 extern "C" {
 #include "rmem_run_gpu.h"

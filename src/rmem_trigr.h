@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, UChicago Argonne, LLC
+ *	See COPYRIGHT in top-level directory
+ */
 #ifndef RMEM_TRIGR_H_
 #define RMEM_TRIGR_H_
 #include <stdint.h>

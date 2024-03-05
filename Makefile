@@ -1,9 +1,7 @@
-#***************************************************************************************************
 #
-# Copyright (C) by Argonne National Laboratory
-# 	See COPYRIGHT in top-level directory
+# Copyright (c) 2024, UChicago Argonne, LLC
+#	See COPYRIGHT in top-level directory
 #
-#***************************************************************************************************
 
 #***************************************************************************************************
 # ARCH DEPENDENT VARIABLES

@@ -1,3 +1,7 @@
+#
+# Copyright (c) 2024, UChicago Argonne, LLC
+#	See COPYRIGHT in top-level directory
+#
 import numpy as np
 import matplotlib as mpl
 from enum import Enum
