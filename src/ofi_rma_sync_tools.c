@@ -46,7 +46,7 @@ static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* 
     const bool is_fence = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_FENCE);
     const bool is_dcmpl = (comm->prov_mode.rcmpl_mode == M_OFI_RCMPL_DELIV_COMPL);
     // count the number of calls issued for each of the ranks and notify them
-    const uint64_t flag = (is_fence) ? (FI_FENCE | FI_DELIVERY_COMPLETE) : FI_TRANSMIT_COMPLETE;
+    const uint64_t flag = FI_TRANSMIT_COMPLETE | ((is_fence) ? FI_FENCE : 0x0);
     ofi_progress_t progress = {
         .cq = mem->ofi.sync_trx->cq,
         .xctx.epoch_ptr = mem->ofi.sync.epch,
@@ -62,8 +62,12 @@ static int ofi_rmem_complete_send(const int nrank, const int* rank, ofi_rmem_t* 
         // to avoid duplication of all the resources we forbid the user to use more than one data
         // trx when using the fence
         m_assert(!(is_fence && mem->ofi.n_tx > 1), "you cannot fence with more than 1 data TRX");
+        // we cannot use fi_msg for the fence because the buffers have been posted on the sync_trx
+        // and not on the data ones.
         m_assert(!(is_fence && comm->prov_mode.dtc_mode == M_OFI_DTC_MSG),
-                 "you cannot fence when using MSG as a down-to-close (DTC) mode");
+                 "you cannot fence when using MSG as a down-to-close (DTC) mode. This because the "
+                 "AM buffers have been posted on the sync_trx EP, while the fence is posted on the "
+                 "data_trx EP");
         ofi_rma_trx_t* trx = (is_fence) ? mem->ofi.data_trx : mem->ofi.sync_trx;
 
         // notify
